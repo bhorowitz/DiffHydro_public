@@ -27,21 +27,21 @@ class CentralSixthOrderReconstruction():
             axis: int,
             **kwargs
         ) -> Array:
-        #maybe wrong direction?
-        s_0 = jnp.roll(buffer,-2, axis=axis)
-        s_1 = jnp.roll(buffer,-1, axis=axis)
-        s_2 = jnp.roll(buffer,0, axis=axis)
-        s_3 = jnp.roll(buffer,1, axis=axis)
-        s_4 = jnp.roll(buffer,2, axis=axis)
-        s_5 = jnp.roll(buffer,3, axis=axis)
+        # shift buffers so that positive shifts walk towards lower indices
+        f_im2 = jnp.roll(buffer, 2, axis=axis)
+        f_im1 = jnp.roll(buffer, 1, axis=axis)
+        f_i = buffer
+        f_ip1 = jnp.roll(buffer, -1, axis=axis)
+        f_ip2 = jnp.roll(buffer, -2, axis=axis)
+        f_ip3 = jnp.roll(buffer, -3, axis=axis)
 
         cell_state_xi = (1.0 / 256.0) * (
-            3.0 * s_0 \
-            - 25.0 * s_1 \
-            + 150.0 * s_2 \
-            + 150.0 * s_3 \
-            - 25.0 * s_4 \
-            + 3.0 * s_5)
+            3.0 * f_im2 \
+            - 25.0 * f_im1 \
+            + 150.0 * f_i \
+            + 150.0 * f_ip1 \
+            - 25.0 * f_ip2 \
+            + 3.0 * f_ip3)
         return cell_state_xi
 
     def derivative_xi(
@@ -51,20 +51,20 @@ class CentralSixthOrderReconstruction():
             **kwargs
             ) -> Array:
         dxi=1.0
-        #maybe wrong direction?
-        s_0 = jnp.roll(buffer,-2, axis=axis)
-        s_1 = jnp.roll(buffer,-1, axis=axis)
-        s_2 = jnp.roll(buffer,0, axis=axis)
-        s_3 = jnp.roll(buffer,1, axis=axis)
-        s_4 = jnp.roll(buffer,2, axis=axis)
-        s_5 = jnp.roll(buffer,3, axis=axis)
+        # sixth-order centered derivative, aligned with mesh orientation
+        f_im3 = jnp.roll(buffer, 3, axis=axis)
+        f_im2 = jnp.roll(buffer, 2, axis=axis)
+        f_im1 = jnp.roll(buffer, 1, axis=axis)
+        f_ip1 = jnp.roll(buffer, -1, axis=axis)
+        f_ip2 = jnp.roll(buffer, -2, axis=axis)
+        f_ip3 = jnp.roll(buffer, -3, axis=axis)
 
         deriv_xi = 1.0 / (60.0 * dxi) * (
-            - s_0 \
-            + 9.0 * s_1 \
-            - 45.0 * s_2 \
-            + 45.0 * s_3 \
-            - 9.0 * s_4 \
-            + s_5)
+            f_im3 \
+            - 9.0 * f_im2 \
+            + 45.0 * f_im1 \
+            - 45.0 * f_ip1 \
+            + 9.0 * f_ip2 \
+            - f_ip3)
         return deriv_xi
-        
+

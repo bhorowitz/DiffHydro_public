@@ -161,7 +161,10 @@ class ConductiveFlux:
             temperature, axis-1)
         heat_flux_xi = - thermal_conductivity * temperature_grad #negative sign? not sure where I got my sign flip...
 
-        return heat_flux_xi
+        conductive_flux = jnp.zeros_like(sol)
+        conductive_flux = conductive_flux.at[self.eq_manage.energy_ids].set(heat_flux_xi)
+
+        return conductive_flux
 
     def timestep(self,sol):
         const = 0.01
