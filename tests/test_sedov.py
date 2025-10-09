@@ -1,10 +1,6 @@
 # tests/test_sedov2d.py
 
 import os
-
-os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
-os.environ["CUDA_VISIBLE_DEVICES"] = "4"
-
 import numpy as np
 
 import diffhydro as dh

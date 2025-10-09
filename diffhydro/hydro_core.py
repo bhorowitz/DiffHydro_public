@@ -17,7 +17,7 @@ class hydro:
                  snapshots = False,
                 splitting_schemes=[[3,1,2,2,1,3],[1,2,3,3,2,1],[2,3,1,1,3,2]], #cyclic permutations
                 fluxes = None, #convection, conduction
-                forces = [NoForcing], #gravity, etc.
+                forces = [NoForcing()], #gravity, etc.
                 maxjit=False):
         #parameters that are held constant per run (i.e. probably don't want to take derivatives with respect to...)
    #     self.init_dt = init_dt # tiny starting timestep to smooth out anything too sharp
@@ -50,10 +50,10 @@ class hydro:
             total_flux += flux.flux(sol,ax,params)
         return total_flux
     
-    def forcing(self,i,sol,params): #all axis independant? 
+    def forcing(self,i,sol,params,dt): #all axis independant? 
         total_force = jnp.zeros(sol.shape)
         for force in self.forces:
-            total_force += force.force(i,sol,params)
+            total_force += force.force(i,sol,params,dt)
         return total_force
     
     def solve_step(self,sol,dt,ax,params):
@@ -122,7 +122,7 @@ class hydro:
         
         fields = hydro_output
 
-        fields = self.forcing(i,fields,params)
+        fields = self.forcing(i,fields,params,dt)
             
         return (fields,params)
     

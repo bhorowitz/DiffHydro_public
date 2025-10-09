@@ -3,7 +3,7 @@
 import numpy as np
 import pytest
 
-jax = pytest.importorskip("jax")
+import jax
 jnp = jax.numpy
 
 import diffhydro as dh
@@ -15,8 +15,9 @@ def test_conduction_blob_expansion():
     shape = (24, 24, 24)
     eq = dh.equationmanager.EquationManager()
     eq.mesh_shape = list(shape)
-    eq.thermal_conductivity_model = "CUSTOM"
-    eq.thermal_conductivity_fun = lambda T: jnp.ones_like(T) * 5.0
+    eq.thermal_conductivity_model = "SUTHERLAND"
+    eq._set_transport_properties(None)
+ #   eq.thermal_conductivity_fun = lambda T: jnp.ones_like(T) * 5.0
 
     init_sol, init_temperature = make_gaussian_blob(eq, shape)
 

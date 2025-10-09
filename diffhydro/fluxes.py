@@ -12,7 +12,7 @@ class ConvectiveFlux:
                 EquationManager,
                  Solver,
                  Recon,
-                 positivity = False
+                 positivity = True
                 ):
         self.eq_manage = EquationManager
         self.solver = Solver

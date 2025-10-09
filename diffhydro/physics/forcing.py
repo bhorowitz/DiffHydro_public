@@ -1,6 +1,6 @@
 
 class NoForcing:
-    def timestep(x):
+    def timestep(self, x):
         return 1E10
-    def force(i,sol,params):
+    def force(self,i,sol,params,dt):
         return sol #no froce

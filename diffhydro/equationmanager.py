@@ -34,7 +34,7 @@ class EquationManager:
         self.thermal_conductivity_model = "SUTHERLAND"
         self.sutherland_parameters = [0.1, 1.0, 1.0]
         self.eps = 1E-20
-        self.cfl = 0.6
+        self.cfl = 0.3
         self.mesh_shape = [100,100,100]
         self.R = 1.0
         self.cp = self.gamma / (self.gamma - 1.0) * self.R
