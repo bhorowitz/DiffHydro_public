@@ -67,4 +67,3 @@ class CentralSixthOrderReconstruction():
             + 9.0 * f_ip2 \
             - f_ip3)
         return deriv_xi
-

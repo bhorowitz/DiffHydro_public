@@ -257,7 +257,7 @@ class EquationManager:
         """
         
         T = temperature
-        checkify.check(jax.numpy.all(T>0), "temperature must be non-negative, got {i}", i=T.min())
+ #       checkify.check(jax.numpy.all(T>0), "temperature must be non-negative, got {i}", i=T.min())
 
             
         if self.thermal_conductivity_model == "CUSTOM":

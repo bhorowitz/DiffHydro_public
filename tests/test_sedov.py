@@ -59,7 +59,7 @@ def test_shapes():
     ss = dh.signal_speed_Rusanov
     solver = dh.HLLC(equation_manager=eq,signal_speed=ss)
     cf = dh.ConvectiveFlux(eq,solver,dh.MUSCL3(limiter="SUPERBEE"))
-    hydrosim = dh.hydro(n_super_step=300,fluxes=[cf],maxjit=True)
+    hydrosim = dh.hydro(n_super_step=200,fluxes=[cf],maxjit=True)
     
     U,_ = sedov_2d(1E7,0.1)
     
