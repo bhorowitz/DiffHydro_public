@@ -154,27 +154,34 @@ def restrict_avg(Uf: Array, r: int) -> Array:
 
 # ------------------------ Local step with frozen ghosts ------------------------
 
-def _update_interior(u: Array, rhs: Array, ax: int, h: int, scale: float) -> Array:
+def _update_interior_old(u: Array, rhs: Array, ax: int, h: int, scale: float) -> Array:
     if ax == 1:   # x-sweep (width dim)
         return u.at[:, :, h:-h].add(-scale * rhs[:, :, h:-h])
     elif ax == 2: # y-sweep (height dim)
         return u.at[:, h:-h, :].add(-scale * rhs[:, h:-h, :])
     else:
         raise ValueError(f"bad axis {ax}")
+        
+def _update_interior(U_bc, rhs, ax, halo_w, scale):
+    # U_bc, rhs: [C, H, W]; update ONLY the interior h:-h, h:-h
+    h = int(halo_w)
+    if h == 0:
+        return U_bc - scale * rhs
+    return U_bc.at[:, h:-h, h:-h].add(-scale * rhs[:, h:-h, h:-h])
 
 def _roll_axis_from_sweep(ax: int) -> int:
     # ax: 1 = x (width, W axis); 2 = y (height, H axis)
     return 2 if ax == 1 else 1
 
 def _solve_step_freeze_ghosts(hydro, U_bc, dt, ax, params, halo_w):
-    ra = _roll_axis_from_sweep(ax)
+    ra   = _roll_axis_from_sweep(ax)
     fu1  = hydro.flux(U_bc, ax, params)
     rhs1 = fu1 - jnp.roll(fu1, 1, axis=ra)
-    U1   = _update_interior(U_bc, rhs1, ax, halo_w, dt / (2.0 * hydro.dx_o))
-
+    U1   = _update_interior(U_bc, rhs1, ax, halo_w, dt/(2.0*hydro.dx_o))
     fu2  = hydro.flux(U1, ax, params)
     rhs2 = fu2 - jnp.roll(fu2, 1, axis=ra)
-    U2   = _update_interior(U1, rhs2, ax, halo_w, dt / hydro.dx_o)
+    U2   = _update_interior(U1, rhs2, ax, halo_w, dt/hydro.dx_o)
+
 
     U2 = U2.at[0].set(jnp.maximum(U2[0], 1e-12))  # gentle safety floor
     return U2
@@ -199,22 +206,23 @@ def _make_halos_x(tiles: Array, h: int) -> Tuple[Array, Array]:
     return L, R
 
 
-def _make_halos_y(tiles: Array, h: int) -> Tuple[Array, Array]:
-    """
-    tiles: [Ny,Nx,C,T,T]
-    return (B, T) halos as [Ny,Nx,C,h,T]
-    """
-    down_nb = jnp.roll(tiles,  1, axis=0)     # shift Ny
-    B = down_nb[..., -1, :][..., None, :]     # take last row -> shape [Ny,Nx,C,1,T]
-    B = jnp.repeat(B, h, axis=-2)             # [Ny,Nx,C,h,T]
-
-    up_nb   = jnp.roll(tiles, -1, axis=0)
-    Tt = up_nb[..., 0, :][..., None, :]
-    Tt = jnp.repeat(Tt, h, axis=-2)           # [Ny,Nx,C,h,T]
+def _make_halos_y(tiles, h):
+    # tiles: [Ny, Nx, C, T, T]
+    down_nb = jnp.roll(tiles,  1, axis=0)   # neighbor below (periodic)
+    B = down_nb[..., -h:, :]                # take the last h rows
+    up_nb   = jnp.roll(tiles, -1, axis=0)   # neighbor above (periodic)
+    Tt = up_nb[..., :h,  :]                 # take the first h rows
     return B, Tt
 
+def _make_halos_y_old(tiles, h):
+    below_nb = jnp.roll(tiles, -1, axis=0)  # neighbor below (i+1)
+    B = below_nb[..., :h, :]                # TOP h rows of the below neighbor
 
-def step_tiles_with_halo(hydro, tiles: Array, dt: float, ax: int, params: Dict, halo_w: int = 1) -> Array:
+    above_nb = jnp.roll(tiles,  1, axis=0)  # neighbor above (i-1)
+    Tt = above_nb[..., -h:, :]              # BOTTOM h rows of the above neighbor
+    return B, Tt
+
+def step_tiles_with_halo(hydro, tiles: Array, dt: float, ax: int, params: Dict, halo_w: int = 2) -> Array:
     """
     tiles: [Ny,Nx,C,T,T]
     returns stepped tiles (same shape), using halos from periodic neighbors.
@@ -278,69 +286,55 @@ def _phys_flux_x(eq, cons_col: Array) -> Array:
 
 def _phys_flux_y(eq, cons_row: Array) -> Array:
     return eq.get_fluxes_xi(eq.get_primitives_from_conservatives(cons_row), cons_row, axis=1)  # <-- API
-
-def reconcile_interfaces(hydro, canvas: jnp.ndarray, cfg, dt: float, params: dict) -> jnp.ndarray:
-    """
-    Apply equal-and-opposite Rusanov updates across tile interfaces on the L0 canvas.
-    - canvas: [C, H, W]
-    - cfg.T is the (coarse) tile size. cfg.Nx, cfg.Ny are tile counts in x/y.
-    - Periodic: we also reconcile the wrap seams by using modulo indices.
-    All equation-manager calls use 2D slices [C, N] for consistency.
-    """
-    eq = hydro.fluxes[0].eq_manage  # equation manager
-
-    T, Ny, Nx     = int(cfg.T), int(cfg.Ny), int(cfg.Nx)
-    C, H, W       = canvas.shape
+def reconcile_interfaces(hydro, canvas, cfg, dt, params):
+    eq = hydro.fluxes[0].eq_manage
+    T, Ny, Nx = int(cfg.T), int(cfg.Ny), int(cfg.Nx)
+    C, H, W   = canvas.shape
     dx = getattr(hydro, "dx_o", 1.0)
-    dy = getattr(hydro, "dx_o", 1.0)  # isotropic unless you expose dy separately
+    dy = getattr(hydro, "dx_o", 1.0)
 
-    U = canvas
+    U0 = canvas                     # freeze
+    dU = jnp.zeros_like(U0)         # accumulate
 
-    # --- vertical interfaces (between tile columns), include periodic seam
+    # --- vertical interfaces (x)
     for j in range(Nx):
         xL = ((j + 1) * T - 1) % W
         xR = ((j + 1) * T) % W
+        UL, UR = U0[:, :, xL], U0[:, :, xR]
 
-        UL = U[:, :, xL]                    # [C, H]
-        UR = U[:, :, xR]                    # [C, H]
+        primL = eq.get_primitives_from_conservatives(UL)
+        primR = eq.get_primitives_from_conservatives(UR)
+        FxL   = eq.get_fluxes_xi(primL, UL, axis=0)
+        FxR   = eq.get_fluxes_xi(primR, UR, axis=0)
+        a     = jnp.maximum(
+                    _sound_speed(eq, primL, UL, axis=0),
+                    _sound_speed(eq, primR, UR, axis=0)
+                )[None, :]
+        Fx = 0.5 * (FxL + FxR) - 0.5 * (a * (UR - UL))
 
-        primL = eq.get_primitives_from_conservatives(UL)   # [C, H]
-        primR = eq.get_primitives_from_conservatives(UR)   # [C, H]
-        FxL   = eq.get_fluxes_xi(primL, UL, axis=0)        # [C, H]
-        FxR   = eq.get_fluxes_xi(primR, UR, axis=0)        # [C, H]
+        dU = dU.at[:, :, xL].add(- dt / dx * Fx)  # left loses
+        dU = dU.at[:, :, xR].add(+ dt / dx * Fx)  # right gains
 
-        aL = _sound_speed(eq, primL, UL, axis=0)           # [H]
-        aR = _sound_speed(eq, primR, UR, axis=0)           # [H]
-        a  = jnp.maximum(aL, aR)[None, :]                  # [1, H] for broadcast
-
-        Fx = 0.5 * (FxL + FxR) - 0.5 * (a * (UR - UL))     # [C, H]
-
-        U = U.at[:, :, xL].add(+ dt / dx * Fx)
-        U = U.at[:, :, xR].add(- dt / dx * Fx)
-
-    # --- horizontal interfaces (between tile rows), include periodic seam
+    # --- horizontal interfaces (y)
     for i in range(Ny):
         yB = ((i + 1) * T - 1) % H
         yT = ((i + 1) * T) % H
+        UL, UR = U0[:, yB, :], U0[:, yT, :]
 
-        UL = U[:, yB, :]                    # [C, W]
-        UR = U[:, yT, :]                    # [C, W]
+        primL = eq.get_primitives_from_conservatives(UL)
+        primR = eq.get_primitives_from_conservatives(UR)
+        FyL   = eq.get_fluxes_xi(primL, UL, axis=1)
+        FyR   = eq.get_fluxes_xi(primR, UR, axis=1)
+        a     = jnp.maximum(
+                    _sound_speed(eq, primL, UL, axis=1),
+                    _sound_speed(eq, primR, UR, axis=1)
+                )[None, :]
+        Fy = 0.5 * (FyL + FyR) - 0.5 * (a * (UR - UL))
 
-        primL = eq.get_primitives_from_conservatives(UL)   # [C, W]
-        primR = eq.get_primitives_from_conservatives(UR)   # [C, W]
-        FyL   = eq.get_fluxes_xi(primL, UL, axis=1)        # [C, W]
-        FyR   = eq.get_fluxes_xi(primR, UR, axis=1)        # [C, W]
+        dU = dU.at[:, yB, :].add(- dt / dy * Fy)  # bottom loses
+        dU = dU.at[:, yT, :].add(+ dt / dy * Fy)  # top gains
 
-        aL = _sound_speed(eq, primL, UL, axis=1)           # [W]
-        aR = _sound_speed(eq, primR, UR, axis=1)           # [W]
-        a  = jnp.maximum(aL, aR)[None, :]                  # [1, W]
-
-        Fy = 0.5 * (FyL + FyR) - 0.5 * (a * (UR - UL))     # [C, W]
-
-        U = U.at[:, yB, :].add(+ dt / dy * Fy)
-        U = U.at[:, yT, :].add(- dt / dy * Fy)
-
-    return U
+    return U0 + dU
 
 
 
@@ -442,21 +436,20 @@ class hydro:
 
     # ------------- time steppers -------------
 
-    def _hydrostep_uniform(self, U: Array, params: Dict, dt: float) -> Array:
-        """No-AMR step using the same RK2 update the tiles use."""
+    def _hydrostep_uniform(self, U, params, dt):
         for scheme in self.splitting_schemes:
             for ax in scheme:
+                ra   = _roll_axis_from_sweep(ax)
                 fu1  = self.flux(U, ax, params)
-                rhs1 = fu1 - jnp.roll(fu1, 1, axis=ax)
-                U    = U - (dt / (2.0 * self.dx_o)) * rhs1
+                rhs1 = fu1 - jnp.roll(fu1, 1, axis=ra)
+                U    = U - (dt/(2.0*self.dx_o)) * rhs1
 
                 fu2  = self.flux(U, ax, params)
-                rhs2 = fu2 - jnp.roll(fu2, 1, axis=ax)
-                U    = U - (dt / self.dx_o) * rhs2
-
+                rhs2 = fu2 - jnp.roll(fu2, 1, axis=ra)
+                U    = U - (dt/self.dx_o) * rhs2
                 U    = U.at[0].set(jnp.maximum(U[0], 1e-12))
         return U
-
+    
     def _hydrostep_amr(self, U0_in: Array, params: Dict, dt: float, step_idx: int) -> Array:
         """
         One AMR step:
@@ -474,11 +467,9 @@ class hydro:
         U0_canvas = assemble_from_tiles(tiles0, cfg0)
         for scheme in self.splitting_schemes:
             dt_ax = dt / len(scheme)
-            # sweep per axis on tiles
             for ax in scheme:
-                tiles0 = step_tiles_with_halo(self, tiles0, dt_ax, ax, params, halo_w=1)
-            U0_canvas = assemble_from_tiles(tiles0, cfg0)
-            U0_canvas = reconcile_interfaces(self, U0_canvas, cfg0, dt_ax, params)
+                tiles0     = step_tiles_with_halo(self, tiles0, dt_ax, ax, params, halo_w=2)
+        U0_canvas  = assemble_from_tiles(tiles0, cfg0)
 
         # Optional: adapt every interval (build L1 mask)
         tiles1 = None
@@ -506,13 +497,27 @@ class hydro:
                         row.append(Uf)
                     tiles1_list.append(jnp.stack(row, axis=0))
                 tiles1 = jnp.stack(tiles1_list, axis=0)   # [Ny,Nx,C,Tf,Tf]
-                mask1  = Bmask
-                # subcycle fine level
+                
+                ## seam?
+                
+                cfg1 = LevelConfig(Ny=cfg0.Ny, Nx=cfg0.Nx, T=Tf, H=cfg0.H * r, W=cfg0.W * r, r=1)
                 nsub = r
                 for scheme in self.splitting_schemes:
                     for ax in scheme:
                         for _ in range(nsub):
-                            tiles1 = step_tiles_with_halo(self, tiles1, dt / len(scheme) / nsub, ax, params, halo_w=1)
+                            
+                            dt_sub = dt / len(scheme) / nsub
+                            tiles1 = step_tiles_with_halo(self, tiles1, dt_sub * r, ax, params, halo_w=2)
+                           # dt_sub   = dt / len(scheme) / nsub
+                            #tiles1   = step_tiles_with_halo(self, tiles1, dt_sub, ax, params, halo_w=2)
+                
+                mask1  = Bmask
+                # subcycle fine level
+             #   nsub = r
+             #   for scheme in self.splitting_schemes:
+             #       for ax in scheme:
+             #           for _ in range(nsub):
+              #              tiles1 = step_tiles_with_halo(self, tiles1, dt / len(scheme) / nsub, ax, params, halo_w=2)
 
                 # restrict/reflux onto parents
                 U0_canvas = reflux_L1_onto_L0(self, U0_canvas, tiles1, mask1, cfg0, dt)
@@ -526,7 +531,7 @@ class hydro:
         self._amr_trace = {"depth_maps": [], "level_masks": [], "steps": []}
 
         outputs = []
-        n_steps = getattr(self, "n_super_step", 1)  # keep compatibility with your driver
+        n_steps = getattr(self, "n_super_step", 10)  # keep compatibility with your driver
         for i in range(n_steps):
             # CFL / dt selection
             dt = jnp.minimum(self.max_dt, self.timestep(U))
