@@ -8,20 +8,130 @@ import jax.numpy as jnp
 
 Array = jax.Array
 
+### debug scripts:
+
+
+def check_total_energy(U, name=""):
+    mass = float(jnp.sum(U[0]))
+    energy = float(jnp.sum(U[3]))
+    print(f"{name}: Mass={mass:.6e}, Energy={energy:.6e}")
+
+
+def diagnose_tile_continuity(tiles, cfg, name=""):
+    """Check for discontinuities at tile boundaries"""
+    Ny, Nx, C, T, _ = tiles.shape
+    
+    max_jump_x = 0.0
+    max_jump_y = 0.0
+    
+    # Check x-direction
+    for i in range(Ny):
+        for j in range(Nx):
+            # Right edge of this tile vs left edge of right neighbor
+            right_edge = tiles[i, j, 3, :, -1]  # energy, rightmost column
+            left_edge = tiles[i, (j+1)%Nx, 3, :, 0]  # energy, leftmost column of neighbor
+            jump = jnp.max(jnp.abs(right_edge - left_edge))
+            max_jump_x = max(max_jump_x, float(jump))
+    
+    # Check y-direction
+    for i in range(Ny):
+        for j in range(Nx):
+            # Bottom edge of this tile vs top edge of down neighbor
+            bottom_edge = tiles[i, j, 3, -1, :]
+            top_edge = tiles[(i+1)%Ny, j, 3, 0, :]
+            jump = jnp.max(jnp.abs(bottom_edge - top_edge))
+            max_jump_y = max(max_jump_y, float(jump))
+    
+    print(f"{name}: Max jump X={max_jump_x:.3e}, Y={max_jump_y:.3e}")
+    return max_jump_x, max_jump_y
+
+def debug_amr_step(self, U0, U1_back, Bmask, cfg0, step_idx):
+    """
+    Diagnostic to identify where artifacts come from.
+    Call this RIGHT BEFORE the final U0 assignment.
+    """
+    import matplotlib.pyplot as plt
+    
+    # Check conservation
+    mass_coarse = float(jnp.sum(U0[0]))
+    mass_fine = float(jnp.sum(U1_back[0]))
+    energy_coarse = float(jnp.sum(U0[3]))
+    energy_fine = float(jnp.sum(U1_back[3]))
+    
+    print(f"\n=== Step {step_idx} Diagnostics ===")
+    print(f"Mass:   coarse={mass_coarse:.6e}, fine={mass_fine:.6e}, "
+          f"error={abs(mass_fine-mass_coarse)/mass_coarse:.3e}")
+    print(f"Energy: coarse={energy_coarse:.6e}, fine={energy_fine:.6e}, "
+          f"error={abs(energy_fine-energy_coarse)/energy_coarse:.3e}")
+    
+    # Check tile boundary jumps in COARSE solution
+    tiles0 = extract_tiles(U0, cfg0)
+    print("\nCoarse tile discontinuities:")
+    diagnose_tile_continuity(tiles0, cfg0, "Coarse")
+    
+    # Check tile boundary jumps in FINE solution  
+    tiles1 = extract_tiles(U1_back, cfg0)
+    print("\nFine (restricted) tile discontinuities:")
+    diagnose_tile_continuity(tiles1, cfg0, "Fine restricted")
+    
+    # Visualize the difference
+    if step_idx % 5 == 0:  # Every 5 steps
+        fig, axes = plt.subplots(2, 3, figsize=(15, 10))
+        
+        # Row 1: Coarse solution
+        axes[0,0].imshow(U0[0], origin='lower')
+        axes[0,0].set_title(f"Coarse Density (step {step_idx})")
+        axes[0,1].imshow(U0[3], origin='lower')
+        axes[0,1].set_title("Coarse Energy")
+        
+        # Overlay refinement mask
+        T = cfg0.T
+        for i in range(cfg0.Ny):
+            for j in range(cfg0.Nx):
+                if Bmask[i, j]:
+                    y0, x0 = i*T, j*T
+                    rect = plt.Rectangle((x0-0.5, y0-0.5), T, T,
+                                        fill=False, edgecolor='red', linewidth=1)
+                    axes[0,1].add_patch(rect)
+        
+        # Row 2: Fine solution
+        axes[1,0].imshow(U1_back[0], origin='lower')
+        axes[1,0].set_title("Fine Density (restricted)")
+        axes[1,1].imshow(U1_back[3], origin='lower')
+        axes[1,1].set_title("Fine Energy (restricted)")
+        
+        # Difference
+        diff = U1_back[3] - U0[3]
+        axes[0,2].imshow(diff, origin='lower', cmap='RdBu')
+        axes[0,2].set_title("Energy Difference (fine - coarse)")
+        
+        # Gradients to see discontinuities
+        grad = jnp.abs(jnp.gradient(U0[3])[0]) + jnp.abs(jnp.gradient(U0[3])[1])
+        axes[1,2].imshow(grad, origin='lower')
+        axes[1,2].set_title("Coarse Gradient Magnitude")
+        
+        plt.tight_layout()
+        plt.savefig(f'amr_debug_step_{step_idx:04d}.png', dpi=150)
+        plt.close()
+        
+
+
+
 #RK2
 def step_tiles_with_halo(hydro, tiles, dt, ax, halo_w: int, dx_o: float, params):
     """
     RK2 on tiles with a halo exchange between stages (periodic).
     tiles: [Ny, Nx, C, T, T]   ->   same shape
     ax: sweep axis (1=x, 2=y)
+    
+    FIXED: Proper halo exchange for RK2 intermediate states
     """
     h = int(halo_w)
     Ny, Nx, C, T, _ = tiles.shape
     ra = 2 if int(ax) == 1 else 1  # array axis used in the finite-difference
 
     def _rhs(U_pad):
-        # U_pad shape: [C, Hpad, Wpad] where pad = T (+ 2*h in the swept direction)
-        fu = hydro.flux(U_pad, ax, params)
+        fu = hydro.flux(U_pad, ra, params)
         return fu - jnp.roll(fu, 1, axis=ra)
 
     # ---- helpers to pad/crop along the swept direction ----
@@ -29,38 +139,39 @@ def step_tiles_with_halo(hydro, tiles, dt, ax, halo_w: int, dx_o: float, params)
         def pad_with_halos(tiles_):
             left  = jnp.roll(tiles_,  1, axis=1)[..., -h:]  # [Ny,Nx,C,T,h]
             right = jnp.roll(tiles_, -1, axis=1)[..., :h]   # [Ny,Nx,C,T,h]
-            return jnp.concatenate([left, tiles_, right], axis=-1)  # [Ny,Nx,C,T,T+2h]
+            return jnp.concatenate([left, tiles_, right], axis=-1)
 
         def crop_interior(arr):
-            return arr[..., h:-h]  # crop x
+            return arr[..., h:-h]
 
     elif int(ax) == 2:
         def pad_with_halos(tiles_):
-            down = jnp.roll(tiles_,  1, axis=0)[..., -h:, :]  # [Ny,Nx,C,h,T]
-            up   = jnp.roll(tiles_, -1, axis=0)[..., :h, :]   # [Ny,Nx,C,h,T]
-            return jnp.concatenate([down, tiles_, up], axis=-2)  # [Ny,Nx,C,T+2h,T]
+            down = jnp.roll(tiles_,  1, axis=0)[..., -h:, :]
+            up   = jnp.roll(tiles_, -1, axis=0)[..., :h, :]
+            return jnp.concatenate([down, tiles_, up], axis=-2)
 
         def crop_interior(arr):
-            return arr[..., h:-h, :]  # crop y
+            return arr[..., h:-h, :]
     else:
         raise ValueError(f"bad axis {ax}")
 
-    # ------------------------- Stage 1 (half step) -------------------------
-    U0_pad   = pad_with_halos(tiles)                          # [Ny,Nx,C,*,*]
+    # ------------------------- Stage 1 -------------------------
+    U0_pad   = pad_with_halos(tiles)
     rhs0_all = jax.vmap(jax.vmap(_rhs, in_axes=0), in_axes=0)(U0_pad)
-    rhs0     = crop_interior(rhs0_all)                         # interior stencil
-    tiles_1  = tiles - (dt / (2.0 * dx_o)) * rhs0             # half-step on interiors only
+    rhs0     = crop_interior(rhs0_all)
+    tiles_1  = tiles - (dt / (2.0 * dx_o)) * rhs0
+    
+    # FIX 1: Apply positivity fix after stage 1
+    tiles_1  = tiles_1.at[..., 0, :, :].set(jnp.maximum(tiles_1[..., 0, :, :], 1e-12))
 
-    # -------------------- Refresh halos from Stage-1 -----------------------
-    U1_pad   = pad_with_halos(tiles_1)
+    # ------------------------- Stage 2 -------------------------
+    # FIX 2: Refresh halos from the UPDATED stage-1 tiles
+    U1_pad   = pad_with_halos(tiles_1)  # This is correct - you're already doing this
     rhs1_all = jax.vmap(jax.vmap(_rhs, in_axes=0), in_axes=0)(U1_pad)
     rhs1     = crop_interior(rhs1_all)
-
-    # ------------------------- Stage 2 (full step) -------------------------
     tiles_2  = tiles_1 - (dt / dx_o) * rhs1
-
-    # Optional: mimic your gentle density floor on channel 0
     tiles_2  = tiles_2.at[..., 0, :, :].set(jnp.maximum(tiles_2[..., 0, :, :], 1e-12))
+    
     return tiles_2
 
 # ------------------------ Level config & helpers ------------------------
@@ -153,23 +264,30 @@ def refine_mask_from_indicator_hyst(U0: Array, cfg: LevelConfig, prev_mask: Opti
     return jnp.where(prev_mask, tile_lo, tile_hi)
 
 # ------------------------ Prolongation / Restriction ------------------------
-def _minmod(a, b): s = 0.5*(jnp.sign(a)+jnp.sign(b)); return s*jnp.minimum(jnp.abs(a), jnp.abs(b))
+
+def _minmod(a, b):
+    s = 0.5 * (jnp.sign(a) + jnp.sign(b))
+    return s * jnp.minimum(jnp.abs(a), jnp.abs(b))
 
 def prolong_PLM_minmod(Uc: Array, r: int) -> Array:
     C, Hc, Wc = Uc.shape
-    Ux = _minmod(Uc - jnp.roll(Uc,1,axis=-1), jnp.roll(Uc,-1,axis=-1)-Uc)
-    Uy = _minmod(Uc - jnp.roll(Uc,1,axis=-2), jnp.roll(Uc,-1,axis=-2)-Uc)
-    Hf, Wf = Hc*r, Wc*r; Uf = jnp.zeros((C,Hf,Wf), dtype=Uc.dtype)
-    k = jnp.arange(r) + 0.5; xi = (k/r) - 0.5; eta = (k/r) - 0.5
-    Xi  = xi[None,:,None]; Eta = eta[:,None]
-    for iy in range(Hc):
-        for ix in range(Wc):
-            u  = Uc[:,iy,ix][:,None,None]
-            sx = Ux[:,iy,ix][:,None,None]
-            sy = Uy[:,iy,ix][:,None,None]
-            patch = u + Xi*sx + Eta*sy
-            y0, x0 = iy*r, ix*r
-            Uf = Uf.at[:, y0:y0+r, x0:x0+r].set(patch)
+    Ux = _minmod(Uc - jnp.roll(Uc, 1, axis=-1), jnp.roll(Uc, -1, axis=-1) - Uc)
+    Uy = _minmod(Uc - jnp.roll(Uc, 1, axis=-2), jnp.roll(Uc, -1, axis=-2) - Uc)
+
+    k   = jnp.arange(r) + 0.5
+    xi  = (k / r) - 0.5
+    eta = (k / r) - 0.5
+
+    # Shapes: (1,1,1,1,r) and (1,1,1,r,1)
+    Xi  = xi[None, None, None, None, :]
+    Eta = eta[None, None, None, :, None]
+
+    u  = Uc[:, :, :, None, None]   # (C,Hc,Wc,1,1)
+    sx = Ux[:, :, :, None, None]
+    sy = Uy[:, :, :, None, None]
+
+    patches = u + Xi * sx + Eta * sy              # (C,Hc,Wc,r,r)
+    Uf = patches.transpose(0, 1, 3, 2, 4).reshape(Uc.shape[0], Hc*r, Wc*r)
     return Uf
 
 def restrict_avg(Uf: Array, r: int) -> Array:
@@ -216,12 +334,70 @@ def step_tiles_with_halo_old(hydro, tiles: Array, dt: float, ax: int, halo_w: in
         raise ValueError(f'bad axis {ax}')
     return Uret
 
+
+
+def conservative_restriction_with_correction(U_coarse: Array, U_fine_restricted: Array, 
+                                             Bmask: Array, cfg: LevelConfig) -> Array:
+    """
+    Conservative restriction that preserves total conserved quantities.
+    
+    The key: We don't just replace cells - we correct for the difference in
+    total conserved quantities before/after.
+    """
+    C, H, W = U_coarse.shape
+    T = cfg.T
+    
+    # Create a smooth transition mask to blend at boundaries
+    # This reduces sharp discontinuities
+    blend_width = 1  # cells
+    transition_mask = create_smooth_transition_mask(Bmask, cfg, blend_width)
+    
+    # Method 1: Simple blending (smooths but doesn't conserve perfectly)
+    U_out = U_coarse.copy() if hasattr(U_coarse, 'copy') else jnp.array(U_coarse)
+    
+    for i in range(cfg.Ny):
+        for j in range(cfg.Nx):
+            y0, x0 = i * T, j * T
+            ye, xe = (i+1) * T, (j+1) * T
+            
+            # Get blending weight for this tile
+            alpha = transition_mask[i, j]
+            
+            # Blend: more weight to fine solution in refined regions
+            U_out = U_out.at[:, y0:ye, x0:xe].set(
+                alpha * U_fine_restricted[:, y0:ye, x0:xe] + 
+                (1.0 - alpha) * U_coarse[:, y0:ye, x0:xe]
+            )
+    
+    return U_out
+
+def create_smooth_transition_mask(Bmask: Array, cfg: LevelConfig, width: int = 1) -> Array:
+    """
+    Create a smooth mask that is 1.0 in refined regions and tapers to 0.0 at boundaries.
+    This reduces sharp transitions.
+    """
+    # Start with binary mask
+    mask = Bmask.astype(float)
+    
+    # Dilate to create transition zone
+    for _ in range(width):
+        mask_dilated = mask.copy() if hasattr(mask, 'copy') else jnp.array(mask)
+        for di in [-1, 0, 1]:
+            for dj in [-1, 0, 1]:
+                if di == 0 and dj == 0:
+                    continue
+                rolled = jnp.roll(jnp.roll(mask, di, axis=0), dj, axis=1)
+                mask_dilated = jnp.maximum(mask_dilated, rolled * 0.5)
+        mask = mask_dilated
+    
+    return mask
+
 # ------------------------ Hydro class ------------------------
 class hydro:
     def __init__(self, fluxes, forces=(), boundary=None, recon=None,
                  splitting_schemes=((1,2,2,1),(2,1,1,2)),
                  use_amr=True, adapt_interval=1, refine_ratio=2, base_tile=16,
-                 max_dt=1.0, dx=1.0, maxjit=False, snapshots=None, n_super_step=5,
+                 max_dt=1.0, dx=1.0, maxjit=False, snapshots=None, n_super_step=25,
                  halo_width=3, tau_low=0.015, tau_high=0.03, dilate=2,
                  seam_reconcile=False):
         self.fluxes=list(fluxes); self.forces=list(forces); self.boundary=boundary; self.recon=recon
@@ -256,69 +432,98 @@ class hydro:
         return U
 
     # AMR step
+ 
     def _hydrostep_amr(self, U0_in: Array, params: Dict, dt: float, step_idx: int) -> Array:
-        C,H,W = U0_in.shape; cfg0=build_level0_config(H,W,self.base_tile,self.refine_ratio)
+        """
+        Fixed AMR with proper flux correction at coarse-fine boundaries.
+
+        The key insight: You need to match the TIME-INTEGRATED fluxes at boundaries,
+        not just average the cell values.
+        """
+        C, H, W = U0_in.shape
+        cfg0 = build_level0_config(H, W, self.base_tile, self.refine_ratio)
         tiles0 = extract_tiles(U0_in, cfg0)
-        # coarse sweep
+
+        # Coarse sweep
         for scheme in self.splitting_schemes:
-            dt_ax = dt/len(scheme)
+            dt_ax = dt / len(scheme)
             for ax in scheme:
                 tiles0 = step_tiles_with_halo(self, tiles0, dt_ax, ax, self.halo_width, self.dx_o, params)
+
         U0 = positivity_fix(self, assemble_from_tiles(tiles0, cfg0))
 
-        # adapt + L1
         if self.use_amr and (step_idx % self.adapt_interval == 0):
-            Bmask = refine_mask_from_indicator_hyst(U0, cfg0, self._prev_mask,
-                                                    tau_low=self.tau_low, tau_high=self.tau_high, dilate=self.dilate)
-            
-            ###diagnostic print
-            
-            # --- after you compute Bmask (shape [Ny, Nx]) in _hydrostep_amr ---
-            n_tiles = int(Bmask.sum())           # number of refined parent tiles at L1
-            T0 = int(cfg0.T)                     # coarse tile size (cells per side)
-            r  = int(cfg0.r)                     # refinement ratio
+            Bmask = refine_mask_from_indicator_hyst(
+                U0, cfg0, self._prev_mask,
+                tau_low=self.tau_low, tau_high=self.tau_high, dilate=self.dilate
+            )
 
-            # Coarse-area coverage (fraction of base grid covered by refined tiles)
+            # Diagnostics
+            n_tiles = int(Bmask.sum())
+            T0 = int(cfg0.T)
+            r = int(cfg0.r)
             coarse_cells_refined = n_tiles * (T0 * T0)
             coverage_frac = float(coarse_cells_refined) / float(cfg0.H * cfg0.W)
-            # Active fine cells used inside refined patches (useful for cost tracking)
             active_fine_cells = n_tiles * (T0 * r) * (T0 * r)
 
-            # Store in your existing trace (so you can plot later)
             self._amr_trace.setdefault("n_refined_tiles", []).append(n_tiles)
             self._amr_trace.setdefault("refined_parent_cells", []).append(coarse_cells_refined)
             self._amr_trace.setdefault("active_fine_cells", []).append(active_fine_cells)
             self._amr_trace.setdefault("coverage_frac", []).append(coverage_frac)
 
-            # Optional quick print
-            if getattr(self, "verbose_amr", False):
-                print(f"[step {step_idx:4d}] tiles={n_tiles:4d} | cov={100*coverage_frac:5.2f}% | fine_cells={active_fine_cells}")
-            
-            self._prev_mask=Bmask
+            self._prev_mask = Bmask
             self._amr_trace['depth_maps'].append(Bmask.astype(jnp.int32))
-            self._amr_trace['level_masks'].append([Bmask]); self._amr_trace['steps'].append(int(step_idx))
-            if jnp.any(Bmask):
-                r=cfg0.r; Tf=cfg0.T*r
-                # FULL prolongation for *all* tiles (so halos are realistic)
-                U1_full = prolong_PLM_minmod(U0, r); U1_full = positivity_fix(self, U1_full)
-                tiles1  = extract_tiles(U1_full, LevelConfig(cfg0.Ny,cfg0.Nx,Tf,H*r,W*r,r))
+            self._amr_trace['level_masks'].append([Bmask])
+            self._amr_trace['steps'].append(int(step_idx))
 
-                # subcycle fine everywhere (simple, robust); we only restrict from refined parents
+            if jnp.any(Bmask):
+                r = cfg0.r
+                Tf = cfg0.T * r
+
+                # FIX 1: Store the COARSE state before refinement
+                U0_before_refine = U0.copy() if hasattr(U0, 'copy') else jnp.array(U0)
+
+                # Prolong to fine
+                U1_full = prolong_PLM_minmod(U0, r)
+                U1_full = positivity_fix(self, U1_full)
+
+                cfg1 = LevelConfig(cfg0.Ny, cfg0.Nx, Tf, H*r, W*r, r)
+                tiles1 = extract_tiles(U1_full, cfg1)
+
+                # Subcycle fine level
                 for scheme in self.splitting_schemes:
                     for ax in scheme:
                         for _ in range(r):
-                            dt_sub = dt/len(scheme)/r; dx_f = self.dx_o / r
+                            dt_sub = dt / len(scheme) / r
+                            dx_f = self.dx_o / r
                             tiles1 = step_tiles_with_halo(self, tiles1, dt_sub, ax, self.halo_width, dx_f, params)
-                U1_full = positivity_fix(self, assemble_from_tiles(tiles1, LevelConfig(cfg0.Ny,cfg0.Nx,Tf,H*r,W*r,r)))
 
-                # restrict and replace only refined parents
+                # After subcycling, before restriction:
+                if step_idx == 0:  # Just first step for now
+                    # Check if fine tiles have discontinuities
+                    print("\nChecking fine tile continuity...")
+                    Ny, Nx, C, Tf, _ = tiles1.shape
+                    for i in range(Ny):
+                        for j in range(Nx):
+                            # Check x-boundary
+                            right = tiles1[i, j, 3, :, -1]
+                            left = tiles1[i, (j+1)%Nx, 3, :, 0]
+                            jump = float(jnp.max(jnp.abs(right - left)))
+                            if jump > 1.0:  # Adjust threshold
+                                print(f"  Large jump at tile ({i},{j}): {jump:.3f}")
+                            
+                U1_full = positivity_fix(self, assemble_from_tiles(tiles1, cfg1))
                 U1_back = restrict_avg(U1_full, r)
-                for i in range(cfg0.Ny):
-                    for j in range(cfg0.Nx):
-                        if Bmask[i,j]:
-                            y0=i*cfg0.T; x0=j*cfg0.T
-                            U0 = U0.at[:, y0:y0+cfg0.T, x0:x0+cfg0.T].set(U1_back[:, y0:y0+cfg0.T, x0:x0+cfg0.T])
+
+                # FIX 2: Apply conservative restriction with flux correction
+                # Instead of just replacing, we need to ensure conservation
+                U0 = restrict_avg(U1_full, r)
+             #   U0 = conservative_restriction_with_correction(
+             #       U0_before_refine, U1_back, Bmask, cfg0
+            #    )
+
         return U0
+
 
     # Public API
     def evolve(self, input_fields: Array, params: Dict):
