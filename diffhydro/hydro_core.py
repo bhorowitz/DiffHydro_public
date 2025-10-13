@@ -5,6 +5,7 @@ from typing import Dict, Tuple, Optional
 
 import jax
 import jax.numpy as jnp
+from jax import lax
 
 Array = jax.Array
 
@@ -242,14 +243,12 @@ def _sobel_like_indicator(rho: Array) -> Array:
     gy = jnp.abs(rho - jnp.roll(rho, 1, axis=-2))
     return gx + gy
 
-def _dilate_mask(mask: Array, iters: int = 1) -> Array:
-    if iters <= 0: return mask
-    for _ in range(iters):
-        nb = [jnp.roll(mask, s, axis=a) for a in (-1, -2) for s in (-1, 1)]
-        st = mask
-        for n in nb: st = jnp.maximum(st, n)
-        mask = st
-    return mask
+def _dilate_mask(mask, iters=1):
+    def step(m):
+        neigh = jnp.stack([jnp.roll(jnp.roll(m, di, 0), dj, 1)
+                           for di in (-1,0,1) for dj in (-1,0,1)], 0)
+        return jnp.max(neigh, axis=0)
+    return lax.fori_loop(0, iters, lambda _, m: step(m), mask)
 
 def refine_mask_from_indicator_hyst(U0: Array, cfg: LevelConfig, prev_mask: Optional[Array],
                                     tau_low: float = 0.015, tau_high: float = 0.03, dilate: int = 2) -> Array:
@@ -318,21 +317,7 @@ def _make_halos_y(tiles: Array, h: int):
     down_nb  = jnp.roll(tiles,  1, axis=0); up_nb    = jnp.roll(tiles, -1, axis=0)
     return down_nb[..., -h:, :], up_nb[..., :h, :]
 
-def step_tiles_with_halo_old(hydro, tiles: Array, dt: float, ax: int, halo_w: int, dx_o: float, params: Dict) -> Array:
-    Ny, Nx, C, T, _ = tiles.shape; h = int(halo_w)
-    if int(ax) == 1:
-        Lh, Rh = _make_halos_x(tiles, h)
-        Ubc = jnp.concatenate([Lh, tiles, Rh], axis=-1)
-        step = jax.vmap(jax.vmap(lambda U: _solve_step_freeze_ghosts(hydro, U, dt, 1, h, dx_o, params), in_axes=0), in_axes=0)
-        Uout = step(Ubc); Uret = Uout[..., h:-h]
-    elif int(ax) == 2:
-        Bh, Th = _make_halos_y(tiles, h)
-        Ubc = jnp.concatenate([Bh, tiles, Th], axis=-2)
-        step = jax.vmap(jax.vmap(lambda U: _solve_step_freeze_ghosts(hydro, U, dt, 2, h, dx_o, params), in_axes=0), in_axes=0)
-        Uout = step(Ubc); Uret = Uout[..., h:-h, :]
-    else:
-        raise ValueError(f'bad axis {ax}')
-    return Uret
+
 
 
 
