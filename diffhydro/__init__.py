@@ -10,7 +10,21 @@ from .solver.limiter import LIMITER_DICT
 from .solver.stencils import *
 from .solver.recon import *
 
-from .hydro_core import *
+# Public hydrodynamics entry points
+from .hydro_core_uni import hydro as hydro
+from .hydro.amr.core import (
+    HydroAMR,
+    assemble_from_tiles,
+    build_level0_config,
+    extract_tiles,
+    prolong_PLM_minmod,
+    refine_mask_from_indicator_hyst,
+    restrict_avg,
+    step_tiles_with_halo,
+)
+
+hydro_amr = HydroAMR
+
 from .fluxes import *
 from .equationmanager import *
 
