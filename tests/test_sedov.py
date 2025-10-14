@@ -4,6 +4,7 @@ import os
 import numpy as np
 
 import diffhydro as dh
+from diffhydro.hydro_core_uni import HydroStatic
 from diffhydro.prob_gen import sedov_2d
 from diffhydro.utils.diagnostics import isotropy_score
     
@@ -17,6 +18,8 @@ def test_shapes():
     solver = dh.HLLC(equation_manager=eq,signal_speed=ss)
     cf = dh.ConvectiveFlux(eq,solver,dh.MUSCL3(limiter="SUPERBEE"))
     hydrosim = dh.hydro(n_super_step=200,fluxes=[cf],maxjit=True)
+
+    assert isinstance(hydrosim, HydroStatic)
     
     U, _ = sedov_2d(1e7, 0.1, eq)
     

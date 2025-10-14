@@ -7,6 +7,7 @@ import jax
 jnp = jax.numpy
 
 import diffhydro as dh
+from diffhydro.hydro_core_uni import HydroStatic
 from diffhydro.prob_gen import make_gaussian_blob
 from diffhydro.utils.diagnostics import blob_radius, isotropy_score
 
@@ -29,6 +30,8 @@ def test_conduction_blob_expansion():
         splitting_schemes=[[1, 2, 3]],
         maxjit=False,
     )
+
+    assert isinstance(hydrosim, HydroStatic)
 
     state = hydrosim.evolve(init_sol, {})
     final_sol = state[0]
