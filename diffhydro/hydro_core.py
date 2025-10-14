@@ -251,7 +251,7 @@ def _dilate_mask(mask, iters=1):
     return lax.fori_loop(0, iters, lambda _, m: step(m), mask)
 
 def refine_mask_from_indicator_hyst(U0: Array, cfg: LevelConfig, prev_mask: Optional[Array],
-                                    tau_low: float = 0.015, tau_high: float = 0.03, dilate: int = 2) -> Array:
+                                    tau_low: float = 45, tau_high: float = 45, dilate: int = 2) -> Array:
     rho = U0[0]; ind = _sobel_like_indicator(rho); mean_ind = jnp.mean(ind) + 1e-12
     refine_hi = _dilate_mask(ind > (tau_high*mean_ind), iters=dilate)
     refine_lo = _dilate_mask(ind > (tau_low *mean_ind), iters=dilate)
@@ -381,9 +381,9 @@ def create_smooth_transition_mask(Bmask: Array, cfg: LevelConfig, width: int = 1
 class hydro:
     def __init__(self, fluxes, forces=(), boundary=None, recon=None,
                  splitting_schemes=((1,2,2,1),(2,1,1,2)),
-                 use_amr=True, adapt_interval=1, refine_ratio=2, base_tile=16,
-                 max_dt=1.0, dx=1.0, maxjit=False, snapshots=None, n_super_step=25,
-                 halo_width=3, tau_low=0.015, tau_high=0.03, dilate=2,
+                 use_amr=True, adapt_interval=1, refine_ratio=2, base_tile=8,
+                 max_dt=1.0, dx=1.0, maxjit=False, snapshots=None, n_super_step=45,
+                 halo_width=3, tau_low=20, tau_high=28, dilate=2,
                  seam_reconcile=False):
         self.fluxes=list(fluxes); self.forces=list(forces); self.boundary=boundary; self.recon=recon
         self.splitting_schemes=tuple(tuple(s) for s in splitting_schemes)

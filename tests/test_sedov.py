@@ -6,7 +6,8 @@ import numpy as np
 import diffhydro as dh
 from diffhydro.prob_gen import sedov_2d
 from diffhydro.utils.diagnostics import isotropy_score
-    
+from diffhydro import hydro_core_uni
+
 def test_shapes():
     print("############# SEDOV SYMMETRY TEST #################")
     print("Should take about 1 minute on GPU")
@@ -16,7 +17,7 @@ def test_shapes():
     ss = dh.signal_speed_Rusanov
     solver = dh.HLLC(equation_manager=eq,signal_speed=ss)
     cf = dh.ConvectiveFlux(eq,solver,dh.MUSCL3(limiter="SUPERBEE"))
-    hydrosim = dh.hydro(n_super_step=200,fluxes=[cf],maxjit=True)
+    hydrosim = hydro_core_uni.hydro(n_super_step=200,fluxes=[cf],maxjit=True)
     
     U, _ = sedov_2d(1e7, 0.1, eq)
     

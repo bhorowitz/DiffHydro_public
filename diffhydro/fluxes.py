@@ -62,7 +62,7 @@ class ConvectiveFlux:
     
 
     def timestep(self,sol):
-        print(sol)
+ #       print(sol)
         v = jnp.abs(sol[1:-1]/sol[0])
     
         temp_quant = (self.eq_manage.gamma-1)*(sol[-1]-sol[0]*jnp.sum(v**2.0,axis=0)/2.0)
