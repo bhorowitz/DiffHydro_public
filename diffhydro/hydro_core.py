@@ -47,7 +47,7 @@ class hydro:
     def flux(self,sol,ax,params):
         total_flux = jnp.zeros(sol.shape)
         for flux in self.fluxes:
-            total_flux += flux.flux(sol,ax,params)
+            total_flux += flux.flux(sol,ax,params,total_flux)
         return total_flux
     
     def forcing(self,i,sol,params,dt): #all axis independant? 
