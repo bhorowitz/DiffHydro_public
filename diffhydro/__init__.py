@@ -7,6 +7,8 @@ from .physics.forcing import *
 from .solver.signal_speeds import *
 from .solver.riemann_solver import *
 from .solver.limiter import LIMITER_DICT
+from .solver.integrator import INTEGRATOR_DICT
+
 from .solver.stencils import *
 from .solver.recon import *
 

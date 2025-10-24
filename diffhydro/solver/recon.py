@@ -142,7 +142,7 @@ class MUSCL3:
         r_R = (phi_{i+1} - phi_{i}) / (phi_{i+2} - phi_{i+1})
     
         """
-        eps_ad = 1e-10
+        eps_ad = 1e-6
         if j == 0: #left
                 delta_central = jnp.roll(buffer,self.f_sten(2,j), axis=axis) - jnp.roll(buffer,self.f_sten(1,j), axis=axis)
                 delta_upwind =  jnp.roll(buffer,self.f_sten(1,j), axis=axis) - jnp.roll(buffer,self.f_sten(0,j), axis=axis)

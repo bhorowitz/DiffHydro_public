@@ -6,6 +6,9 @@ from diffhydro import NoBoundary, NoForcing
 import jax
 from jax import jit
 import jax.numpy as jnp
+from .solver.integrator import INTEGRATOR_DICT
+
+
 
 @jax.tree_util.register_pytree_node_class
 class hydro:
@@ -18,7 +21,9 @@ class hydro:
                 splitting_schemes=[[3,1,2,2,1,3],[1,2,3,3,2,1],[2,3,1,1,3,2]], #cyclic permutations
                 fluxes = None, #convection, conduction
                 forces = [NoForcing()], #gravity, etc.
-                maxjit=False):
+                maxjit=False,
+                use_mol=False,
+                integrator="RK2"):
         #parameters that are held constant per run (i.e. probably don't want to take derivatives with respect to...)
    #     self.init_dt = init_dt # tiny starting timestep to smooth out anything too sharp
         self.splitting_schemes = splitting_schemes #strang splitting for x,y,z sweeps
@@ -33,6 +38,8 @@ class hydro:
         self.maxjit = maxjit
         self.dx_o = 1.0
         self.timescale = jnp.zeros(self.n_super_step)
+        self.use_mol = use_mol
+        self.integrator = INTEGRATOR_DICT[integrator]  # callable
 
     
     def timestep(self,fields):
@@ -46,8 +53,10 @@ class hydro:
     
     def flux(self,sol,ax,params):
         total_flux = jnp.zeros(sol.shape)
-        for flux in self.fluxes:
-            total_flux += flux.flux(sol,ax,params)
+        for flux in self.fluxes: 
+            #note it is ordered, to allow a flux_correction depending on calculated fluxes
+            #make sure your order is correct for that though!
+            total_flux += flux.flux(sol,ax,params,total_flux)
         return total_flux
     
     def forcing(self,i,sol,params,dt): #all axis independant? 
@@ -56,7 +65,7 @@ class hydro:
             total_force += force.force(i,sol,params,dt)
         return total_force
     
-    def solve_step(self,sol,dt,ax,params):
+    def split_solve_step(self,sol,dt,ax,params):
         ##RK2 method
         
         fu1 = self.flux(sol,ax,params) 
@@ -79,7 +88,7 @@ class hydro:
         for scheme in self.splitting_schemes:
             for nn,ax in enumerate(scheme):
                 sol = self.boundary.impose(sol,ax)
-                sol = self.solve_step(sol,dt/len(scheme)*2,int(ax),params)                 
+                sol = self.split_solve_step(sol,dt/len(scheme)*2,int(ax),params)                 
                 # experimental
                 sol = sol.at[0].set(jnp.abs(sol[0])) #experimental...
                 sol = sol.at[-1].set(jnp.abs(sol[-1])) #experimental...
@@ -125,17 +134,46 @@ class hydro:
         fields = self.forcing(i,fields,params,dt)
             
         return (fields,params)
+
+    @jax.jit
+    def _hydrostep(self, i, state, dt):
+        
+        #split forcing outside of core hydro loop
+        
+        fields, params = state
+        
+        fields = self.forcing(i, fields, params, dt/2)          
+
+        if self.use_mol:
+            fields = self.mol_solve_step(fields, dt, params)  # <<< unsplit RK2
+        else:
+            fields = self.sweep_stack(state, dt, i)           #
+            
+        fields = self.forcing(i, fields, params, dt/2)          
+        return (fields, params)
+    def rhs_unsplit(self, sol, params):
+        rhs = jnp.zeros_like(sol)
+        # assume first axis is variable index; spatial axes start at 1
+        for ax in range(1, sol.ndim):
+            sol_b = self.boundary.impose(sol, ax)            
+            fu = self.flux(sol_b, ax, params)                
+            rhs = rhs - (fu - jnp.roll(fu, 1, axis=ax)) / self.dx_o
+        return rhs
+
+    def mol_solve_step(self, sol, dt, params):
+        return self.integrator(self.rhs_unsplit, sol, dt, params)
     
     @classmethod
     def tree_unflatten(cls, aux_data, children):
         return cls(*children, **aux_data)
 
     def tree_flatten(self):
-        #this method is needed for JAX control flow
+        #this method is needed for JAX control flow, probably some easier way to do it though...
         children = ()  # arrays / dynamic values
         aux_data = {
                     "boundary":self.boundary,
                     "snapshots":self.snapshots,
                    "splitting_schemes":self.splitting_schemes,
-                    "fluxes":self.fluxes,"forces":self.forces,"maxjit":self.maxjit}  # static values
+                    "fluxes":self.fluxes,"forces":self.forces,"maxjit":self.maxjit,
+                "use_mol":self.use_mol}  # static values
         return (children, aux_data)

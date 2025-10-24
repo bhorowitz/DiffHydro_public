@@ -3,6 +3,8 @@ from typing import Tuple, Union
 from jax import Array 
 import jax.numpy as jnp
 
+#adapted from jaxfluids
+
 class CentralSixthOrderReconstruction():
     """CentralSixthOrderReconstruction 
 
