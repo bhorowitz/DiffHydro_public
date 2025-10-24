@@ -26,7 +26,7 @@ def test_conduction_blob_expansion():
     hydrosim = dh.hydro(
         n_super_step=120,
         fluxes=[conductive_flux],
-        splitting_schemes=[[1, 2, 3]],
+    #    splitting_schemes=[[1, 2, 3]],
         maxjit=False,
     )
 
