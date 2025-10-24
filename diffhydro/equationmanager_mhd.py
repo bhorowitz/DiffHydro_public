@@ -177,7 +177,44 @@ class EquationManagerMHD:
     def get_specific_energy(self, p: Array, rho: Array) -> Array:
         return p / (jnp.maximum(rho, self.eps) * (self.gamma - 1.0))
 
-    def get_fast_magnetosonic_speed(self, primitives: Array, axis: int) -> Array:
+    def get_fast_magnetosonic_speed(self, W, axis: int):
+        # W = [rho, u, v, w, B1, B2, B3, p, (psi?)]
+        eps = self.eps
+        
+        # 1) sanitize inputs (face primitives)
+        W = jnp.nan_to_num(W, nan=eps, posinf=eps, neginf=eps)
+        
+        rho = jnp.maximum(W[self.mass_ids], eps)
+        p   = jnp.maximum(W[self.energy_ids], eps)  # pressure index in primitives
+        
+        B1 = jnp.nan_to_num(W[self.mag_ids[0]], 0.0, 0.0, 0.0)
+        B2 = jnp.nan_to_num(W[self.mag_ids[1]], 0.0, 0.0, 0.0)
+        B3 = jnp.nan_to_num(W[self.mag_ids[2]], 0.0, 0.0, 0.0)
+        
+        # 2) components
+        cs2   = jnp.maximum(self.gamma * p / rho, 0.0)      # sound^2 >= 0
+        B2sum = B1*B1 + B2*B2 + B3*B3
+        va2   = jnp.maximum(B2sum / rho, 0.0)               # Alfven^2 >= 0
+        
+        Bd    = (B1, B2, B3)[axis]
+        va_d2 = jnp.maximum((Bd*Bd) / rho, 0.0)             # normal Alfven^2 >= 0
+        
+        # 3) discriminant (avoid inf−inf / tiny negatives)
+        a    = cs2 + va2
+        b    = cs2 * va_d2
+        a    = jnp.nan_to_num(a,    0.0, 0.0, 0.0)
+        b    = jnp.nan_to_num(b,    0.0, 0.0, 0.0)
+        
+        disc = jnp.maximum(a*a - 4.0*b, 0.0)                # clamp to 0
+        root = jnp.sqrt(disc)
+        
+        # 4) fast-mode
+        cf2  = 0.5 * jnp.maximum(a + root, 0.0)
+        cf2  = jnp.nan_to_num(cf2, 0.0, 0.0, 0.0)
+        return jnp.sqrt(cf2)
+
+        
+    def get_fast_magnetosonic_speed_old(self, primitives: Array, axis: int) -> Array:
         rho = jnp.maximum(primitives[self.mass_ids], self.eps)
         u = primitives[self.vel_ids[0]]
         v = primitives[self.vel_ids[1]]
