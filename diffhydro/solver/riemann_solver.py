@@ -7,8 +7,7 @@ from jax import Array
 
 from .signal_speeds import compute_sstar
 
-#from jaxfluids.materials.material_manager import MaterialManager
-#from jaxfluids.config import precision
+#adapted from jaxfluids
 
 class RiemannSolver(ABC):
     """Abstract base class for Riemann solvers.

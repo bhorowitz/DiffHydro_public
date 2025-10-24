@@ -3,6 +3,8 @@ from typing import Tuple, Union
 import jax.numpy as jnp
 from jax import Array 
 
+#adapted from jaxfluids
+
 def signal_speed_Arithmetic(u_L: Array, u_R: Array, a_L: Array, a_R: Array,
     *args, **kwargs) -> Tuple[Array, Array]:
     
