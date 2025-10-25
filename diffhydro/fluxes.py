@@ -3,6 +3,7 @@ from functools import partial
 from typing import List
 from .solver import recon
 from .solver.stencils import CentralSixthOrderReconstruction
+from .physics import mhd
 import jax.numpy as jnp
 import jax
 from jax.experimental import checkify
@@ -23,12 +24,12 @@ class ConvectiveFlux:
         self.dx_o = 1
         
         try: #3d
-            self.flux_shapes = (5,EquationManager.mesh_shape[0],EquationManager.mesh_shape[1],EquationManager.mesh_shape[2])
+            self.flux_shapes = (EquationManager.n_cons,EquationManager.mesh_shape[0],EquationManager.mesh_shape[1],EquationManager.mesh_shape[2])
         except: #2d, z velocity axis usually just constant...
-            self.flux_shapes = (5,EquationManager.mesh_shape[0],EquationManager.mesh_shape[1])
+            self.flux_shapes = (EquationManager.n_cons,EquationManager.mesh_shape[0],EquationManager.mesh_shape[1])
 
         
-    def flux(self,sol,ax,params):
+    def flux(self,sol,ax,params,flux):
         primitives = self.eq_manage.get_primitives_from_conservatives(sol)
         
         primitives_xi_L = self.recon.reconstruct_xi(
@@ -56,23 +57,61 @@ class ConvectiveFlux:
                 primitives_xi_j=primitives_xi_R,
                 j=1,
                 axis=ax)
-        #final axis is from vel-id, so one off... should standardize at some point!
-        flux,_,_ = self.solver.solve_riemann_problem_xi(primitives_xi_L,primitives_xi_R,conservative_xi_L,conservative_xi_R,ax-1)
-        return flux
-    
+        cons_L_solver = conservative_xi_L
+        cons_R_solver = conservative_xi_R
+        
+        glm_active = (getattr(self.eq_manage, "n_cons", conservative_xi_L.shape[0]) == 9)
+        
+        if glm_active:
+            # Pass only the MHD rows (ρ, ρu, ρv, ρw, B1, B2, B3, E) to HLL/HLLD
+            cons_L_solver = conservative_xi_L[:8]
+            cons_R_solver = conservative_xi_R[:8]
+        
+        # final axis is 0-based for solver
+        F, _, _ = self.solver.solve_riemann_problem_xi(
+            primitives_xi_L, primitives_xi_R,
+            cons_L_solver, cons_R_solver, ax-1)        # HLL/HLLD returns 8 rows (MHD) 
+        
+        # ---- NEW: GLM face update (2×2 subsystem) and ψ row append ----
+        if glm_active:
+            c_h = getattr(self.eq_manage, "glm_ch", 1.0) 
+            
+            F_Bn, F_psi = mhd.glm_face_flux(primitives_xi_L,primitives_xi_R,ax-1,c_h)
 
-    def timestep(self,sol):
-        print(sol)
-        v = jnp.abs(sol[1:-1]/sol[0])
+            # overwrite the normal-B row in the 8-row MHD flux and then append ψ to make 9 rows
+            Bn_idx = (4, 5, 6)[ax-1]     # your MHD magnetic row indices
+            F = F.at[Bn_idx].set(F_Bn)
+            F = jnp.vstack([F, F_psi[jnp.newaxis,:]])    # return 9 rows when GLM is active
+
+        return F
+
+        
+    def timestep(self, sol):
+        # Primitives once, then derive speeds axis-by-axis
+        primitives = self.eq_manage.get_primitives_from_conservatives(sol)
     
-        temp_quant = (self.eq_manage.gamma-1)*(sol[-1]-sol[0]*jnp.sum(v**2.0,axis=0)/2.0)
-        P = jnp.maximum(jnp.where(temp_quant>0,temp_quant,0),0.0)
+        # Pull velocities via indices (don’t slice 1:-1; that would include B in MHD)
+        u = primitives[self.eq_manage.vel_ids[0]]
+        v = primitives[self.eq_manage.vel_ids[1]]
+        # Handle 2D/3D transparently
+        w = primitives[self.eq_manage.vel_ids[2]] if len(self.eq_manage.vel_ids) > 2 else 0.0
     
-        cs = jnp.sqrt(self.eq_manage.gamma*P/sol[0])
+        # Max wave speed per axis = |v_d| + signal_speed(prims, axis)
+        # Euler managers: signal_speed = c_s;  MHD managers: signal_speed = c_f (fast magnetosonic)
+        # axis numbering here matches your flux() call convention (ax=1,2,3 are spatial axes)
+        speed_x = jnp.abs(u) + self.eq_manage.get_signal_speed(primitives, axis=0)
+        speed_y = jnp.abs(v) + self.eq_manage.get_signal_speed(primitives, axis=1)
+        speed_z = jnp.abs(w) + (self.eq_manage.get_signal_speed(primitives, axis=2) if sol.ndim >= 4 else 0.0)
     
-        #cmax = jnp.nanmax(jnp.nanmax(v)+cs)
-        cmax = jnp.max(jnp.max(v)+cs)
-        dt = self.eq_manage.cfl*self.dx_o/cmax
+        # Global max over the grid (and axes)
+        cmax = jnp.max(jnp.stack([
+            jnp.max(speed_x),
+            jnp.max(speed_y),
+            jnp.max(speed_z),
+        ]))
+    
+        # CFL timestep
+        dt = self.eq_manage.cfl * self.dx_o / (cmax + self.eq_manage.eps)
         return dt
     
     def compute_positivity_preserving_interpolation(self,
@@ -124,13 +163,13 @@ class ConductiveFlux:
         self.dx_o = 1
         
         try: #3d
-            self.flux_shapes = (5,EquationManager.mesh_shape[0],EquationManager.mesh_shape[1],EquationManager.mesh_shape[2])
+            self.flux_shapes = (EquationManager.n_cons,EquationManager.mesh_shape[0],EquationManager.mesh_shape[1],EquationManager.mesh_shape[2])
         except: #2d, z velocity axis usually just constant...
-            self.flux_shapes = (5,EquationManager.mesh_shape[0],EquationManager.mesh_shape[1])
+            self.flux_shapes = (EquationManager.n_cons,EquationManager.mesh_shape[0],EquationManager.mesh_shape[1])
 
     def flux(
             self,
-            sol,axis,params
+            sol,axis,params,flux
         ) -> Array:
         """Computes the heat flux in axis direction.
         

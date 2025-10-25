@@ -60,11 +60,10 @@ class hydro:
         return total_flux
     
     def forcing(self,i,sol,params,dt): #all axis independant? 
-        total_force = jnp.zeros(sol.shape)
         for force in self.forces:
-            total_force += force.force(i,sol,params,dt)
-        return total_force
-    
+            sol = force.force(i, sol, params, dt)  # each returns UPDATED fields
+        return sol
+        
     def split_solve_step(self,sol,dt,ax,params):
         ##RK2 method
         
