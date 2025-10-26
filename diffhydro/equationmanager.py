@@ -34,10 +34,11 @@ class EquationManager:
         self.thermal_conductivity_model = "SUTHERLAND"
         self.sutherland_parameters = [0.1, 1.0, 1.0]
         self.eps = 1E-20
-        self.cfl = 0.3
+        self.cfl = 0.4
         self.mesh_shape = [100,100,100]
         self.R = 1.0
         self.cp = self.gamma / (self.gamma - 1.0) * self.R
+        self.n_cons = 5
         
     def get_conservatives_from_primitives(self, primitives: Array) -> Array:
         """Converts primitive variables to conservative ones.
@@ -76,7 +77,7 @@ class EquationManager:
 
         if self.equation_type == "SINGLE-PHASE":
             rho = conservatives[self.mass_ids]  # rho = rho
-            one_rho = 1.0 / rho
+            one_rho = 1.0 / (rho + self.eps)
             u = conservatives[self.vel_ids[0]] * one_rho  # u = rho*u / rho
             v = conservatives[self.vel_ids[1]] * one_rho  # v = rho*v / rho
             w = conservatives[self.vel_ids[2]] * one_rho  # w = rho*w / rho
@@ -221,6 +222,10 @@ class EquationManager:
         cp = self.get_specific_heat_capacity(T)
         return T + 0.5 * (u * u + v * v + w * w) / cp
 
+    def get_signal_speed(self, primitives, axis):
+        p = primitives[self.energy_ids]
+        rho = primitives[self.mass_ids]
+        return self.get_speed_of_sound(p, rho)
 
     
     def _set_transport_properties(self,func) -> None:
