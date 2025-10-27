@@ -76,16 +76,22 @@ class EquationManager:
         """           
 
         if self.equation_type == "SINGLE-PHASE":
-            rho = conservatives[self.mass_ids]  # rho = rho
-            one_rho = 1.0 / (rho + self.eps)
-            u = conservatives[self.vel_ids[0]] * one_rho  # u = rho*u / rho
-            v = conservatives[self.vel_ids[1]] * one_rho  # v = rho*v / rho
-            w = conservatives[self.vel_ids[2]] * one_rho  # w = rho*w / rho
-            e = conservatives[self.energy_ids] * one_rho - 0.5 * (u * u + v * v + w * w)
-            p = self.get_pressure(e, rho) # p = (gamma-1) * ( E - 1/2 * (rho*u) * u)
-
-            primitives = jnp.stack([rho, u, v, w, p], axis=0)
-
+            rho = conservatives[self.mass_ids]
+            rho_safe = jnp.maximum(rho, self.eps)
+            inv_rho  = 1.0 / rho_safe
+            
+            u = conservatives[self.vel_ids[0]] * inv_rho
+            v = conservatives[self.vel_ids[1]] * inv_rho
+            w = conservatives[self.vel_ids[2]] * inv_rho
+            
+            # specific internal energy (per mass)
+            e = conservatives[self.energy_ids] * inv_rho - 0.5 * (u*u + v*v + w*w)
+            e = jnp.maximum(e, self.eps)          # prevent negative/internal-energy NaNs
+            
+            # build pressure with safe rho
+            p = self.get_pressure(e, rho_safe)
+            
+            primitives = jnp.stack([rho_safe, u, v, w, p], axis=0)
         else:
             raise NotImplementedError
 
@@ -171,18 +177,20 @@ class EquationManager:
         """See base class. """
         return jnp.sqrt( self.gamma * jnp.maximum( p, self.eps) / jnp.maximum( rho, self.eps ) )
 
-    def get_pressure(self, e: Array, rho: Array) -> Array:
-        """See base class. """
-        return (self.gamma - 1.0) * e * rho
+    def get_pressure(self, e, rho):
+        return (self.gamma - 1.0) * jnp.maximum(e, self.eps) * jnp.maximum(rho, self.eps)
 
-    def get_temperature(self, p: Array, rho: Array) -> Array:
-        """See base class. """
-        return p / (rho * self.R + self.eps)
+    def get_temperature(self, p, rho):
+        p_safe   = jnp.maximum(p,   self.eps)
+        rho_safe = jnp.maximum(rho, self.eps)
+        T = p_safe / (rho_safe * self.R + self.eps)
+        # cap used temp to keep any downstream log/exp/table sane
+        return jnp.clip(T, 0.10, 10.0**10.5) 
 
-    def get_specific_energy(self, p:Array, rho:Array) -> Array:
-        """See base class. """
-        # Specific internal energy
-        return p / (rho * (self.gamma - 1.0))
+    def get_specific_energy(self, p, rho):
+        p_safe   = jnp.maximum(p,   self.eps)
+        rho_safe = jnp.maximum(rho, self.eps)
+        return p_safe / (rho_safe * (self.gamma - 1.0) + self.eps)
 
     def get_total_energy(
             self,
@@ -293,21 +301,28 @@ class EquationManager:
             #hydrogen mass over Boltzmann constant in simulation unit
             MHKB=115.98518596699539
 
-            temp = temperature/1E7
-            n_e2 = EPSILON * primitives[self.mass_ids]
-            kappa_hot = (1.7e11 * temp_7**2.5) / (1 + 0.029 * jnp.log10(temp_7 / jnp.sqrt(n_e2)))
-                # thermal conductivity for neutral atomic collisions (Parker 1953)
-            temp_4 = temperature/ 1.0E4
-            kappa_cool = 2.5E5 * jnp.sqrt(temp_4)
-                    #adjast for Athena++ units
-            kappa = jnp.where(T>6.6E4, kappa_hot, kappa_cool)
-            kappa = kappa * 1.4 * MHKB / primitives[self.mass_ids]
-            kc = 1.8E12 / DELTA * 1.4 * MHKB
-
-            kappa_max = 1E16
+            rho = primitives[self.mass_ids]
+            p   = primitives[self.energy_ids]
             
-            thermal_conductivity = jnp.minimum(kc*jnp.ones(temp.shape), 1.0 / (1.0 / kappa + 1.0 / kappa_max))
+            # Physical temperature like Athena (Kelvin)
+            # numeric factor mirrors their 1.272727*MHKB*p/rho
+            T_phys = 1.272727 * MHKB * p / (rho + self.eps)
             
+            # Hot vs. cool branches (Spitzer / Parker)
+            temp7 = T_phys / 1.0e7
+            ne2   = jnp.maximum(EPSILON * rho, self.eps)  # guard
+            
+            kappa_hot  = (1.7e11 * temp7**2.5) / (1.0 + 0.029 * jnp.log(temp7 / jnp.sqrt(ne2)))  # NATURAL log
+            kappa_cool = 2.5e5 * jnp.sqrt(jnp.maximum(T_phys / 1.0e4, 0.0))
+            
+            kappa = jnp.where(T_phys > 6.6e4, kappa_hot, kappa_cool)
+            
+            # Athena "adjust for units": multiply by 1.4*MHKB/rho
+            kappa = kappa * 1.4 * MHKB / (rho + self.eps)
+            
+            # Apply El-Badry ceiling here (saturation comes later)
+            k_ceiling = 1.8e12/ DELTA * 1.4 * MHKB #1.8e12 / DELTA * 1.4 * MHKB
+            thermal_conductivity = jnp.minimum(kappa, k_ceiling)
         else:
             raise NotImplementedError
 

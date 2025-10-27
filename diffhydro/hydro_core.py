@@ -89,7 +89,7 @@ class hydro:
         for scheme in self.splitting_schemes:
             for nn,ax in enumerate(scheme):
                 sol = self.boundary.impose(sol,ax)
-                sol = self.split_solve_step(sol,dt/len(scheme)*2,int(ax),params)                 
+                sol = self.split_solve_step(sol,dt/(len(scheme)),int(ax),params)                 
                 # experimental
                 sol = sol.at[0].set(jnp.abs(sol[0])) #experimental...
                 sol = sol.at[-1].set(jnp.abs(sol[-1])) #experimental...
@@ -121,20 +121,6 @@ class hydro:
         dt = (ttt)
         return self._hydrostep(i,state,dt)
     
-    @jax.jit
-    def _hydrostep(self,i,state,dt):
-        fields,params = state
-
-        #save actual timescale used, mostly important if you are using hydro_adapt
-#        self.timescale[i].set(dt)
-        
-        hydro_output = self.sweep_stack(state,dt,i)
-        
-        fields = hydro_output
-
-        fields = self.forcing(i,fields,params,dt)
-            
-        return (fields,params)
 
     @jax.jit
     def _hydrostep(self, i, state, dt):
@@ -142,15 +128,20 @@ class hydro:
         #split forcing outside of core hydro loop
         
         fields, params = state
-        
+
         fields = self.forcing(i, fields, params, dt/2)          
 
         if self.use_mol:
-            fields = self.mol_solve_step(fields, dt, params)  # <<< unsplit RK2
+            fields = self.mol_solve_step(fields, dt, params)  # <<< unsplit
         else:
             fields = self.sweep_stack(state, dt, i)           #
             
-        fields = self.forcing(i, fields, params, dt/2)          
+        fields = self.forcing(i, fields, params, dt/2) 
+
+        #positivity hack, probably should add a flag...
+      #  fields = fields.at[0].set(jnp.abs(fields[0]))
+      #  fields = fields.at[-1].set(jnp.abs(fields[-1]))
+
         return (fields, params)
     def rhs_unsplit(self, sol, params):
         rhs = jnp.zeros_like(sol)
@@ -166,7 +157,7 @@ class hydro:
             # pass dt into rhs via a closure
             return self.integrator(lambda u, p: self.rhs_ctu(u, p, dt), sol, dt, params)
         else:
-            return self.integrator(self.rhs_unsplit, sol, dt, params)  # existing path  :contentReference[oaicite:1]{index=1}
+            return self.integrator(self.rhs_unsplit, sol, dt, params)  # existing path
 
     def rhs_ctu(self, sol, params, dt):
         print("CTU")
