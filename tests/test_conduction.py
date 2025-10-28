@@ -12,7 +12,7 @@ from diffhydro.utils.diagnostics import blob_radius, isotropy_score
 
 
 def test_conduction_blob_expansion():
-    shape = (24, 24, 24)
+    shape = (36, 36, 36)
     eq = dh.equationmanager.EquationManager()
     eq.mesh_shape = list(shape)
     eq.thermal_conductivity_model = "SUTHERLAND"

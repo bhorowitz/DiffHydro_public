@@ -290,17 +290,18 @@ class HLLD_MHD(RiemannSolver):
     """HLLD Riemann Solver for ideal MHD
     Miyoshi & Kusano 2005
     
-    Four-wave solver with robust degeneracy handling and HLL fallback.
+    Four-wave solver with (hopefully) robust degeneracy handling and HLL fallback.
     """
 
     def __init__(
             self,
             equation_manager,
-            signal_speed,
+            signal_speed, #not used, just for completeness/same format
+            wft=1.0,
             **kwargs
             ) -> None:
         super().__init__(equation_manager, signal_speed)
-
+        self.wft = wft
     def _solve_riemann_problem_xi_single_phase(
             self,
             primitives_L: Array,
@@ -312,22 +313,21 @@ class HLLD_MHD(RiemannSolver):
             ) -> Tuple[Array, Array, Array]:
         
         # Get indices
-        rho_i = self.mass_ids
-        energy_i = self.energy_ids
         
-        # Extract primitive variables
+        # --- indices ---
+        rho_i      = self.mass_ids
+        energy_i   = self.energy_ids            # pressure index in primitives
+        u_i, v_i, w_i = self.equation_manager.vel_ids
+        b1_i, b2_i, b3_i = self.equation_manager.mag_ids
+        
+        # --- extract prims ---
         rho_L = jnp.maximum(primitives_L[rho_i], self.eps)
         rho_R = jnp.maximum(primitives_R[rho_i], self.eps)
-        p_L = jnp.maximum(primitives_L[energy_i], self.eps)
-        p_R = jnp.maximum(primitives_R[energy_i], self.eps)
+        p_L   = jnp.maximum(primitives_L[energy_i], self.eps)
+        p_R   = jnp.maximum(primitives_R[energy_i], self.eps)
         
-        # Magnetic field components
-        B1_L = primitives_L[4]
-        B2_L = primitives_L[5]
-        B3_L = primitives_L[6]
-        B1_R = primitives_R[4]
-        B2_R = primitives_R[5]
-        B3_R = primitives_R[6]
+        B1_L, B2_L, B3_L = primitives_L[b1_i], primitives_L[b2_i], primitives_L[b3_i]
+        B1_R, B2_R, B3_R = primitives_R[b1_i], primitives_R[b2_i], primitives_R[b3_i]
         
         # Normal and tangential components (axis-dependent)
         if axis == 0:
@@ -364,7 +364,7 @@ class HLLD_MHD(RiemannSolver):
         ptot_L = p_L + 0.5 * B2_L
         ptot_R = p_R + 0.5 * B2_R
         
-        # Fast magnetosonic speeds
+        # Fast magnetosonic speeds, instead of normal hydro soundspeed
         cf_L = self.equation_manager.get_fast_magnetosonic_speed(primitives_L, axis)
         cf_R = self.equation_manager.get_fast_magnetosonic_speed(primitives_R, axis)
         
@@ -373,13 +373,13 @@ class HLLD_MHD(RiemannSolver):
         S_R = jnp.maximum(vn_L + cf_L, vn_R + cf_R)
         
         # Physical fluxes (needed for both HLLD and HLL fallback)
-        fluxes_L = self.equation_manager.get_fluxes_xi(primitives_L, conservatives_L, axis)
-        fluxes_R = self.equation_manager.get_fluxes_xi(primitives_R, conservatives_R, axis)
+        fluxes_L = self.equation_manager.get_fluxes_xi(primitives_L, conservatives_L, axis)[:8]
+        fluxes_R = self.equation_manager.get_fluxes_xi(primitives_R, conservatives_R, axis)[:8]
         
         # Early exit for supersonic flow
         fluxes_xi = jnp.where(S_L >= 0.0, fluxes_L,
                     jnp.where(S_R <= 0.0, fluxes_R, 
-                              jnp.zeros_like(fluxes_L)))  # placeholder, will be overwritten
+                              jnp.zeros_like(fluxes_L)))  # placeholder, will be overwritten later on
         
         # Check if we need to compute intermediate states
         compute_intermediates = (S_L < 0.0) & (S_R > 0.0)
@@ -413,14 +413,14 @@ class HLLD_MHD(RiemannSolver):
         
         # Check for weak field limit: if |Bn_star| is very small, fall back to HLL
         Bn_star_sq = Bn_star * Bn_star
-        weak_field_threshold = self.eps * 100.0
+        weak_field_threshold = self.eps * self.wft
         use_HLL = (Bn_star_sq < weak_field_threshold) | (jnp.abs(denominator_M) < self.eps)
         
         # HLL flux (fallback)
         denom_HLL = S_R - S_L + self.eps
         flux_HLL = (S_R * fluxes_L - S_L * fluxes_R + S_L * S_R * (conservatives_R - conservatives_L)) / denom_HLL
         
-        # Alfvén wave speeds (Miyoshi & Kusano eq. 51)
+        # Alfvén wave speeds 
         sqrt_rho_L_star = jnp.sqrt(rho_L_star)
         sqrt_rho_R_star = jnp.sqrt(rho_R_star)
         S_L_star = S_M - jnp.abs(Bn_star) / (sqrt_rho_L_star + self.eps)
@@ -499,7 +499,6 @@ class HLLD_MHD(RiemannSolver):
             ke = 0.5 * rho_star * (u_star*u_star + v_star*v_star + w_star*w_star)
             me = 0.5 * (B1_star*B1_star + B2_star*B2_star + B3_star*B3_star)
             p_star = jnp.maximum(ptot_star_val - me, self.eps)
-            # FIXED: internal energy needs rho_star factor
             e_int = p_star / (self.equation_manager.gamma - 1.0)
             E_star = ke + me + e_int
             
@@ -531,7 +530,7 @@ class HLLD_MHD(RiemannSolver):
         # Choose between HLLD and HLL based on field strength and degeneracy
         fluxes_xi = jnp.where(use_HLL, flux_HLL, flux_HLLD)
         
-        # Final safety: ensure no NaNs or Infs
+        # Final safety: ensure no NaNs or Infs, probably not best practice... might remove..
         fluxes_xi = jnp.nan_to_num(fluxes_xi, nan=0.0, posinf=0.0, neginf=0.0)
         
         return fluxes_xi, None, None

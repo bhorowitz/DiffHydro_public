@@ -5,7 +5,6 @@ import jax.numpy as jnp
 def init_turbulent_velocity(eq, Lbox, rho0, p0,
                             kmin=1, kmax=3, solenoidal_frac=1.0,
                             pslope=-2.0, target_M=1.0, seed=123):
-    import jax, jax.numpy as jnp
     nx, ny, nz = eq.mesh_shape
     # k-grid (fundamental k0 = 2π/L)
     k0 = 2.0 * jnp.pi / Lbox

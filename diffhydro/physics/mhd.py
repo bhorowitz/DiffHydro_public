@@ -230,6 +230,8 @@ class PPCTForce: #Provably Positivity-Preserving Constrained Transport (PPCT)
     After convergence, recompute total energy E to stay thermodynamically consistent
     with the new v and the existing pressure p (primitive).
 
+    See https://arxiv.org/abs/2410.05173
+
     Assumes EquationManagerMHD-like indexing:
       U = [rho, rho*u, rho*v, rho*w, B1, B2, B3, E]
       W = [rho,     u,     v,     w, B1, B2, B3, p]
@@ -381,14 +383,31 @@ class PPCTForce: #Provably Positivity-Preserving Constrained Transport (PPCT)
         # Use a checkpointed while_loop so reverse-mode is memory-light
         kf, Vf, Bf, res0 = jax.lax.while_loop(cond, jax.remat(body), init_state)
 
-        # Reassemble primitives with new v, B; keep p fixed
-        W_upd = W.at[self.i_u].set(Vf[0]).at[self.i_v].set(Vf[1]).at[self.i_w].set(Vf[2]) \
-                .at[self.iBx].set(Bf[0]).at[self.iBy].set(Bf[1]).at[self.iBz].set(Bf[2]) \
-                .at[self.iE].set(p)
-
-        # Recompute E from (rho, v, B, p): E = 0.5*rho*|v|^2 + 0.5*|B|^2 + p/(gamma-1)
+        # Compute total energy of old state (conservative)
+        E_old = sol[self.iE]
+        
+        # Compute kinetic and magnetic contributions of new fields
+        kin_new = 0.5 * rho * (Vf[0]**2 + Vf[1]**2 + Vf[2]**2)
+        mag_new = 0.5 * (Bf[0]**2 + Bf[1]**2 + Bf[2]**2)
+        
+        # Recover internal energy from total conservation
+        E_int_new = E_old - kin_new - mag_new
+        E_int_new = jnp.maximum(E_int_new, self.eps)
+        
+        # Convert back to primitive pressure
+        p_new = (self.eq.gamma - 1.0) * E_int_new
+        
+        # Rebuild primitives with updated v, B, and new pressure
+        W_upd = (W.at[self.i_u].set(Vf[0])
+                   .at[self.i_v].set(Vf[1])
+                   .at[self.i_w].set(Vf[2])
+                   .at[self.iBx].set(Bf[0])
+                   .at[self.iBy].set(Bf[1])
+                   .at[self.iBz].set(Bf[2])
+                   .at[self.iE].set(p_new))
+        
         U_upd = self.eq.get_conservatives_from_primitives(W_upd)
-
+        
         # Optional final boundary
         if self.boundary is not None:
             for ax in range(1, U_upd.ndim):

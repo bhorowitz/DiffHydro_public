@@ -124,7 +124,8 @@ class hydro:
 
     @jax.jit
     def _hydrostep(self, i, state, dt):
-        
+        if i%10 == 0:
+            jax.debug.print("step {bar}, dt {foo}", bar=i,foo=dt)
         #split forcing outside of core hydro loop
         
         fields, params = state
