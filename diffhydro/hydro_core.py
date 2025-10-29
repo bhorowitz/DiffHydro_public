@@ -6,9 +6,113 @@ from diffhydro import NoBoundary, NoForcing
 import jax
 from jax import jit
 import jax.numpy as jnp
+
+#reorg into halo_helper sometime
+from jax.experimental import mesh_utils
+from jax.sharding import Mesh, NamedSharding, PartitionSpec as P
+from jax.experimental.pjit import pjit
+
 from .solver.integrator import INTEGRATOR_DICT
+from .utils.parallel import halo_helper
+
+from jax.experimental import mesh_utils
+#from jax.experimental import maps as maps
+from jax.experimental.pjit import pjit
+from jax.sharding import PartitionSpec as P  # keep P from jax.sharding
+import jax, jax.numpy as jnp
+
+from jax.experimental.shard_map import shard_map
+from jax.sharding import PartitionSpec as P
+
+from jax.experimental import multihost_utils
+from jax.experimental.shard_map import shard_map
 
 
+def roll_with_halo(self, array, shift, axis):
+    """
+    Halo-aware roll for distributed arrays using shard_map.
+    """
+    # Single device or not distributed on this axis - use regular roll
+    axis_idx = axis - 1  # axis 0 is variables, spatial axes start at 1
+    if self.pmesh_shape[axis_idx] == 1:
+        return jnp.roll(array, shift, axis=axis)
+
+    # For multi-step shifts, do them one at a time
+    # This is less efficient but handles arbitrary shifts
+    if abs(shift) > 1:
+        result = array
+        step = 1 if shift > 0 else -1
+        for _ in range(abs(shift)):
+            result = self.roll_with_halo(result, step, axis)
+        return result
+
+    axis_name = ('x', 'y', 'z')[axis_idx]
+    n_devices = self.pmesh_shape[axis_idx]
+
+    # Define the operation that will run on each shard
+    def _exchange_halos(local_array):
+        # Build permutation for communication
+        if shift == 1:
+            perm = [(i, (i + 1) % n_devices) for i in range(n_devices)]
+            # Get last slice to send forward
+            boundary = jax.lax.slice_in_dim(local_array, -1, None, axis=axis)
+            received = jax.lax.ppermute(boundary, axis_name, perm)
+            # Prepend received data
+            interior = jax.lax.slice_in_dim(local_array, 0, -1, axis=axis)
+            return jnp.concatenate([received, interior], axis=axis)
+        elif shift == -1:
+            perm = [(i, (i - 1) % n_devices) for i in range(n_devices)]
+            # Get first slice to send backward
+            boundary = jax.lax.slice_in_dim(local_array, 0, 1, axis=axis)
+            received = jax.lax.ppermute(boundary, axis_name, perm)
+            # Append received data
+            interior = jax.lax.slice_in_dim(local_array, 1, None, axis=axis)
+            return jnp.concatenate([interior, received], axis=axis)
+        else:
+            raise ValueError(f"Only shift=±1 supported in base case, got {shift}")
+
+    # Use shard_map to bind the axis names for ppermute
+    return shard_map(
+        _exchange_halos,
+        mesh=self.mesh,
+        in_specs=self.FIELD_XYZ,
+        out_specs=self.FIELD_XYZ,
+        check_rep=False
+    )(array)
+
+def halo_exchange_roll_old(array, shift, axis):
+    """
+    Replacement for jnp.roll that works across sharded arrays.
+    Uses proper halo exchange between devices.
+    """
+    # Get the sharding info
+    sharding = array.sharding
+    mesh = sharding.mesh
+    
+    # Use lax.ppermute for explicit device-to-device communication
+    # This handles the boundary exchanges correctly
+    def _roll_with_halo(x):
+        # Shift data with proper halo communication
+        return jax.lax.ppermute(
+            x, 
+            axis_name=('x', 'y', 'z')[axis-1],  # axis-1 because axis 0 is variables
+            perm=[(i, (i + shift) % mesh.shape[axis-1]) 
+                  for i in range(mesh.shape[axis-1])]
+        )
+    
+    # Apply shard_map to handle the exchange
+    return shard_map(
+        _roll_with_halo,
+        mesh=mesh,
+        in_specs=sharding.spec,
+        out_specs=sharding.spec
+    )(array)
+
+def _diff1d(Fh, axis):  # local first-order backward difference of halo-extended array
+    # Fh has pad=1 halo on both sides along `axis`; drop halos and difference
+    interior = jax.lax.slice_in_dim(Fh, 1, Fh.shape[axis]-1, axis=axis)
+    left     = jax.lax.slice_in_dim(Fh, 0, Fh.shape[axis]-2, axis=axis)
+    return interior - left
 
 @jax.tree_util.register_pytree_node_class
 class hydro:
@@ -23,7 +127,8 @@ class hydro:
                 forces = [NoForcing()], #gravity, etc.
                 maxjit=False,
                 use_mol=False,
-                 use_ctu=False,
+                use_ctu=False,
+                pmesh_shape= (1,1,1) ,
                 integrator="RK2"):
         #parameters that are held constant per run (i.e. probably don't want to take derivatives with respect to...)
    #     self.init_dt = init_dt # tiny starting timestep to smooth out anything too sharp
@@ -42,8 +147,56 @@ class hydro:
         self.use_mol = use_mol
         self.integrator = INTEGRATOR_DICT[integrator]  # callable
         self.use_ctu = use_ctu
+        self.pmesh_shape = pmesh_shape #parallelism
+        
+        devices = mesh_utils.create_device_mesh(self.pmesh_shape)
+        self.mesh =  Mesh(devices, ('x', 'y','z'))
+        self.FIELD_XYZ = P(None, 'x', 'y','z')
         print("using CTU?",use_ctu)
-    
+
+
+    def roll_with_halo(self, array, shift, axis):
+        """
+        Halo-aware roll for distributed arrays using shard_map.
+        """
+        # Single device or not distributed on this axis - use regular roll
+        axis_idx = axis - 1  # axis 0 is variables, spatial axes start at 1
+        if self.pmesh_shape[axis_idx] == 1:
+            return jnp.roll(array, shift, axis=axis)
+
+        axis_name = ('x', 'y', 'z')[axis_idx]
+        n_devices = self.pmesh_shape[axis_idx]
+
+        # Define the operation that will run on each shard
+        def _exchange_halos(local_array):
+            # Build permutation for communication
+            if shift == 1:
+                perm = [(i, (i + 1) % n_devices) for i in range(n_devices)]
+                # Get last slice to send forward
+                boundary = jax.lax.slice_in_dim(local_array, -1, None, axis=axis)
+                received = jax.lax.ppermute(boundary, axis_name, perm)
+                # Prepend received data
+                interior = jax.lax.slice_in_dim(local_array, 0, -1, axis=axis)
+                return jnp.concatenate([received, interior], axis=axis)
+            elif shift == -1:
+                perm = [(i, (i - 1) % n_devices) for i in range(n_devices)]
+                # Get first slice to send backward
+                boundary = jax.lax.slice_in_dim(local_array, 0, 1, axis=axis)
+                received = jax.lax.ppermute(boundary, axis_name, perm)
+                # Append received data
+                interior = jax.lax.slice_in_dim(local_array, 1, None, axis=axis)
+                return jnp.concatenate([interior, received], axis=axis)
+            else:
+                raise ValueError(f"Only shift=±1 supported, got {shift}")
+
+        # Use shard_map to bind the axis names for ppermute
+        return shard_map(
+            _exchange_halos,
+            mesh=self.mesh,
+            in_specs=self.FIELD_XYZ,
+            out_specs=self.FIELD_XYZ,
+            check_rep=False
+        )(array)
     def timestep(self,fields):
         dt = []
         for flux in self.fluxes:
@@ -65,24 +218,23 @@ class hydro:
         for force in self.forces:
             sol = force.force(i, sol, params, dt)  # each returns UPDATED fields
         return sol
-        
-    def split_solve_step(self,sol,dt,ax,params):
-        ##RK2 method
-        
-        fu1 = self.flux(sol,ax,params) 
-        #first order upwind
-        rhs_cons = (fu1 - jnp.roll(fu1, 1, axis=ax)) 
-        
-        u1 = sol - rhs_cons * dt / (2.0 * self.dx_o)
-        #second order step
 
-        fu = self.flux(sol,ax,params)  
-            
-        rhs_cons = (fu - jnp.roll(fu, 1, axis=ax))  #fu or fu1?
-        
+    def split_solve_step(self, sol, dt, ax, params):
+        """RK2 method, need to put in integrator choice at some point..."""
+
+        # First stage
+        fu1 = self.flux(sol, ax, params) 
+        rhs_cons = (fu1 - self.roll_with_halo(fu1, 1, ax))  # ✓ WITH HALO EXCHANGE
+
+        u1 = sol - rhs_cons * dt / (2.0 * self.dx_o)
+
+        # Second stage
+        fu = self.flux(u1, ax, params)  # Note: should this be u1 instead of sol?
+        rhs_cons = (fu - self.roll_with_halo(fu, 1, ax))    # ✓ WITH HALO EXCHANGE
+
         sol = sol - (rhs_cons) * dt / self.dx_o
         return sol
-    
+
     @jax.checkpoint
     def sweep_stack(self,state,dt,i):
         sol,params = state
@@ -97,11 +249,12 @@ class hydro:
         return sol
     
    # @jax.jit
-    def evolve(self,input_fields,params):
+    def evolve_old(self,input_fields,params):
         self.outputs=[]
         #main loop
-        state = (input_fields,params)
-
+      #  state = (input_fields,params)
+        sharding = NamedSharding(self.mesh, self.FIELD_XYZ)
+        state = (jax.device_put(input_fields, sharding), params)
         #need to rework the UI to get out snapshots from jitted function, hack for now...
         if self.maxjit:
             state  = jax.lax.fori_loop(0, self.n_super_step, self.hydrostep_adapt, state)
@@ -113,7 +266,7 @@ class hydro:
                         self.outputs.append(state)
         return state
         
-    @partial(jit, static_argnums=0)
+ #   @partial(jit, static_argnums=0)
     def hydrostep_adapt(self,i,state):
         fields,params = state
         ttt = self.timestep(fields)
@@ -122,7 +275,7 @@ class hydro:
         return self._hydrostep(i,state,dt)
     
 
-    @jax.jit
+   # @jax.jit
     def _hydrostep(self, i, state, dt):
 
         #split forcing outside of core hydro loop
@@ -143,13 +296,55 @@ class hydro:
       #  fields = fields.at[-1].set(jnp.abs(fields[-1]))
 
         return (fields, params)
+    
+    
+    # Wrap the *step* in pjit so named axes exist when rhs_unsplit runs.
+    def build_pjit_step(self):
+        def _step(fields, params, i):
+            # hydrostep_adapt expects (i, state) where state=(fields, params)
+            fields_out, params_out = self.hydrostep_adapt(i, (fields, params))
+            return fields_out, params_out
+
+        return pjit(
+            _step,
+            in_shardings=(self.FIELD_XYZ, None, None),  # (fields, params, i)
+            out_shardings=(self.FIELD_XYZ, None),       # (fields_out, params_out)
+        )
+
+    
+
+    def evolve(self, input_fields, params):
+        # 1) Create sharding spec for fields
+        sh_arr = NamedSharding(self.mesh, self.FIELD_XYZ)
+        fields = jax.device_put(input_fields, sh_arr)
+
+        # 2) Define and wrap the step function with pjit
+        def _one_step(fields, params, i):
+            fields_out, params_out = self.hydrostep_adapt(i, (fields, params))
+            return fields_out, params_out
+
+        pjit_step = pjit(
+            _one_step,
+            in_shardings=(sh_arr, None, None),
+            out_shardings=(sh_arr, None),
+        )
+
+        # 3) Run the loop (no mesh context needed!)
+        self.outputs = []
+        for i in range(self.n_super_step):
+            fields, params = pjit_step(fields, params, i)
+            if self.snapshots and i % self.snapshots == 0:
+                self.outputs.append((fields, params))
+
+        return fields, params
+    
     def rhs_unsplit(self, sol, params):
         rhs = jnp.zeros_like(sol)
         # assume first axis is variable index; spatial axes start at 1
         for ax in range(1, sol.ndim):
             sol_b = self.boundary.impose(sol, ax)            
             fu = self.flux(sol_b, ax, params)                
-            rhs = rhs - (fu - jnp.roll(fu, 1, axis=ax)) / self.dx_o
+            rhs = rhs - (fu - self.roll_with_halo(fu, 1, ax)) / self.dx_o
         return rhs
 
     def mol_solve_step(self, sol, dt, params):
@@ -224,13 +419,17 @@ class hydro:
         Fz_h = riemann(WLz_h, WRz_h, slice8(ULz_h), slice8(URz_h), 2)
     
         # CTU transverse corrections (each face corrected by fluxes from other 2 dirs)
-        def ctu_correct(WL_h, WR_h, F_a, F_b, ax_a, ax_b):
-            dFa_da = (jnp.roll(F_a, -1, axis=ax_a+1) - jnp.roll(F_a, 1, axis=ax_a+1)) * (0.5/dx)
-            dFb_db = (jnp.roll(F_b, -1, axis=ax_b+1) - jnp.roll(F_b, 1, axis=ax_b+1)) * (0.5/dx)
+        def ctu_correct(self, WL_h, WR_h, F_a, F_b, ax_a, ax_b):
+            # Need to map axis indices correctly
+            # ax_a, ax_b are 0,1,2 but roll_with_halo expects 1,2,3
+            dFa_da = (self.roll_with_halo(F_a, -1, ax_a+1) - 
+                      self.roll_with_halo(F_a, 1, ax_a+1)) * (0.5/dx)
+            dFb_db = (self.roll_with_halo(F_b, -1, ax_b+1) - 
+                      self.roll_with_halo(F_b, 1, ax_b+1)) * (0.5/dx)
             WL_ctu = WL_h - 0.5 * dt * (dFa_da + dFb_db)
             WR_ctu = WR_h - 0.5 * dt * (dFa_da + dFb_db)
             return WL_ctu, WR_ctu
-            
+        
         WLx_ctu, WRx_ctu = ctu_correct(WLx_h, WRx_h, Fy_h, Fz_h, 1, 2)
         WLy_ctu, WRy_ctu = ctu_correct(WLy_h, WRy_h, Fz_h, Fx_h, 2, 0)
         WLz_ctu, WRz_ctu = ctu_correct(WLz_h, WRz_h, Fx_h, Fy_h, 0, 1)
@@ -261,9 +460,9 @@ class hydro:
         
         # Flux divergence
         rhs = jnp.zeros_like(sol)
-        rhs = rhs - (Fx - jnp.roll(Fx, 1, axis=1)) / dx
-        rhs = rhs - (Fy - jnp.roll(Fy, 1, axis=2)) / dx
-        rhs = rhs - (Fz - jnp.roll(Fz, 1, axis=3)) / dx
+        rhs = rhs - (Fx - self.roll_with_halo(Fx, 1, 1)) / dx  # ✓ axis=1 for x
+        rhs = rhs - (Fy - self.roll_with_halo(Fy, 1, 2)) / dx  # ✓ axis=2 for y
+        rhs = rhs - (Fz - self.roll_with_halo(Fz, 1, 3)) / dx  # ✓ axis=3 for z
     
         # --- Constrained Transport update ---
        # --- Constrained Transport update (upwinded EMFs, Gardiner–Stone style) ---
@@ -283,12 +482,12 @@ class hydro:
             # 2. Corner-averaged, upwinded EMFs (following GS05 eq. 59)
             # We assume your data layout (nx, ny, nz) with periodic BCs.
             
-            def avg4(A):
-                # Average over four neighboring faces in the xy-plane (used for Ez)
-                return 0.25 * (A + jnp.roll(A, -1, axis=1)
-                                 + jnp.roll(A, -1, axis=2)
-                                 + jnp.roll(jnp.roll(A, -1, axis=1), -1, axis=2))
-            
+        def avg4(A, ax1, ax2):
+        # Average over four neighboring faces
+            return 0.25 * (A + self.roll_with_halo(A, -1, ax1)
+                         + self.roll_with_halo(A, -1, ax2)
+                         + self.roll_with_halo(self.roll_with_halo(A, -1, ax1), -1, ax2))
+
             # Example for E_z corners; others are cyclic permutations
             Ez_corner = avg4(Ez_face)
             Ex_corner = avg4(Ex_face)
@@ -299,12 +498,15 @@ class hydro:
             # Ez_corner = Ez_corner - 0.25 * dt/dx * (dFy_dx - dFx_dy)
             
             # 3. Compute curl(E) on the uniform grid
-            dBx_dt = -(jnp.roll(Ez_corner, -1, axis=1) - Ez_corner) / dx \
-                     + (jnp.roll(Ey_corner, -1, axis=2) - Ey_corner) / dx
-            dBy_dt = -(jnp.roll(Ex_corner, -1, axis=2) - Ex_corner) / dx \
-                     + (jnp.roll(Ez_corner, -1, axis=0) - Ez_corner) / dx
-            dBz_dt = -(jnp.roll(Ey_corner, -1, axis=0) - Ey_corner) / dx \
-                     + (jnp.roll(Ex_corner, -1, axis=1) - Ex_corner) / dx
+            dBx_dt = -(self.roll_with_halo(Ez_corner, -1, 2) - Ez_corner) / dx \
+                 + (self.roll_with_halo(Ey_corner, -1, 3) - Ey_corner) / dx
+
+            
+            dBy_dt = -(self.roll_with_halo(Ez_corner, -1, 2) - Ex_corner) / dx \
+                 + (self.roll_with_halo(Ey_corner, -1, 0) - Ez_corner) / dx
+            dBz_dt = -(self.roll_with_halo(Ez_corner, -1, 0) - Ey_corner) / dx \
+                 + (self.roll_with_halo(Ey_corner, -1, 1) - Ex_corner) / dx
+            
             
             # 4. Overwrite magnetic rows in RHS
             rhs = rhs.at[4].set(dBx_dt)
@@ -333,5 +535,5 @@ class hydro:
                     "snapshots":self.snapshots,
                    "splitting_schemes":self.splitting_schemes,
                     "fluxes":self.fluxes,"forces":self.forces,"maxjit":self.maxjit,
-                "use_mol":self.use_mol,"use_ctu":self.use_ctu}  # static values
+                "use_mol":self.use_mol,"use_ctu":self.use_ctu, "pmesh_shape":self.pmesh_shape}  # static values
         return (children, aux_data)
