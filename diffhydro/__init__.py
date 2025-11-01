@@ -18,6 +18,7 @@ from .hydro_core import *
 from .fluxes import *
 from .equationmanager import *
 from .equationmanager_mhd import *
+from .hydro_core_CT import hydro as hydro_ct
 
 __all__ = [
     "__version__"

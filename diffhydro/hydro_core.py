@@ -95,8 +95,8 @@ class hydro:
                 splitting_schemes=[[3,1,2,2,1,3],[1,2,3,3,2,1],[2,3,1,1,3,2]], #cyclic permutations
                 fluxes = None, #convection, conduction
                 forces = [NoForcing()], #gravity, etc.
-                use_mol=False,
-                use_ctu=False,
+                use_mol=True,
+                use_ct=False,
                 pmesh_shape= (1,1,1) ,
                 integrator="RK2",
                 snapshot_every: int | None = None,
@@ -117,7 +117,10 @@ class hydro:
         self.timescale = jnp.zeros(self.n_super_step)
         self.use_mol = use_mol
         self.integrator = INTEGRATOR_DICT[integrator]  # callable
-        self.use_ctu = use_ctu
+        self._integrator_name = integrator
+        self.use_ct = use_ct
+        self.iBx, self.iBy, self.iBz = 4, 5, 6  # if Euler run, these rows may not exist
+
         self.pmesh_shape = pmesh_shape #parallelism
         
         devices = mesh_utils.create_device_mesh(self.pmesh_shape)
@@ -334,7 +337,7 @@ class hydro:
         sharding = NamedSharding(self.mesh, self.FIELD_XYZ)
         state = (jax.device_put(input_fields, sharding), params)
         #need to rework the UI to get out snapshots from jitted function, hack for now...
-        if self.maxjit:
+        if True:
             state  = jax.lax.fori_loop(0, self.n_super_step, self.hydrostep_adapt, state)
         else:
             for i in range(0,self.n_super_step):
@@ -358,22 +361,21 @@ class hydro:
 
    # @jax.jit
     def _hydrostep(self, i, state, dt):
-
-        #split forcing outside of core hydro loop
-        
+        # split forcing outside of core hydro loop
         fields, params = state
+        fields = self.forcing(i, fields, params, dt/2)
 
-        fields = self.forcing(i, fields, params, dt/2)          
+        if self.use_mol and self.use_ct:
+            jax.debug.print("use ct")
+            fields = self.mol_solve_step_ct(fields, dt, params)  # <<< unsplit (MOL + CT-on-state)
+        elif self.use_mol:
+            fields = self.mol_solve_step(fields, dt, params)  # <<< unsplit (MOL + CT-on-state)
 
-        if self.use_mol:
-            fields = self.mol_solve_step(fields, dt, params)  # <<< unsplit
         else:
-            fields = self.sweep_stack(state, dt, i)           #
-            
-        fields = self.forcing(i, fields, params, dt/2) 
+            fields = self.sweep_stack(state, dt, i)
 
+        fields = self.forcing(i, fields, params, dt/2)
         return (fields, params)
-    
     
     # Wrap the *step* in pjit so named axes exist when rhs_unsplit runs.
     def build_pjit_step(self):
@@ -449,184 +451,157 @@ class hydro:
             # STEP 4: Compute divergence with proper halo exchange
             rhs = rhs - (fu - self.roll_with_halo(fu, 1, ax)) / self.dx_o
 
+        #magnetic stuff, ignored if no magnetic fields
+        if getattr(self, "ct", False):
+            if sol.shape[0] > self.iBx:
+                rhs = rhs.at[self.iBx].set(0.0)
+            if sol.shape[0] > self.iBy:
+                rhs = rhs.at[self.iBy].set(0.0)
+            if sol.shape[0] > self.iBz:
+                rhs = rhs.at[self.iBz].set(0.0)
         return rhs
 
     def mol_solve_step(self, sol, dt, params):
-        if getattr(self, "use_ctu", False):
-            # pass dt into rhs via a closure
-            return self.integrator(lambda u, p: self.rhs_ctu(u, p, dt), sol, dt, params)
+        #normal solve without MHD CT
+        return self.integrator(self.rhs_unsplit, sol, dt, params)  
+    
+        # ---------------- MOL + CT-on-updated-state ----------------
+
+    def mol_solve_step_ct(self, sol, dt, params):
+        """
+        MOL with CT applied on the UPDATED state, using this step's fluxes.
+        For SSPRK3 / RK2 integrators we inline the stages to insert CT after each stage.
+        For other integrators we apply CT once after the full step (fallback).
+        
+        Hopefully I figure out a nicer way to do this, but easy to code up...
+        """
+        name = self._integrator_name.upper()
+
+        if name in ("SSPRK3", "RK3", "SSP3"):
+            # --- SSPRK(3,3) ---
+            # stage 1
+            k1 = self.rhs_unsplit(sol, params); u1 = sol + dt * k1
+            u1 = self._apply_ct_on_state(u1, params, dt)
+
+            # stage 2
+            k2 = self.rhs_unsplit(u1, params); u2 = 0.75 * sol + 0.25 * (u1 + dt * k2)
+            # Effective substep on convex combo -> 0.25*dt contributes to new part; use 0.25*dt for CT
+            u2 = self._apply_ct_on_state(u2, params, 0.25 * dt)
+
+            # stage 3
+            k3 = self.rhs_unsplit(u2, params); u3 = (1.0/3.0) * sol + (2.0/3.0) * (u2 + dt * k3)
+            # Effective increment is (2/3)*dt on the last convex part; apply CT with that weight
+            u3 = self._apply_ct_on_state(u3, params, (2.0/3.0) * dt)
+            return u3
+
+        elif name in ("RK2", "HEUN", "MIDPOINT"):
+            # --- RK2 (Heun) ---
+            k1 = self.rhs_unsplit(sol, params); u1 = sol + dt * k1
+            u1 = self._apply_ct_on_state(u1, params, dt)
+
+            k2 = self.rhs_unsplit(u1, params)
+            u2_pred = sol + 0.5 * dt * (k1 + k2)
+            # Apply CT for the second half contribution (0.5*dt)
+            u2 = self._apply_ct_on_state(u2_pred, params, 0.5 * dt)
+            return u2
+
+        elif name in ("RK4",):
+            # Fallback: apply CT once after a classic RK4 step using provided integrator
+            u = self.integrator(self.rhs_unsplit, sol, dt, params)
+            u = self._apply_ct_on_state(u, params, dt)
+            return u
+
         else:
-            return self.integrator(self.rhs_unsplit, sol, dt, params)  # existing path
+            # Unknown integrator: apply CT once
+            u = self.integrator(self.rhs_unsplit, sol, dt, params)
+            u = self._apply_ct_on_state(u, params, dt)
+            return u
 
-    def rhs_ctu(self, sol, params, dt):
-        print("CTU")
-        #THE MONSTER! Need to figure out a better org for it...
+    # ---------------- CT on updated state ----------------
+
+    def _apply_ct_on_state(self, sol, params, dt):
         """
-        3D CTU(+CT) RHS for MHD (and GLM-MHD).
-        Reuses:
-          - recon.reconstruct_xi()
-          - solver.solve_riemann_problem_xi()
-          - eq.get_fluxes_xi()
+        Constrained Transport applied to the *updated* state (MOL path).
+        - Build edge-centered EMFs from face fluxes on the updated state.
+        - Take curl(-E) to get face-centered dB/dt.
+        - Average faces to cell centers and add to B components in `sol`.
+        Works in 2D and 3D (if the state has 3 spatial dims).
+        
+        not properlly parallelized for multi-gpu, probably will work in forward at least
         """
-        eq     = self.fluxes[0].eq_manage
-        recon  = self.fluxes[0].recon
-        solver = self.fluxes[0].solver
-        dx     = self.dx_o
-        dt_dx  = dt / dx
-    
-        Uc = sol
-        for ax in range(1, Uc.ndim):
-            Uc = self.boundary.impose(Uc, ax)
-        Wc = eq.get_primitives_from_conservatives(Uc)
-    
-        def phys_flux(W, U, axis0):
-            return eq.get_fluxes_xi(W, U, axis0)
-    
-        def riemann(WL, WR, UL, UR, axis0):
-            F, _, _ = solver.solve_riemann_problem_xi(WL, WR, UL, UR, axis0)
-            return F
-    
-        def reconstruct_faces(W, axis, j):
-            return recon.reconstruct_xi(W, axis=axis, j=j)
-    
-        glm_on = getattr(eq, "use_glm", False)
-        def slice8(U): return U[:8] if (glm_on and U.shape[0] == 9) else U
-    
-        # Reconstruct along each axis (x=1,y=2,z=3)
-        WLx, WRx = reconstruct_faces(Wc, 1, 0), reconstruct_faces(Wc, 1, 1)
-        WLy, WRy = reconstruct_faces(Wc, 2, 0), reconstruct_faces(Wc, 2, 1)
-        WLz, WRz = reconstruct_faces(Wc, 3, 0), reconstruct_faces(Wc, 3, 1)
-    
-        ULx, URx = eq.get_conservatives_from_primitives(WLx), eq.get_conservatives_from_primitives(WRx)
-        ULy, URy = eq.get_conservatives_from_primitives(WLy), eq.get_conservatives_from_primitives(WRy)
-        ULz, URz = eq.get_conservatives_from_primitives(WLz), eq.get_conservatives_from_primitives(WRz)
-    
-        # MUSCL–Hancock half-time prediction (normal only)
-        def half_time_predict(WL, WR, UL, UR, axis0):
-            F_L = phys_flux(WL, UL, axis0)
-            F_R = phys_flux(WR, UR, axis0)
-            W_Lh = WL - 0.5 * dt_dx * (F_R - F_L)
-            W_Rh = WR - 0.5 * dt_dx * (F_R - F_L)
-            return W_Lh, W_Rh
-    
-        WLx_h, WRx_h = half_time_predict(WLx, WRx, ULx, URx, 0)
-        WLy_h, WRy_h = half_time_predict(WLy, WRy, ULy, URy, 1)
-        WLz_h, WRz_h = half_time_predict(WLz, WRz, ULz, URz, 2)
-    
-        # First-pass Riemann on half-time face states
-        ULx_h, URx_h = eq.get_conservatives_from_primitives(WLx_h), eq.get_conservatives_from_primitives(WRx_h)
-        ULy_h, URy_h = eq.get_conservatives_from_primitives(WLy_h), eq.get_conservatives_from_primitives(WRy_h)
-        ULz_h, URz_h = eq.get_conservatives_from_primitives(WLz_h), eq.get_conservatives_from_primitives(WRz_h)
-    
-        Fx_h = riemann(WLx_h, WRx_h, slice8(ULx_h), slice8(URx_h), 0)
-        Fy_h = riemann(WLy_h, WRy_h, slice8(ULy_h), slice8(URy_h), 1)
-        Fz_h = riemann(WLz_h, WRz_h, slice8(ULz_h), slice8(URz_h), 2)
-    
-        # CTU transverse corrections (each face corrected by fluxes from other 2 dirs)
-        def ctu_correct(self, WL_h, WR_h, F_a, F_b, ax_a, ax_b):
-            # Need to map axis indices correctly
-            # ax_a, ax_b are 0,1,2 but roll_with_halo expects 1,2,3
-            dFa_da = (self.roll_with_halo(F_a, -1, ax_a+1) - 
-                      self.roll_with_halo(F_a, 1, ax_a+1)) * (0.5/dx)
-            dFb_db = (self.roll_with_halo(F_b, -1, ax_b+1) - 
-                      self.roll_with_halo(F_b, 1, ax_b+1)) * (0.5/dx)
-            WL_ctu = WL_h - 0.5 * dt * (dFa_da + dFb_db)
-            WR_ctu = WR_h - 0.5 * dt * (dFa_da + dFb_db)
-            return WL_ctu, WR_ctu
-        
-        WLx_ctu, WRx_ctu = ctu_correct(WLx_h, WRx_h, Fy_h, Fz_h, 1, 2)
-        WLy_ctu, WRy_ctu = ctu_correct(WLy_h, WRy_h, Fz_h, Fx_h, 2, 0)
-        WLz_ctu, WRz_ctu = ctu_correct(WLz_h, WRz_h, Fx_h, Fy_h, 0, 1)
-    
-        # Final Riemann on CTU-corrected states
-        ULx_ctu, URx_ctu = eq.get_conservatives_from_primitives(WLx_ctu), eq.get_conservatives_from_primitives(WRx_ctu)
-        ULy_ctu, URy_ctu = eq.get_conservatives_from_primitives(WLy_ctu), eq.get_conservatives_from_primitives(WRy_ctu)
-        ULz_ctu, URz_ctu = eq.get_conservatives_from_primitives(WLz_ctu), eq.get_conservatives_from_primitives(WRz_ctu)
-    
-        Fx = riemann(WLx_ctu, WRx_ctu, slice8(ULx_ctu), slice8(URx_ctu), 0)
-        Fy = riemann(WLy_ctu, WRy_ctu, slice8(ULy_ctu), slice8(URy_ctu), 1)
-        Fz = riemann(WLz_ctu, WRz_ctu, slice8(ULz_ctu), slice8(URz_ctu), 2)
-    
-        # Optional GLM coupling (same pattern for each axis)
-        if glm_on:
-            def glm_modify(WL, WR, F, axis0):
-                Bn_L = (WL[4], WL[5], WL[6])[axis0]
-                Bn_R = (WR[4], WR[5], WR[6])[axis0]
-                psi_L, psi_R = WL[-1], WR[-1]
-                c_h = getattr(eq, "glm_ch", 1.0)
-                F_Bn  = 0.5*(psi_L+psi_R) - 0.5*c_h*(Bn_R - Bn_L)
-                F_psi = 0.5*(c_h**2)*(Bn_L+Bn_R) - 0.5*c_h*(psi_R - psi_L)
-                F = F.at[(4,5,6)[axis0]].set(F_Bn)
-                return jnp.vstack([F, F_psi])
-            Fx = glm_modify(WLx_ctu, WRx_ctu, Fx, 0)
-            Fy = glm_modify(WLy_ctu, WRy_ctu, Fy, 1)
-            Fz = glm_modify(WLz_ctu, WRz_ctu, Fz, 2)
-        
-        # Flux divergence
-        rhs = jnp.zeros_like(sol)
-        rhs = rhs - (Fx - self.roll_with_halo(Fx, 1, 1)) / dx  # ✓ axis=1 for x
-        rhs = rhs - (Fy - self.roll_with_halo(Fy, 1, 2)) / dx  # ✓ axis=2 for y
-        rhs = rhs - (Fz - self.roll_with_halo(Fz, 1, 3)) / dx  # ✓ axis=3 for z
-    
-        # --- Constrained Transport update ---
-       # --- Constrained Transport update (upwinded EMFs, Gardiner–Stone style) ---
-        if False:
-            #bugged...
-            # All fluxes Fx,Fy,Fz have shape (n_cons, nx, ny, nz)
-            # Each contains magnetic flux components:
-            #   Fx[5]=F(By)= -Ez,  Fx[6]=F(Bz)= +Ey
-            #   Fy[4]=F(Bx)= +Ez,  Fy[6]=F(Bz)= -Ex
-            #   Fz[4]=F(Bx)= -Ey,  Fz[5]=F(By)= +Ex
-            
-            # 1. Derive face-centered electric fields from flux components
-            Ex_face = 0.5 * ((-Fy[6]) + Fz[5])      # E_x ≈ ½(−Fy(Bz) + Fz(By))
-            Ey_face = 0.5 * ((Fx[6])  - Fz[4])      # E_y ≈ ½(+Fx(Bz) − Fz(Bx))
-            Ez_face = 0.5 * ((-Fx[5]) + Fy[4])      # E_z ≈ ½(−Fx(By) + Fy(Bx))
-            
-            # 2. Corner-averaged, upwinded EMFs (following GS05 eq. 59)
-            # We assume your data layout (nx, ny, nz) with periodic BCs.
-            
-        def avg4(A, ax1, ax2):
-        # Average over four neighboring faces
-            return 0.25 * (A + self.roll_with_halo(A, -1, ax1)
-                         + self.roll_with_halo(A, -1, ax2)
-                         + self.roll_with_halo(self.roll_with_halo(A, -1, ax1), -1, ax2))
+        # If no magnetic rows_present, nothing to do
+        if sol.shape[0] <= self.iBy:
+            return sol
 
-            # Example for E_z corners; others are cyclic permutations
-            Ez_corner = avg4(Ez_face)
-            Ex_corner = avg4(Ex_face)
-            Ey_corner = avg4(Ey_face)
-            
-            # Optional upwind bias using local velocities (normal component sign)
-            # Requires face-centered velocities from CTU states; omit for now
-            # Ez_corner = Ez_corner - 0.25 * dt/dx * (dFy_dx - dFx_dy)
-            
-            # 3. Compute curl(E) on the uniform grid
-            dBx_dt = -(self.roll_with_halo(Ez_corner, -1, 2) - Ez_corner) / dx \
-                 + (self.roll_with_halo(Ey_corner, -1, 3) - Ey_corner) / dx
+        # 1) Per-axis fluxes on the UPDATED state
+        Fx = self.flux(sol, 1, params)  # (vars, x, y[, z])
+        Fy = self.flux(sol, 2, params)
+        Fz = self.flux(sol, 3, params) if sol.ndim >= 4 else None
 
-            
-            dBy_dt = -(self.roll_with_halo(Ez_corner, -1, 2) - Ex_corner) / dx \
-                 + (self.roll_with_halo(Ey_corner, -1, 0) - Ez_corner) / dx
-            dBz_dt = -(self.roll_with_halo(Ez_corner, -1, 0) - Ey_corner) / dx \
-                 + (self.roll_with_halo(Ey_corner, -1, 1) - Ex_corner) / dx
-            
-            
-            # 4. Overwrite magnetic rows in RHS
-            rhs = rhs.at[4].set(dBx_dt)
-            rhs = rhs.at[5].set(dBy_dt)
-            rhs = rhs.at[6].set(dBz_dt)
-        if True:
-            #debug without CT, use PCCT or something like that instead for the CT
-            rhsBx, rhsBy, rhsBz = rhs[4:7]
-            rhs_numerical = -(Fx[4:7] - jnp.roll(Fx[4:7], 1, axis=1))/dx \
-                            -(Fy[4:7] - jnp.roll(Fy[4:7], 1, axis=2))/dx \
-                            -(Fz[4:7] - jnp.roll(Fz[4:7], 1, axis=3))/dx
-            rhs = rhs.at[4:7].set(rhs_numerical)
-        
-        return rhs
+        # 2) EMF mapping from magnetic flux rows (face-centered)
+        #   Fx[By] = -E_z,  Fx[Bz] = +E_y
+        #   Fy[Bx] = +E_z,  Fy[Bz] = -E_x
+        #   Fz[Bx] = -E_y,  Fz[By] = +E_x
+        Ez_face = 0.5 * (-Fx[self.iBy] + Fy[self.iBx])
 
-        
+        if sol.ndim == 3:
+            # ---------- 2D (vars, x, y) ----------
+            # corners (i+1/2, j+1/2) from faces: average over x(0) and y(1)
+            Ez_corner = 0.25 * (
+                Ez_face
+                + jnp.roll(Ez_face, -1, axis=0)
+                + jnp.roll(Ez_face, -1, axis=1)
+                + jnp.roll(jnp.roll(Ez_face, -1, axis=0), -1, axis=1)
+            )
+
+            # curl(-E_z k̂):
+            # dBx/dt on x-faces =  ∂(-Ez)/∂y  ;  dBy/dt on y-faces = -∂(-Ez)/∂x
+            dbx_face = ( -Ez_corner + jnp.roll(-Ez_corner, 1, axis=1) ) / self.dx_o   # derivative in y
+            dby_face = (  Ez_corner - jnp.roll( Ez_corner, 1, axis=0) ) / self.dx_o   # derivative in x
+
+            # face → cell-center averages along the normal axis
+            dBx = 0.5 * (dbx_face + jnp.roll(dbx_face, 1, axis=0))  # average along x
+            dBy = 0.5 * (dby_face + jnp.roll(dby_face, 1, axis=1))  # average along y
+
+            sol = sol.at[self.iBx].add(dt * dBx)
+            sol = sol.at[self.iBy].add(dt * dBy)
+            return sol
+
+        # ---------- 3D (vars, x, y, z) ----------
+        # Additional EMFs from other flux rows
+        Ex_face = 0.5 * ((-Fy[self.iBz]) + Fz[self.iBy])
+        Ey_face = 0.5 * (( Fx[self.iBz]) - Fz[self.iBx])
+
+        def avg4(A, ax_a, ax_b):
+            """Average A with neighbors shifted by -1 along (ax_a, ax_b) in A's own axes."""
+            A1 = jnp.roll(A, -1, axis=ax_a)
+            A2 = jnp.roll(A, -1, axis=ax_b)
+            A3 = jnp.roll(A1, -1, axis=ax_b)
+            return 0.25 * (A + A1 + A2 + A3)
+
+        # After slicing var, EMFs are (x,y,z) with axes (0,1,2)
+        Ez_corner = avg4(Ez_face, 0, 1)  # x–y corners
+        Ex_corner = avg4(Ex_face, 1, 2)  # y–z corners
+        Ey_corner = avg4(Ey_face, 0, 2)  # x–z corners
+
+        # dB/dt = -curl(E) using corner EMFs
+        dBx_face = (-(Ez_corner - jnp.roll(Ez_corner, 1, axis=1)) / self.dx_o   # -∂Ez/∂y
+                    + ( Ey_corner - jnp.roll( Ey_corner, 1, axis=2)) / self.dx_o)  # +∂Ey/∂z
+        dBy_face = (-( Ex_corner - jnp.roll( Ex_corner, 1, axis=2)) / self.dx_o   # -∂Ex/∂z
+                    + ( Ez_corner - jnp.roll(Ez_corner, 1, axis=0)) / self.dx_o)  # +∂Ez/∂x
+        dBz_face = (-( Ey_corner - jnp.roll( Ey_corner, 1, axis=0)) / self.dx_o   # -∂Ey/∂x
+                    + ( Ex_corner - jnp.roll( Ex_corner, 1, axis=1)) / self.dx_o)  # +∂Ex/∂y
+
+        # face → cell-center averages along normal axes
+        dBx = 0.5 * (dBx_face + jnp.roll(dBx_face, 1, axis=0))  # along x
+        dBy = 0.5 * (dBy_face + jnp.roll(dBy_face, 1, axis=1))  # along y
+        dBz = 0.5 * (dBz_face + jnp.roll(dBz_face, 1, axis=2))  # along z
+
+        sol = sol.at[self.iBx].add(dt * dBx)
+        sol = sol.at[self.iBy].add(dt * dBy)
+        sol = sol.at[self.iBz].add(dt * dBz)
+        return sol
+
     @classmethod
     def tree_unflatten(cls, aux_data, children):
         return cls(*children, **aux_data)
@@ -638,6 +613,6 @@ class hydro:
                     "boundary":self.boundary,
                     "snapshots":self.snapshots,
                    "splitting_schemes":self.splitting_schemes,
-                    "fluxes":self.fluxes,"forces":self.forces,"maxjit":self.maxjit,
-                "use_mol":self.use_mol,"use_ctu":self.use_ctu, "pmesh_shape":self.pmesh_shape}  # static values
+                    "fluxes":self.fluxes,"forces":self.forces,
+                "use_mol":self.use_mol,"use_ct":self.use_ct, "pmesh_shape":self.pmesh_shape}  # static values
         return (children, aux_data)
