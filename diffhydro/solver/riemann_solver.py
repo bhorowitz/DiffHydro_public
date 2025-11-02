@@ -287,7 +287,240 @@ class HLL_MHD(RiemannSolver):
 
 
 class HLLD_MHD(RiemannSolver):
+    """HLLD Riemann Solver for ideal MHD (Miyoshi & Kusano, 2005)
+
+    - Careful algebra for star and double-star states
+    - Symmetric/robust total-pressure formula
+    - Stable handling when Bn ~ 0 (HLL fallback)
+    - Uses jnp.select (ordered conditions) to avoid jnp.where chaining pitfalls
+    """
+
+    def __init__(self, equation_manager, signal_speed=None, wft=1.0):
+        self.equation_type = "SINGLE-PHASE"
+        self.equation_manager = equation_manager
+        self.signal_speed = signal_speed
+        self.wft = wft
+        self.eps = getattr(equation_manager, "eps", 1e-12)
+        self.gamma = getattr(equation_manager, "gamma", 5.0/3.0)
+        # Common indices
+        self.mass_ids = getattr(equation_manager, "mass_ids", 0)
+        self.energy_ids = getattr(equation_manager, "energy_ids", 4)  
+    # ---------------------- helpers ---------------------- #
+    @staticmethod
+    def _axis_unpack(prims, axis, vel_ids, mag_ids):
+        """Return (rho, p, vn, vt1, vt2, Bn, Bt1, Bt2, (B1,B2,B3)).
+        Assumes prims layout consistent with equation_manager.  """
+        B1_i, B2_i, B3_i = mag_ids
+        u_i, v_i, w_i = vel_ids
+        rho = prims[0]  # assuming mass density first in primitives
+        p = prims[4]    # in your code, primitives[energy_i] stores gas pressure
+
+        B1, B2, B3 = prims[B1_i], prims[B2_i], prims[B3_i]
+        if axis == 0:
+            vn, vt1, vt2 = prims[u_i], prims[v_i], prims[w_i]
+            Bn, Bt1, Bt2 = B1, B2, B3
+        elif axis == 1:
+            vn, vt1, vt2 = prims[v_i], prims[w_i], prims[u_i]
+            Bn, Bt1, Bt2 = B2, B3, B1
+        else:
+            vn, vt1, vt2 = prims[w_i], prims[u_i], prims[v_i]
+            Bn, Bt1, Bt2 = B3, B1, B2
+        return rho, p, vn, vt1, vt2, Bn, Bt1, Bt2, (B1, B2, B3)
+
+    @staticmethod
+    def _build_state(rho, vn, vt1, vt2, Bn, Bt1, Bt2, ptot, axis, gamma, eps):
+        """Build conservative state U = [rho, rho*u, rho*v, rho*w, B1, B2, B3, E]."""
+        if axis == 0:
+            u, v, w = vn, vt1, vt2
+            B1, B2, B3 = Bn, Bt1, Bt2
+        elif axis == 1:
+            v, w, u = vn, vt1, vt2
+            B2, B3, B1 = Bn, Bt1, Bt2
+        else:
+            w, u, v = vn, vt1, vt2
+            B3, B1, B2 = Bn, Bt1, Bt2
+
+        ke = 0.5 * rho * (u*u + v*v + w*w)
+        me = 0.5 * (B1*B1 + B2*B2 + B3*B3)
+        p_gas = jnp.maximum(ptot - me, eps)
+        e_int = p_gas / (gamma - 1.0)
+        E = ke + me + e_int
+        return jnp.stack([rho, rho*u, rho*v, rho*w, B1, B2, B3, E])
+
+    # ---------------- main solver (single-face) ---------------- #
+    def _solve_riemann_problem_xi_single_phase(self,
+                                               primitives_L,
+                                               primitives_R,
+                                               conservatives_L,
+                                               conservatives_R,
+                                               axis,
+                                               **kwargs) -> Tuple[jnp.ndarray, None, None]:
+        # indices / params
+        u_i, v_i, w_i = self.equation_manager.vel_ids
+        b1_i, b2_i, b3_i = self.equation_manager.mag_ids
+        rho_i = self.mass_ids
+        p_i = self.energy_ids  # gas pressure index in primitives
+
+        # Extract primitive components (per-axis oriented)
+        rhoL = jnp.maximum(primitives_L[rho_i], self.eps)
+        rhoR = jnp.maximum(primitives_R[rho_i], self.eps)
+        pL   = jnp.maximum(primitives_L[p_i], self.eps)
+        pR   = jnp.maximum(primitives_R[p_i], self.eps)
+
+        (rhoL_, pL_, vnL, vt1L, vt2L, BnL, Bt1L, Bt2L, BvecL) = self._axis_unpack(
+            primitives_L, axis, (u_i, v_i, w_i), (b1_i, b2_i, b3_i))
+        (rhoR_, pR_, vnR, vt1R, vt2R, BnR, Bt1R, Bt2R, BvecR) = self._axis_unpack(
+            primitives_R, axis, (u_i, v_i, w_i), (b1_i, b2_i, b3_i))
+        # consistency guards
+        rhoL = jnp.maximum(rhoL, self.eps)
+        rhoR = jnp.maximum(rhoR, self.eps)
+        pL = jnp.maximum(pL, self.eps)
+        pR = jnp.maximum(pR, self.eps)
+
+        # total (gas + magnetic) pressure
+        B2L = BvecL[0]*BvecL[0] + BvecL[1]*BvecL[1] + BvecL[2]*BvecL[2]
+        B2R = BvecR[0]*BvecR[0] + BvecR[1]*BvecR[1] + BvecR[2]*BvecR[2]
+        pTL = pL + 0.5 * B2L
+        pTR = pR + 0.5 * B2R
+
+        # Fast magnetosonic speeds (per-axis)
+        cfL = self.equation_manager.get_fast_magnetosonic_speed(primitives_L, axis)
+        cfR = self.equation_manager.get_fast_magnetosonic_speed(primitives_R, axis)
+
+        # Davis estimates for outer signal speeds
+        SL = jnp.minimum(vnL - cfL, vnR - cfR)
+        SR = jnp.maximum(vnL + cfL, vnR + cfR)
+
+        # Physical fluxes on each side (needed for HLL fallback too)
+        FL = self.equation_manager.get_fluxes_xi(primitives_L, conservatives_L, axis)[:8]
+        FR = self.equation_manager.get_fluxes_xi(primitives_R, conservatives_R, axis)[:8]
+
+        # Supersonic regions
+        flux_upwind = jnp.where(SL >= 0.0, FL,
+                         jnp.where(SR <= 0.0, FR, jnp.zeros_like(FL)))
+        # NOTE: Avoid Python branching on traced booleans. We'll compute middle-state
+        # fluxes and then select per-face using array masks.
+        need_middle = (SL < 0.0) & (SR > 0.0)
+        # (No early return here; keep everything JAX-traceable.)
+        # --- continue to build HLLD/HLL below and select with masks ---
+
+
+        # Contact speed S_M (Miyoshi & Kusano eq. 38)
+        denomM = (SR - vnR) * rhoR - (SL - vnL) * rhoL
+        denomM = jnp.where(jnp.abs(denomM) < self.eps, jnp.sign(denomM) * self.eps, denomM)
+        numM = (
+            (SR - vnR) * rhoR * vnR - (SL - vnL) * rhoL * vnL - (pTR - pTL)
+        )
+        SM = numM / denomM
+
+        # Bn across the fan: for CT schemes Bn is continuous; use a stable interface value
+        # Prefer arithmetic average to damp inconsistency when inputs slightly disagree.
+        Bn_star = 0.5 * (BnL + BnR)
+
+        # Star-region densities (eq. 43)
+        rhoL_star = rhoL * (SL - vnL) / (SL - SM)
+        rhoR_star = rhoR * (SR - vnR) / (SR - SM)
+        rhoL_star = jnp.maximum(rhoL_star, self.eps)
+        rhoR_star = jnp.maximum(rhoR_star, self.eps)
+
+        # Total pressure in star region – robust symmetric form
+        pT_star_L = pTL + rhoL * (SL - vnL) * (SM - vnL)
+        pT_star_R = pTR + rhoR * (SR - vnR) * (SM - vnR)
+        pT_star = 0.5 * (pT_star_L + pT_star_R)
+        pT_star = jnp.maximum(pT_star, self.eps)
+
+        # HLL fallback (pre-compute)
+        denomHLL = SR - SL + self.eps
+        Udiff = conservatives_R - conservatives_L
+        F_HLL = (SR * FL - SL * FR + SL * SR * Udiff) / denomHLL
+        # Degeneracy/weak-field detection (per-face array). We will *not* Python-return here;
+        # instead we use it in a mask for flux selection.
+        weak_Bn = (Bn_star * Bn_star) < jnp.maximum(1e-12, 1e-8 * jnp.maximum(B2L, B2R))
+
+
+        # Alfvén wave speeds in star states
+        aL = jnp.abs(Bn_star) / jnp.sqrt(rhoL_star)
+        aR = jnp.abs(Bn_star) / jnp.sqrt(rhoR_star)
+        SL_star = SM - aL
+        SR_star = SM + aR
+
+        # Tangential states in * (eq. 46–49)
+        Bn2 = Bn_star * Bn_star
+        # Left
+        denomL = rhoL * (SL - vnL) * (SL - SM) - Bn2
+        denomL = jnp.where(jnp.abs(denomL) < self.eps, jnp.sign(denomL) * self.eps, denomL)
+        vt1L_star = vt1L - Bn_star * Bt1L * (SM - vnL) / denomL
+        vt2L_star = vt2L - Bn_star * Bt2L * (SM - vnL) / denomL
+        Bt1L_star = Bt1L * (rhoL * (SL - vnL) * (SL - vnL) - Bn2) / denomL
+        Bt2L_star = Bt2L * (rhoL * (SL - vnL) * (SL - vnL) - Bn2) / denomL
+
+        # Right
+        denomR = rhoR * (SR - vnR) * (SR - SM) - Bn2
+        denomR = jnp.where(jnp.abs(denomR) < self.eps, jnp.sign(denomR) * self.eps, denomR)
+        vt1R_star = vt1R - Bn_star * Bt1R * (SM - vnR) / denomR
+        vt2R_star = vt2R - Bn_star * Bt2R * (SM - vnR) / denomR
+        Bt1R_star = Bt1R * (rhoR * (SR - vnR) * (SR - vnR) - Bn2) / denomR
+        Bt2R_star = Bt2R * (rhoR * (SR - vnR) * (SR - vnR) - Bn2) / denomR
+
+        # Double-star averages across Alfvén fan
+        sgnBn = jnp.sign(Bn_star)
+        srL = jnp.sqrt(rhoL_star)
+        srR = jnp.sqrt(rhoR_star)
+        denomSS = srL + srR + self.eps
+
+        vt1_ss = (srL * vt1L_star + srR * vt1R_star + sgnBn * (Bt1R_star - Bt1L_star)) / denomSS
+        vt2_ss = (srL * vt2L_star + srR * vt2R_star + sgnBn * (Bt2R_star - Bt2L_star)) / denomSS
+        Bt1_ss = (srL * Bt1R_star + srR * Bt1L_star + sgnBn * srL * srR * (vt1R_star - vt1L_star)) / denomSS
+        Bt2_ss = (srL * Bt2R_star + srR * Bt2L_star + sgnBn * srL * srR * (vt2R_star - vt2L_star)) / denomSS
+
+        # Build conservative states
+        UL_star = self._build_state(rhoL_star, SM, vt1L_star, vt2L_star, Bn_star, Bt1L_star, Bt2L_star,
+                                    pT_star, axis, self.gamma, self.eps)
+        UR_star = self._build_state(rhoR_star, SM, vt1R_star, vt2R_star, Bn_star, Bt1R_star, Bt2R_star,
+                                    pT_star, axis, self.gamma, self.eps)
+        UL_ss = self._build_state(rhoL_star, SM, vt1_ss, vt2_ss, Bn_star, Bt1_ss, Bt2_ss,
+                                  pT_star, axis, self.gamma, self.eps)
+        UR_ss = self._build_state(rhoR_star, SM, vt1_ss, vt2_ss, Bn_star, Bt1_ss, Bt2_ss,
+                                  pT_star, axis, self.gamma, self.eps)
+
+        # Star fluxes
+        FL_star = FL + SL * (UL_star - conservatives_L)
+        FR_star = FR + SR * (UR_star - conservatives_R)
+        FL_ss = FL_star + SL_star * (UL_ss - UL_star)
+        FR_ss = FR_star + SR_star * (UR_ss - UR_star)
+
+        # Select flux according to wavefan ordering
+        conds = [SL >= 0.0,
+                 (SL < 0.0) & (SL_star >= 0.0),
+                 (SL_star < 0.0) & (SM >= 0.0),
+                 (SM < 0.0) & (SR_star >= 0.0),
+                 (SR_star < 0.0) & (SR >= 0.0)]
+        choices = [FL, FL_star, FL_ss, FR_ss, FR_star]
+        F_HLLD = jnp.select(conds, choices, FR)
+        # Final selection between HLLD and HLL (degeneracy safeguard), then between
+        # transonic and supersonic regions. Make masks broadcastable to flux shape (8, Nx, Ny, 1).
+        use_HLL = (jnp.abs(denomM) < 10.0*self.eps) | weak_Bn | (jnp.abs(denomL) < 10.0*self.eps) | (jnp.abs(denomR) < 10.0*self.eps)
+
+        # --- mask shaping helpers ---
+        def _mask_to_flux_shape(mask):
+            # mask expected (Nx, Ny, 1, 1) or (Nx, Ny, 1)
+            m = jnp.squeeze(mask, axis=-2) if mask.ndim == 4 else mask  # drop the penultimate singleton if present
+            # Now m has shape (Nx, Ny, 1)
+            m = m[None, ...]  # (1, Nx, Ny, 1)
+            return m
+
+        use_HLL_m = _mask_to_flux_shape(use_HLL)
+        need_middle_m = _mask_to_flux_shape(need_middle)
+
+        F_mid = jnp.where(use_HLL_m, F_HLL, F_HLLD)
+        # Choose upwind if not transonic, otherwise HLL/HLLD mid-fan flux
+        F = jnp.where(need_middle_m, F_mid, flux_upwind)
+        return jnp.nan_to_num(F, nan=0.0, posinf=0.0, neginf=0.0), None, None
+
+    
+class HLLD_MHD_old(RiemannSolver):
     """HLLD Riemann Solver for ideal MHD
+    Seems maybe more prone to errors, will discontinue eventually...
     Miyoshi & Kusano 2005
     
     Four-wave solver with (hopefully) robust degeneracy handling and HLL fallback.
@@ -296,7 +529,7 @@ class HLLD_MHD(RiemannSolver):
     def __init__(
             self,
             equation_manager,
-            signal_speed, #not used, just for completeness/same format
+            signal_speed =None, #not used, just for completeness/same format
             wft=1.0,
             **kwargs
             ) -> None:
@@ -387,10 +620,11 @@ class HLLD_MHD(RiemannSolver):
         # Contact wave speed S_M (Miyoshi & Kusano eq. 38)
         denominator_M = (S_R - vn_R) * rho_R - (S_L - vn_L) * rho_L
         # Safe division
-        denominator_M_safe = jnp.where(jnp.abs(denominator_M) < self.eps, 
-                                       jnp.sign(denominator_M) * self.eps, 
-                                       denominator_M)
-        
+      #  denominator_M_safe = jnp.where(jnp.abs(denominator_M) < self.eps, 
+      #                                 jnp.sign(denominator_M) * self.eps, 
+       #                                denominator_M)
+        denominator_M_safe = jnp.where(jnp.abs(denominator_M) < self.eps, self.eps, denominator_M)
+
         numerator_M = ((S_R - vn_R) * rho_R * vn_R - (S_L - vn_L) * rho_L * vn_L - 
                       ptot_R + ptot_L)
         S_M = numerator_M / denominator_M_safe
@@ -406,9 +640,14 @@ class HLLD_MHD(RiemannSolver):
         rho_R_star = jnp.maximum(rho_R_star, self.eps)
         
         # Total pressure in star region (Miyoshi & Kusano eq. 41)
-        ptot_star = ((S_R - vn_R) * rho_R * ptot_L - (S_L - vn_L) * rho_L * ptot_R + 
-                     rho_L * rho_R * (S_R - vn_R) * (S_L - vn_L) * (vn_R - vn_L)) / \
-                    denominator_M_safe
+     #   ptot_star = ((S_R - vn_R) * rho_R * ptot_L - (S_L - vn_L) * rho_L * ptot_R + 
+     #                rho_L * rho_R * (S_R - vn_R) * (S_L - vn_L) * (vn_R - vn_L)) / \
+     #               denominator_M_safe
+        ptot_star = (
+                (S_R - vn_R) * rho_R * ptot_R - (S_L - vn_L) * rho_L * ptot_L
+                + rho_L * rho_R * (S_R - vn_R) * (S_L - vn_L) * (vn_R - vn_L)
+            ) / denominator_M_safe
+
         ptot_star = jnp.maximum(ptot_star, self.eps)
         
         # Check for weak field limit: if |Bn_star| is very small, fall back to HLL
@@ -472,6 +711,7 @@ class HLLD_MHD(RiemannSolver):
                         sum_sqrt_rho
         
         # Build conservative star states
+        
         def build_star_state(rho_star, vn_star, vt1_star, vt2_star, 
                             Bn_star_val, Bt1_star, Bt2_star, ptot_star_val, axis):
             if axis == 0:

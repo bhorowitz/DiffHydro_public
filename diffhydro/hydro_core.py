@@ -322,7 +322,7 @@ class hydro:
         for scheme in self.splitting_schemes:
             for nn,ax in enumerate(scheme):
                 sol = self.boundary.impose(sol,ax)
-                sol = self.split_solve_step(sol,dt/(len(scheme)),int(ax),params)                 
+                sol = self.split_solve_step(sol,dt/(len(self.splitting_schemes)),int(ax),params)                 
                 # experimental
                 sol = sol.at[0].set(jnp.abs(sol[0])) #experimental...
                 sol = sol.at[-1].set(jnp.abs(sol[-1])) #experimental...

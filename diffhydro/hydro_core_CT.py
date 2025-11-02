@@ -46,10 +46,15 @@ class hydro:
         self.integrator = INTEGRATOR_DICT[integrator]  # callable
         self._integrator_name = integrator
         self.use_ct = use_ct
-        print("using CTU?", use_ct)
+        print("using CT?", use_ct)
 
         # indices expected by EquationManagerMHD; leave generic
         self.iBx, self.iBy, self.iBz = 4, 5, 6  # if Euler run, these rows may not exist
+
+        #square for now...
+        self.dx = self.dx_o
+        self.dy = self.dx_o
+        self.dz = self.dx_o
 
     # ---------------- timing/flux/forcing ----------------
 
@@ -102,7 +107,7 @@ class hydro:
 
     def evolve(self, input_fields, params):
         self.outputs=[]
-        state = (input_fields, params)
+        state = (input_fields, params, jnp.array(0.0))
 
         if self.maxjit:
             state  = jax.lax.fori_loop(0, self.n_super_step, self.hydrostep_adapt, state)
@@ -116,11 +121,12 @@ class hydro:
 
     @partial(jit, static_argnums=0)
     def hydrostep_adapt(self, i, state):
-        fields, params = state
+        fields, params, t = state
         ttt = self.timestep(fields)
         ttt = jnp.minimum(self.max_dt, ttt)
-        dt = (ttt)
-        return self._hydrostep(i, state, dt)
+        dt = ttt
+        fields2, params2 = self._hydrostep(i, (fields, params), dt)  # unchanged _hydrostep
+        return (fields2, params2, t + dt)
 
     @jax.jit
     def _hydrostep(self, i, state, dt):
@@ -129,11 +135,10 @@ class hydro:
         fields = self.forcing(i, fields, params, dt/2)
 
         if self.use_mol and self.use_ct:
-       #     jax.debug.print("use ct")
+           # jax.debug.print("use ct")
             fields = self.mol_solve_step_ct(fields, dt, params)  # <<< unsplit (MOL + CT-on-state)
         elif self.use_mol:
             fields = self.mol_solve_step(fields, dt, params)  # <<< unsplit (MOL)
-
         else:
             fields = self.sweep_stack(state, dt, i)
 
@@ -155,11 +160,9 @@ class hydro:
             rhs = rhs - (fu - jnp.roll(fu, 1, axis=ax)) / self.dx_o
 
         # Zero out magnetic rows; CT will advance them after the integrator stage
-        if sol.shape[0] > self.iBx:
+        if True:
             rhs = rhs.at[self.iBx].set(0.0)
-        if sol.shape[0] > self.iBy:
             rhs = rhs.at[self.iBy].set(0.0)
-        if sol.shape[0] > self.iBz:
             rhs = rhs.at[self.iBz].set(0.0)
         return rhs
 
@@ -220,10 +223,10 @@ class hydro:
         Constrained Transport applied to the *updated* state (MOL path).
         - Build edge-centered EMFs from face fluxes on the updated state.
         - Take curl(-E) to get face-centered dB/dt.
-        - Average faces to cell centers and add to B components in `sol`.
+        - Average to cell centers and add to B components in `sol`.
         Works in 2D and 3D (if the state has 3 spatial dims).
         """
-        # If no magnetic rows_present, nothing to do
+        # If no magnetic rows present, nothing to do
         if sol.shape[0] <= self.iBy:
             return sol
 
@@ -232,68 +235,72 @@ class hydro:
         Fy = self.flux(sol, 2, params)
         Fz = self.flux(sol, 3, params) if sol.ndim >= 4 else None
 
-        # 2) EMF mapping from magnetic flux rows (face-centered)
-        #   Fx[By] = -E_z,  Fx[Bz] = +E_y
-        #   Fy[Bx] = +E_z,  Fy[Bz] = -E_x
-        #   Fz[Bx] = -E_y,  Fz[By] = +E_x
-        Ez_face = 0.5 * (-Fx[self.iBy] + Fy[self.iBx])
-
         if sol.ndim == 3:
             # ---------- 2D (vars, x, y) ----------
-            # corners (i+1/2, j+1/2) from faces: average over x(0) and y(1)
+            # EMF mapping: Fx[By] = -Ez, Fy[Bx] = +Ez
+            Ez_face = 0.5 * (-Fx[self.iBy] + Fy[self.iBx])
+
+            # Corner average (4-pt avg to edge centers)
             Ez_corner = 0.25 * (
                 Ez_face
-                + jnp.roll(Ez_face, -1, axis=0)
-                + jnp.roll(Ez_face, -1, axis=1)
-                + jnp.roll(jnp.roll(Ez_face, -1, axis=0), -1, axis=1)
+              + jnp.roll(Ez_face, -1, axis=0)
+              + jnp.roll(Ez_face, -1, axis=1)
+              + jnp.roll(jnp.roll(Ez_face, -1, axis=0), -1, axis=1)
             )
 
-            # curl(-E_z k̂):
-            # dBx/dt on x-faces =  ∂(-Ez)/∂y  ;  dBy/dt on y-faces = -∂(-Ez)/∂x
-            dbx_face = ( -Ez_corner + jnp.roll(-Ez_corner, 1, axis=1) ) / self.dx_o   # derivative in y
-            dby_face = (  Ez_corner - jnp.roll( Ez_corner, 1, axis=0) ) / self.dx_o   # derivative in x
+            # Induction: ∂Bx/∂t = -∂Ez/∂y, ∂By/∂t = +∂Ez/∂x
+            # Using backward differences: (f[i] - f[i-1]) / dx
+            dBx = -(Ez_corner - jnp.roll(Ez_corner, 1, axis=1)) / self.dy
+            dBy =  (Ez_corner - jnp.roll(Ez_corner, 1, axis=0)) / self.dx
 
-            # face → cell-center averages along the normal axis
-            dBx = 0.5 * (dbx_face + jnp.roll(dbx_face, 1, axis=0))  # average along x
-            dBy = 0.5 * (dby_face + jnp.roll(dby_face, 1, axis=1))  # average along y
-
+            # Update B fields (Ez_corner is already at cell centers)
             sol = sol.at[self.iBx].add(dt * dBx)
             sol = sol.at[self.iBy].add(dt * dBy)
             return sol
 
         # ---------- 3D (vars, x, y, z) ----------
-        # Additional EMFs from other flux rows
-        Ex_face = 0.5 * ((-Fy[self.iBz]) + Fz[self.iBy])
-        Ey_face = 0.5 * (( Fx[self.iBz]) - Fz[self.iBx])
+        # EMF mapping from magnetic flux rows:
+        #   Fx[By] = -Ez,  Fx[Bz] = +Ey
+        #   Fy[Bx] = +Ez,  Fy[Bz] = -Ex
+        #   Fz[Bx] = -Ey,  Fz[By] = +Ex
+        Ez_face = 0.5 * (-Fx[self.iBy] + Fy[self.iBx])
+        Ex_face = 0.5 * (-Fy[self.iBz] + Fz[self.iBy])
+        Ey_face = 0.5 * ( Fx[self.iBz] - Fz[self.iBx])
 
         def avg4(A, ax_a, ax_b):
-            """Average A with neighbors shifted by -1 along (ax_a, ax_b) in A's own axes."""
+            """Average A with neighbors shifted by -1 along (ax_a, ax_b)."""
             A1 = jnp.roll(A, -1, axis=ax_a)
             A2 = jnp.roll(A, -1, axis=ax_b)
             A3 = jnp.roll(A1, -1, axis=ax_b)
             return 0.25 * (A + A1 + A2 + A3)
 
-        # After slicing var, EMFs are (x,y,z) with axes (0,1,2)
-        Ez_corner = avg4(Ez_face, 0, 1)  # x–y corners
-        Ex_corner = avg4(Ex_face, 1, 2)  # y–z corners
-        Ey_corner = avg4(Ey_face, 0, 2)  # x–z corners
+        # Average EMFs to edge centers
+        # Ez lives on x-y edges (average over x,y)
+        # Ex lives on y-z edges (average over y,z)
+        # Ey lives on x-z edges (average over x,z)
+        Ez_corner = avg4(Ez_face, 0, 1)  # x–y edges
+        Ex_corner = avg4(Ex_face, 1, 2)  # y–z edges
+        Ey_corner = avg4(Ey_face, 0, 2)  # x–z edges
 
-        # dB/dt = -curl(E) using corner EMFs
-        dBx_face = (-(Ez_corner - jnp.roll(Ez_corner, 1, axis=1)) / self.dx_o   # -∂Ez/∂y
-                    + ( Ey_corner - jnp.roll( Ey_corner, 1, axis=2)) / self.dx_o)  # +∂Ey/∂z
-        dBy_face = (-( Ex_corner - jnp.roll( Ex_corner, 1, axis=2)) / self.dx_o   # -∂Ex/∂z
-                    + ( Ez_corner - jnp.roll(Ez_corner, 1, axis=0)) / self.dx_o)  # +∂Ez/∂x
-        dBz_face = (-( Ey_corner - jnp.roll( Ey_corner, 1, axis=0)) / self.dx_o   # -∂Ey/∂x
-                    + ( Ex_corner - jnp.roll( Ex_corner, 1, axis=1)) / self.dx_o)  # +∂Ex/∂y
+        # Compute dB/dt = -curl(E) using edge-centered EMFs
+        # ∂Bx/∂t = -∂Ez/∂y + ∂Ey/∂z
+        # ∂By/∂t = -∂Ex/∂z + ∂Ez/∂x
+        # ∂Bz/∂t = -∂Ey/∂x + ∂Ex/∂y
+        # Using backward differences: (f[i] - f[i-1]) / d_axis
+        dBx = (-(Ez_corner - jnp.roll(Ez_corner, 1, axis=1)) / self.dy
+               +(Ey_corner - jnp.roll(Ey_corner, 1, axis=2)) / self.dz)
 
-        # face → cell-center averages along normal axes
-        dBx = 0.5 * (dBx_face + jnp.roll(dBx_face, 1, axis=0))  # along x
-        dBy = 0.5 * (dBy_face + jnp.roll(dBy_face, 1, axis=1))  # along y
-        dBz = 0.5 * (dBz_face + jnp.roll(dBz_face, 1, axis=2))  # along z
+        dBy = (-(Ex_corner - jnp.roll(Ex_corner, 1, axis=2)) / self.dz
+               +(Ez_corner - jnp.roll(Ez_corner, 1, axis=0)) / self.dx)
 
+        dBz = (-(Ey_corner - jnp.roll(Ey_corner, 1, axis=0)) / self.dx
+               +(Ex_corner - jnp.roll(Ex_corner, 1, axis=1)) / self.dy)
+
+        # Update B fields (EMFs are already at cell centers after averaging)
         sol = sol.at[self.iBx].add(dt * dBx)
         sol = sol.at[self.iBy].add(dt * dBy)
         sol = sol.at[self.iBz].add(dt * dBz)
+
         return sol
 
     # ---------------- JAX pytree plumbing ----------------
