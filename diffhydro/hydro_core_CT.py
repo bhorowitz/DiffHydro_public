@@ -216,14 +216,90 @@ class hydro:
             u = self._apply_ct_on_state(u, params, dt)
             return u
 
-    # ---------------- CT on updated state ----------------
-
     def _apply_ct_on_state(self, sol, params, dt):
         """
         Constrained Transport applied to the *updated* state (MOL path).
-        - Build edge-centered EMFs from face fluxes on the updated state.
-        - Take curl(-E) to get face-centered dB/dt.
-        - Average to cell centers and add to B components in `sol`.
+       
+        Works in 2D and 3D (if the state has 3 spatial dims).
+        """
+        # If no magnetic rows_present, nothing to do
+        if sol.shape[0] <= self.iBy:
+            return sol
+
+        # 1) Per-axis fluxes on the UPDATED state
+        Fx = self.flux(sol, 1, params)  # (vars, x, y[, z])
+        Fy = self.flux(sol, 2, params)
+        Fz = self.flux(sol, 3, params) if sol.ndim >= 4 else None
+
+        # 2) EMF mapping from magnetic flux rows (face-centered)
+        #   Fx[By] = -E_z,  Fx[Bz] = +E_y
+        #   Fy[Bx] = +E_z,  Fy[Bz] = -E_x
+        #   Fz[Bx] = -E_y,  Fz[By] = +E_x
+        Ez_face = 0.5 * (-Fx[self.iBy] + Fy[self.iBx])
+
+        if sol.ndim == 3:
+            # ---------- 2D (vars, x, y) ----------
+            # corners (i+1/2, j+1/2) from faces: average over x(0) and y(1)
+            Ez_corner = 0.25 * (
+                Ez_face
+                + jnp.roll(Ez_face, -1, axis=0)
+                + jnp.roll(Ez_face, -1, axis=1)
+                + jnp.roll(jnp.roll(Ez_face, -1, axis=0), -1, axis=1)
+            )
+
+            # curl(-E_z k̂):
+            # dBx/dt on x-faces =  ∂(-Ez)/∂y  ;  dBy/dt on y-faces = -∂(-Ez)/∂x
+            dbx_face = ( -Ez_corner + jnp.roll(-Ez_corner, 1, axis=1) ) / self.dx_o   # derivative in y
+            dby_face = (  Ez_corner - jnp.roll( Ez_corner, 1, axis=0) ) / self.dx_o   # derivative in x
+
+            # face → cell-center averages along the normal axis
+            dBx = 0.5 * (dbx_face + jnp.roll(dbx_face, 1, axis=0))  # average along x
+            dBy = 0.5 * (dby_face + jnp.roll(dby_face, 1, axis=1))  # average along y
+
+            sol = sol.at[self.iBx].add(dt * dBx)
+            sol = sol.at[self.iBy].add(dt * dBy)
+            return sol
+
+        # ---------- 3D (vars, x, y, z) ----------
+        # Additional EMFs from other flux rows
+        Ex_face = 0.5 * ((-Fy[self.iBz]) + Fz[self.iBy])
+        Ey_face = 0.5 * (( Fx[self.iBz]) - Fz[self.iBx])
+
+        def avg4(A, ax_a, ax_b):
+            """Average A with neighbors shifted by -1 along (ax_a, ax_b) in A's own axes."""
+            A1 = jnp.roll(A, -1, axis=ax_a)
+            A2 = jnp.roll(A, -1, axis=ax_b)
+            A3 = jnp.roll(A1, -1, axis=ax_b)
+            return 0.25 * (A + A1 + A2 + A3)
+
+        # After slicing var, EMFs are (x,y,z) with axes (0,1,2)
+        Ez_corner = avg4(Ez_face, 0, 1)  # x–y corners
+        Ex_corner = avg4(Ex_face, 1, 2)  # y–z corners
+        Ey_corner = avg4(Ey_face, 0, 2)  # x–z corners
+
+        # dB/dt = -curl(E) using corner EMFs
+        dBx_face = (-(Ez_corner - jnp.roll(Ez_corner, 1, axis=1)) / self.dx_o   # -∂Ez/∂y
+                    + ( Ey_corner - jnp.roll( Ey_corner, 1, axis=2)) / self.dx_o)  # +∂Ey/∂z
+        dBy_face = (-( Ex_corner - jnp.roll( Ex_corner, 1, axis=2)) / self.dx_o   # -∂Ex/∂z
+                    + ( Ez_corner - jnp.roll(Ez_corner, 1, axis=0)) / self.dx_o)  # +∂Ez/∂x
+        dBz_face = (-( Ey_corner - jnp.roll( Ey_corner, 1, axis=0)) / self.dx_o   # -∂Ey/∂x
+                    + ( Ex_corner - jnp.roll( Ex_corner, 1, axis=1)) / self.dx_o)  # +∂Ex/∂y
+
+        # face → cell-center averages along normal axes
+        dBx = 0.5 * (dBx_face + jnp.roll(dBx_face, 1, axis=0))  # along x
+        dBy = 0.5 * (dBy_face + jnp.roll(dBy_face, 1, axis=1))  # along y
+        dBz = 0.5 * (dBz_face + jnp.roll(dBz_face, 1, axis=2))  # along z
+
+        sol = sol.at[self.iBx].add(dt * dBx)
+        sol = sol.at[self.iBy].add(dt * dBy)
+        sol = sol.at[self.iBz].add(dt * dBz)
+        return sol
+
+    def _apply_ct_on_state_old(self, sol, params, dt):
+        """
+        This one actually keeps divergence down, but seems to introduce more wiggles sooner...
+        Constrained Transport applied to the *updated* state (MOL path).
+ 
         Works in 2D and 3D (if the state has 3 spatial dims).
         """
         # If no magnetic rows present, nothing to do
