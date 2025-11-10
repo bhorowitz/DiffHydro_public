@@ -406,11 +406,6 @@ class HeatCoolForce_old:
           - Subcycling path: explicit with symmetric fractional cap (no extra fac throttle).
           - Early-exit path: only when safe; trapezoidal update + fractional cap.
         """
-       # idx = 444656  # your tracked flat index
-      #  p_bad  = (self.eq.gamma - 1.0) * jnp.maximum(U[-1] - 0.5*U[0] * ((U[0:-1]**2).sum(0) / jnp.maximum(U[0],1e-30)**2), 0.0)
-      #  p_good = self.pressure_fn(U)
-        
-     #   jax.debug.print("p_bad={pb:.3e} p_good={pg:.3e}", pb=p_bad.reshape(-1)[idx], pg=p_good.reshape(-1)[idx])
         # --- state & thermodynamics ---
         W     = self.eq.get_primitives_from_conservatives(U)
         rho   = jnp.maximum(W[self.i_rho], self.eps)
@@ -495,7 +490,7 @@ class HeatCoolForce_old:
         # --- write back thermal-energy change into total energy slot ---
         # Compute the physical Et floor corresponding to the temp floor
         gamma = getattr(self.eq, "gamma", 5.0/3.0)
-        Rgas  = getattr(self.eq, "R", 1.0)  # your EOS gas constant in code units
+        Rgas  = getattr(self.eq, "R", 1.0)  # EOS gas constant in code units
         Tf    = self.temp_floor if self.temp_floor is not None else 0.0
         Et_floor = (rho * Rgas * Tf) / (gamma - 1.0)
         

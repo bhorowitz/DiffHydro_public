@@ -276,6 +276,47 @@ class MUSCL3:
         return cell_state_xi_j
 
 
+class PLM:
+    """
+    Piecewise-Linear MUSCL/PLM reconstruction in the repo's API:
+      reconstruct_xi(buffer, axis, j)
+    Uses LIMITER_DICT[limiter] exactly like MUSCL3 (so you can choose MC, VANLEER, SUPERBEE, ...).
+    """
+    def __init__(self, limiter: str = "MC", eps: float = 1e-6):
+        self.limiter_fun = LIMITER_DICT[limiter]
+        self.eps = eps
+
+    def reconstruct_xi(self, buffer: Array, axis: int, j: int) -> Array:
+        # cell-centered values around a given face (i+1/2)
+        qim1 = jnp.roll(buffer, +1, axis=axis)
+        qi   = buffer
+        qip1 = jnp.roll(buffer, -1, axis=axis)
+
+        # one-sided raw slopes
+        dqm = qi   - qim1
+        dqp = qip1 - qi
+
+        # ratio r = dqp / dqm with robust eps handling
+        r = jnp.where(dqm >= self.eps,
+                      dqp / (dqm + self.eps),
+                      (dqp + self.eps) / (dqm + self.eps))
+
+        # limited slope (phi(r) * dqm); same limiter interface as MUSCL3
+        phi = self.limiter_fun(r)
+        dq  = phi * dqm
+
+        # left/right face states at i+1/2 (same j convention as MUSCL3/PPM)
+        qL_iphalf = qi   + 0.5 * dq     # from cell i
+        qR_iphalf = qip1 - 0.5 * (jnp.roll(buffer, -2, axis=axis) - qip1) * \
+                    self.limiter_fun(
+                        jnp.where((qip1 - qi) >= self.eps,
+                                  (jnp.roll(buffer, -2, axis=axis) - qip1) / ((qip1 - qi) + self.eps),
+                                  ((jnp.roll(buffer, -2, axis=axis) - qip1) + self.eps) / ((qip1 - qi) + self.eps))
+                    )
+
+        return qL_iphalf if j == 0 else qR_iphalf
+    
+
 class PPM:
     """
     Piecewise Parabolic Method (Colella–Woodward style, simplified) with MUSCL-style

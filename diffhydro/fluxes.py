@@ -2,7 +2,7 @@ from jax import Array
 from functools import partial
 from typing import List
 from .solver import recon
-from .solver.stencils import CentralSixthOrderReconstruction
+from .solver.stencils import *
 from .physics import mhd
 import jax.numpy as jnp
 import jax
@@ -157,7 +157,7 @@ class ConductiveFlux:
                 ):
         self.eq_manage = EquationManager
         self.solver = Solver
-        self.recon_heat = CentralSixthOrderReconstruction()
+        self.recon_heat = CentralSecondOrderReconstruction()
         self.zeta = zeta #5.111496271545331e-12
         self.positivity = positivity
         self.positivity_stencil = recon.WENO1()
@@ -167,7 +167,7 @@ class ConductiveFlux:
             self.flux_shapes = (EquationManager.n_cons,EquationManager.mesh_shape[0],EquationManager.mesh_shape[1],EquationManager.mesh_shape[2])
         except: #2d, z velocity axis usually just constant...
             self.flux_shapes = (EquationManager.n_cons,EquationManager.mesh_shape[0],EquationManager.mesh_shape[1])
-    def flux_old(
+    def flux_old_old(
             self,
             sol,axis,params,flux
         ) -> Array:
@@ -204,7 +204,7 @@ class ConductiveFlux:
         conductive_flux = conductive_flux.at[self.eq_manage.energy_ids].set(heat_flux_xi)
 
         return conductive_flux
-    def flux(self, sol, axis, params, flux):
+    def flux_b(self, sol, axis, params, flux):
         """
         Conductive energy flux along `axis`.
         Uses κ_eff (Balbus–McKee saturation) only for ELBADRY; otherwise plain κ.
@@ -219,7 +219,7 @@ class ConductiveFlux:
         # --- face-centered T for evaluating κ(T) ---
         ax0 = axis - 1  # your code uses 1-based axis at call sites
         T_face = self.recon_heat.reconstruct_xi(T, ax0)
-    
+        
         # Get unsaturated conductivity from the manager
         # (keep signature matching your manager; extra args are ignored if not present)
         try:
@@ -246,7 +246,7 @@ class ConductiveFlux:
             #ZETA = 5.111496271545331e-12  # same constant used in your ELBADRY block
             kappa_max = 1.5 * cs**3 / (gradT_mag * self.zeta)
             # harmonic combine (κ_eff ≤ κ_unsat, κ_eff ≤ κ_max)
-            kappa_used = 1.0 / (1.0/(kappa_unsat + 1e-30) + 1.0/(kappa_max + 1e-30))
+            kappa_used = 1.0 / (1.0/(kappa_unsat + 1e-30) + 1.0/(kappa_max + 1e-30)) * self.zeta
         else:
             # plain, unsaturated conductivity for non-ElBadry models
             kappa_used = kappa_unsat
@@ -257,8 +257,124 @@ class ConductiveFlux:
         conductive_flux = jnp.zeros_like(sol)
         conductive_flux = conductive_flux.at[self.eq_manage.energy_ids].set(heat_flux_xi)
         return conductive_flux
+    def flux_c(self, sol, axis, params, flux):
+        # primitives & temperature (cell-centered)
+        prim = self.eq_manage.get_primitives_from_conservatives(sol)
+        rho  = prim[self.eq_manage.mass_ids]
+        p    = prim[self.eq_manage.energy_ids]
+        T    = self.eq_manage.get_temperature(p, rho)
 
+        ax0 = axis - 1  # 0-based spatial axis
 
+        # --- face-centered temperature & primitives for kappa(T, prim) ---
+        T_face   = self.recon_heat.reconstruct_xi(T, ax0)
+        rho_face = self.recon_heat.reconstruct_xi(rho, ax0)
+        p_face   = self.recon_heat.reconstruct_xi(p,   ax0)
+        prim_face = prim.at[self.eq_manage.mass_ids].set(rho_face)\
+                       .at[self.eq_manage.energy_ids].set(p_face)
+
+        # unsaturated kappa at faces
+        try:
+            kappa_unsat = self.eq_manage.get_thermal_conductivity(T_face, prim_face, None, None, None)
+        except TypeError:
+            kappa_unsat = self.eq_manage.get_thermal_conductivity(T_face, prim_face)
+
+        # --- temperature gradient at faces (collocated!) ---
+        dT_dxi_face = (jnp.roll(T, -1, axis=ax0) - T) / self.dx_o  # lives at i+1/2 "slot"
+
+        # --- saturation (El-Badry) uses |∇T| at faces, also collocated ---
+        model = getattr(self.eq_manage, "thermal_conductivity_model", "")
+        if model == "ELBADRY":
+            # build face-aligned gradients in each dir
+            dTdx_f = (jnp.roll(T, -1, axis=0) - T) / self.dx_o if (sol.ndim - 1) >= 1 else 0.0
+            dTdy_f = (jnp.roll(T, -1, axis=1) - T) / self.dx_o if (sol.ndim - 1) >= 2 else 0.0
+            dTdz_f = (jnp.roll(T, -1, axis=2) - T) / self.dx_o if (sol.ndim - 1) >= 3 else 0.0
+            gradT_mag_face = jnp.sqrt(dTdx_f**2 + dTdy_f**2 + dTdz_f**2) + 1e-30
+
+            cs_face = self.eq_manage.get_speed_of_sound(p_face, rho_face)
+            kappa_max = 1.5 * cs_face**3 / (gradT_mag_face * self.zeta)
+            kappa_used = 1.0 / (1.0/(kappa_unsat + 1e-30) + 1.0/(kappa_max + 1e-30)) * self.zeta
+        else:
+            kappa_used = kappa_unsat
+
+        # --- face flux with correct sign ---
+        heat_flux_xi = - kappa_used * dT_dxi_face
+
+        # pack into full flux array (only energy row nonzero)
+        conductive_flux = jnp.zeros_like(sol)
+        conductive_flux = conductive_flux.at[self.eq_manage.energy_ids].set(heat_flux_xi)
+        return conductive_flux
+    def flux(self, sol, axis, params, flux):
+        """
+        Physically consistent conductive flux for finite-volume hydro.
+        - κ is cell-centered, harmonic-mean to faces
+        - Temperature gradient is staggered, face-collocated
+        - Heat flux sign convention: q = -κ ∇T
+        - Compatible with El-Badry saturation (computed at faces)
+        """
+        eq = self.eq_manage
+        prim = eq.get_primitives_from_conservatives(sol)
+
+        rho = prim[eq.mass_ids]
+        p   = prim[eq.energy_ids]
+        T   = eq.get_temperature(p, rho)
+        ax0 = axis - 1  # 0-based axis
+
+        # -----------------------------------------------------
+        # 1) Cell-centered thermal conductivity
+        # -----------------------------------------------------
+        try:
+            k_center = eq.get_thermal_conductivity(T, prim, None, None, None)
+        except TypeError:
+            k_center = eq.get_thermal_conductivity(T, prim)
+
+        # -----------------------------------------------------
+        # 2) Face-centered harmonic mean of κ
+        # -----------------------------------------------------
+        kL = k_center
+        kR = jnp.roll(k_center, -1, axis=ax0)
+        k_face = 2.0 * kL * kR / (kL + kR + 1e-30)
+
+        # -----------------------------------------------------
+        # 3) Staggered temperature gradient at faces
+        # -----------------------------------------------------
+        dT_dxi_face = (jnp.roll(T, -1, axis=ax0) - T) / self.dx_o
+
+        # -----------------------------------------------------
+        # 4) El-Badry saturation (optional)
+        # -----------------------------------------------------
+        model = getattr(eq, "thermal_conductivity_model", "")
+        if model == "ELBADRY":
+            # Face-centered primitive quantities for saturation
+            rho_face = 0.5 * (rho + jnp.roll(rho, -1, axis=ax0))
+            p_face   = 0.5 * (p   + jnp.roll(p,   -1, axis=ax0))
+            T_face   = 0.5 * (T   + jnp.roll(T,   -1, axis=ax0))
+
+            # |∇T| magnitude at faces (use forward diffs on each axis)
+            dTdx = (jnp.roll(T, -1, axis=0) - T) / self.dx_o if (sol.ndim - 1) >= 1 else 0.0
+            dTdy = (jnp.roll(T, -1, axis=1) - T) / self.dx_o if (sol.ndim - 1) >= 2 else 0.0
+            dTdz = (jnp.roll(T, -1, axis=2) - T) / self.dx_o if (sol.ndim - 1) >= 3 else 0.0
+            gradT_mag_face = jnp.sqrt(dTdx**2 + dTdy**2 + dTdz**2) + 1e-30
+
+            # Sound speed at faces
+            cs_face = eq.get_speed_of_sound(p_face, rho_face)
+
+            # Saturation limiter
+            kappa_max = 1.5 * cs_face**3 / (gradT_mag_face * self.zeta)
+
+            # Combine harmonically
+            k_face_used = 1.0 / (1.0/(k_face + 1e-30) + 1.0/(kappa_max + 1e-30))
+        else:
+            k_face_used = k_face
+
+        # -----------------------------------------------------
+        # 5) Compute face flux and pack into array
+        # -----------------------------------------------------
+        heat_flux_xi = k_face_used * dT_dxi_face  # minus sign = energy flows down T gradient
+
+        conductive_flux = jnp.zeros_like(sol)
+        conductive_flux = conductive_flux.at[eq.energy_ids].set(heat_flux_xi)
+        return conductive_flux
     def timestep(self, sol):
         # Explicit diffusion CFL (safe in 1–3D)
         const = 0.1
@@ -284,11 +400,11 @@ class ConductiveFlux:
             gradT = jnp.sqrt(dTdx*dTdx + dTdy*dTdy + dTdz*dTdz) + 1e-30
     
             cs = self.eq_manage.get_speed_of_sound(p, rho)
-            ZETA = 5.111496271545331e-12  # same constant used in flux
-            kappa_max = 1.5 * cs**3 / (gradT * ZETA)
+            ZETA = self.zeta  # same constant used in flux
+            kappa_max = 1.5 * cs**3 / (gradT * self.zeta)
     
             # Harmonic combine for effective κ
-            kappa_used = 1.0 / (1.0/(kappa_unsat + 1e-30) + 1.0/(kappa_max + 1e-30))
+            kappa_used = 1.0 / (1.0/(kappa_unsat + 1e-30) + 1.0/(kappa_max + 1e-30))* self.zeta * 75
     
             # El-Badry κ from your manager already contains a 1/ρ factor; do NOT divide by ρ again
             denom = jnp.maximum(cp_m, 1e-30)

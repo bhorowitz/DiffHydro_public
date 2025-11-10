@@ -108,6 +108,40 @@ class RiemannSolver(ABC):
         pass
 
 
+class LaxFriedrichs_MHD(RiemannSolver):
+    """
+    Local Lax–Friedrichs (Rusanov) solver for ideal MHD.
+    EquationManagerMHD to get physical fluxes & fast magnetosonic speed.
+    """
+
+    def __init__(self, equation_manager, signal_speed=None, **kwargs):
+        super().__init__(equation_manager, signal_speed)
+
+    def _solve_riemann_problem_xi_single_phase(
+        self,
+        primitives_L: Array, primitives_R: Array,
+        conservatives_L: Array, conservatives_R: Array,
+        axis: int, **kwargs
+    ):
+        # Physical fluxes from the equation manager (same pattern as HLL/HLLD)
+        F_L = self.equation_manager.get_fluxes_xi(primitives_L, conservatives_L, axis)
+        F_R = self.equation_manager.get_fluxes_xi(primitives_R, conservatives_R, axis)
+
+        # Normal velocities (repo convention: velocity component index supplied by equation_manager)
+        uL = primitives_L[self.velocity_ids[axis]]
+        uR = primitives_R[self.velocity_ids[axis]]
+
+        # Fast magnetosonic speeds (EquationManagerMHD provides this helper)
+        c_fL = self.equation_manager.get_fast_magnetosonic_speed(primitives_L, axis)
+        c_fR = self.equation_manager.get_fast_magnetosonic_speed(primitives_R, axis)
+
+        # Local Lax–Friedrichs diffusion parameter
+        alpha = jnp.maximum(jnp.abs(uL) + c_fL, jnp.abs(uR) + c_fR)
+
+        # Rusanov flux (vectorized)
+        fluxes_xi = 0.5 * (F_L + F_R) - 0.5 * alpha * (conservatives_R - conservatives_L)
+        return fluxes_xi, None, None
+
 class LaxFriedrichs(RiemannSolver):
 
     def __init__(

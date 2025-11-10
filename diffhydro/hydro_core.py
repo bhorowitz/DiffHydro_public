@@ -24,6 +24,26 @@ import jax.lax as lax
 import numpy as onp
 from jax.experimental import io_callback  # side-effect callback inside jit/pjit
 
+# ---- Remat/checkpoint compatibility shim ----
+import jax
+
+try:
+    # Newer JAX: checkpoint + (optional) policies module
+    _remat = jax.checkpoint
+    try:
+        from jax.experimental import checkpoint_policies as _ckp  # may not exist on older JAX
+        REMAT_POLICY = _ckp.checkpoint_dots  # good default when available
+    except Exception:
+        REMAT_POLICY = None
+except AttributeError:
+    # Older JAX: fall back to remat
+    _remat = jax.remat
+    REMAT_POLICY = None
+
+def remat(fn):
+    # Use a policy if available in your JAX; otherwise plain remat/checkpoint
+    return _remat(fn) if REMAT_POLICY is None else _remat(fn, policy=REMAT_POLICY)
+# ---------------------------------------------
 
 
 def save_snapshot_np(path, arr_host):
@@ -132,7 +152,10 @@ class hydro:
         self.track_time: bool = track_time
         self.snapshot_every: int | None = snapshot_every
         self.snapshot_dir: str = snapshot_dir
-
+        
+        self.compute_dtype = jnp.float32
+        self.state_dtype = jnp.float32
+        
         # Make snapshot dir on host 0 (safe if it already exists)
         if self.snapshot_every is not None and jax.process_index() == 0:
             os.makedirs(self.snapshot_dir, exist_ok=True)
@@ -168,7 +191,8 @@ class hydro:
         sh_arr = NamedSharding(self.mesh, self.FIELD_XYZ)
         fields0 = jax.device_put(input_fields, sh_arr)
         t0 = jnp.array(0.0, dtype=fields0.dtype)
-
+        dt_hist0 = jnp.zeros((self.n_super_step,), dtype=fields0.dtype)
+        
         snapshot_every = (self.snapshot_every if getattr(self, "snapshot_every", None) is not None
                           else (int(getattr(self, "snapshots", 0)) if getattr(self, "snapshots", 0) else 0))
         snapshot_every = int(snapshot_every) if snapshot_every else 0
@@ -190,11 +214,12 @@ class hydro:
             (fields_out, params_out), dt = self.hydrostep_adapt(i, (fields, params), t_scalar)
             return fields_out, params_out, dt
 
-        def run_loop(fields, params, t):
+        def run_loop(fields, params, t, dt_hist):
             def body(i, carry):
-                fields, params, t = carry
+                fields, params, t, dt_hist = carry
                 fields, params, dt = _one_step(fields, params, i, t)
                 t = t + dt
+                dt_hist = dt_hist.at[i].set(dt)  # <- record per-step dt
 
                 if snapshot_every > 0:
                     def _do_snapshot(_):
@@ -219,21 +244,22 @@ class hydro:
 
                     lax.cond((i % snapshot_every) == 0, _do_snapshot, lambda _: (), operand=None)
 
-                return (fields, params, t)
+                return (fields, params, t, dt_hist)
 
-            return lax.fori_loop(0, self.n_super_step, body, (fields, params, t))
+            return lax.fori_loop(0, self.n_super_step, body, (fields, params, t, dt_hist0))
 
         evolve_pjit = pjit(
             run_loop,
-            in_shardings=(sh_arr, None, None),
-            out_shardings=(sh_arr, None, None),
+            in_shardings=(sh_arr, None, None, None),
+            out_shardings=(sh_arr, None, None, None),
+            donate_argnums=(0,)
         )
 
         with self.mesh:
-            fields_f, params_f, t_f = evolve_pjit(fields0, params, t0)
+            fields_f, params_f, t_f, dt_hist = evolve_pjit(fields0, params, t0, dt_hist0)
 
         self.sim_time = float(t_f)
-        return fields_f, params_f
+        return fields_f, params_f, dt_hist
                 
     def roll_with_halo(self, array, shift, axis):
         """
@@ -316,7 +342,7 @@ class hydro:
         sol = sol - (rhs_cons) * dt / self.dx_o
         return sol
 
-    @jax.checkpoint
+    @partial(remat)
     def sweep_stack(self,state,dt,i):
         sol,params = state
         for scheme in self.splitting_schemes:
@@ -391,21 +417,184 @@ class hydro:
         )
 
     
+    def evolve_with_dt_schedule(self, input_fields, params, dt_array):
+        """
+        Evolve using a pre-specified array of dt's, in order.
+
+        Parameters
+        ----------
+        input_fields : Array
+            Initial field state on host.
+        params : Any
+            Initial params.
+        dt_array : Array-like, shape (n_steps,)
+            Sequence of time steps to apply. n_steps determines how many
+            hydro steps we take.
+
+        Returns
+        -------
+        fields_f : Array
+            Final field state on the device mesh.
+        params_f : Any
+            Final params.
+        t_f : Array
+            Final simulation time (sum of dt_array).
+        """
+        # 1) Shard fields
+        sh_arr = NamedSharding(self.mesh, self.FIELD_XYZ)
+        fields = jax.device_put(input_fields.astype(self.state_dtype), sh_arr)
+
+        # 2) Put dt_array on device, make sure dtype matches
+        dt_array = jnp.asarray(dt_array, dtype=fields.dtype)
+        n_steps = dt_array.shape[0]
+
+        # 3) Single hydro step that uses dt_array[i]
+        def _one_step(fields, params, i, dt_array):
+            dt = dt_array[i]
+            fields, params = self._hydrostep(i, (fields, params), dt)
+            return fields, params
+
+        checkpointed_step = remat(_one_step)
+
+        # We shard fields, params unsharded, dt_array replicated
+        pjit_step = pjit(
+            checkpointed_step,
+            in_shardings=(sh_arr, None, None, None),
+            out_shardings=(sh_arr, None),
+            donate_argnums=(0,),
+        )
+
+        # 4) fori_loop over step index
+        def body(i, carry):
+            fields, params = carry
+            fields, params = pjit_step(fields, params, i, dt_array)
+            return (fields, params)
+
+        fields_f, params_f = lax.fori_loop(
+            0, n_steps, body, (fields, params)
+        )
+
+        # Final time is just sum of the dt's
+        t_f = jnp.sum(dt_array)
+     #   self.sim_time = float(t_f)
+
+        return fields_f, params_f, t_f
+    def evolve_till_time(
+        self,
+        input_fields,
+        params,
+        t_target: float,
+        max_steps: int | None = None,
+    ):
+        """
+        Evolve the system until the simulation time reaches `t_target`
+        (or until `max_steps` steps are taken), using a JAX while_loop.
+
+        Returns
+        -------
+        fields_f : Array
+            Final field state on the device mesh.
+        params_f : Any
+            Final params.
+        t_f : Array
+            Final simulation time (scalar, same dtype as fields).
+        dt_hist : Array
+            Per-step dt history of length `self.n_super_step`.
+            Only the first `n_steps` entries are filled; the rest remain 0.
+        n_steps : Array
+            Number of steps actually taken (int32 scalar).
+        """
+        # Sharding for the field array
+        sh_arr = NamedSharding(self.mesh, self.FIELD_XYZ)
+        fields0 = jax.device_put(input_fields, sh_arr)
+
+        # Initial time and step counter
+        t0 = jnp.array(0.0, dtype=fields0.dtype)
+        step0 = jnp.array(0, dtype=jnp.int32)
+
+        # dt history with a fixed, static length for JIT/pjit
+        # We re-use n_super_step as an upper bound for safety.
+        max_hist_len = self.n_super_step
+        dt_hist0 = jnp.zeros((max_hist_len,), dtype=fields0.dtype)
+
+        # Target time and step cap as JAX scalars
+        t_target = jnp.asarray(t_target, dtype=fields0.dtype)
+        max_steps = (
+            jnp.asarray(max_steps, dtype=jnp.int32)
+            if max_steps is not None
+            else jnp.asarray(self.n_super_step, dtype=jnp.int32)
+        )
+
+        def _one_step(fields, params, i, t_scalar):
+            # Same stepping logic as in evolve_with_callbacks
+            (fields_out, params_out), dt = self.hydrostep_adapt(i, (fields, params), t_scalar)
+            return fields_out, params_out, dt
+
+        def run_loop(fields, params, t, dt_hist, step, t_target, max_steps):
+            # while (t < t_target) and (step < max_steps)
+            def cond_fn(carry):
+                fields, params, t, dt_hist, step = carry
+                return jnp.logical_and(t < t_target, step < max_steps)
+
+            def body_fn(carry):
+                fields, params, t, dt_hist, step = carry
+
+                # Use current step as the loop index for hydrostep_adapt and dt_hist
+                fields_new, params_new, dt = _one_step(fields, params, step, t)
+                t_new = t + dt
+
+                # Record dt for this step (if within allocated history length)
+                dt_hist_new = jax.lax.cond(
+                    step < max_hist_len,
+                    lambda _dt_hist: _dt_hist.at[step].set(dt),
+                    lambda _dt_hist: _dt_hist,
+                    dt_hist,
+                )
+
+                step_new = step + jnp.array(1, dtype=step.dtype)
+                return (fields_new, params_new, t_new, dt_hist_new, step_new)
+
+            fields_f, params_f, t_f, dt_hist_f, step_f = lax.while_loop(
+                cond_fn,
+                body_fn,
+                (fields, params, t, dt_hist, step),
+            )
+            return fields_f, params_f, t_f, dt_hist_f, step_f
+
+        evolve_pjit = pjit(
+            run_loop,
+            in_shardings=(sh_arr, None, None, None, None, None, None),
+            out_shardings=(sh_arr, None, None, None, None),
+            donate_argnums=(0,),  # donate fields
+        )
+
+        with self.mesh:
+            fields_f, params_f, t_f, dt_hist, n_steps = evolve_pjit(
+                fields0, params, t0, dt_hist0, step0, t_target, max_steps
+            )
+
+        self.sim_time = float(t_f)
+        return fields_f, params_f, t_f, dt_hist, n_steps
 
     def evolve(self, input_fields, params):
         # 1) Create sharding spec for fields
         sh_arr = NamedSharding(self.mesh, self.FIELD_XYZ)
-        fields = jax.device_put(input_fields, sh_arr)
+        fields = jax.device_put(input_fields.astype(self.state_dtype), sh_arr)
 
         # 2) Define and wrap the step function with pjit
         def _one_step(fields, params, i):
             (fields_out, params_out),_t = self.hydrostep_adapt(i, (fields, params),0)
-            return fields_out, params_out
+            return fields_out.astype(input_fields.dtype), params_out
 
+        
+        checkpointed_step = remat(_one_step)
+
+        
         pjit_step = pjit(
-            _one_step,
+            checkpointed_step,
             in_shardings=(sh_arr, None, None),
             out_shardings=(sh_arr, None),
+            donate_argnums=(0,)
         )
 
         # 3) Run the loop (no mesh context needed!)
@@ -427,6 +616,7 @@ class hydro:
 
         return fields, params
     
+    @partial(remat)
     def rhs_unsplit(self, sol, params):
         """
         Unsplit RHS computation with proper halo exchanges via boundary class.
@@ -443,7 +633,7 @@ class hydro:
             # STEP 2: For wide stencils (TENO5, PPM), sync halos multiple times
             # Each impose() call exchanges one layer of halos
             # For TENO5 (needs ±2 cells), call 2-3 times to be safe
-            sol_b = self.boundary.impose(sol, ax, width=3)
+            sol_b = self.boundary.impose(sol_b, ax, width=3)
 
             # STEP 3: Compute flux (now reconstruction can safely use jnp.roll)
             fu = self.flux(sol_b, ax, params)
@@ -460,7 +650,7 @@ class hydro:
             if sol.shape[0] > self.iBz:
                 rhs = rhs.at[self.iBz].set(0.0)
         return rhs
-
+    
     def mol_solve_step(self, sol, dt, params):
         #normal solve without MHD CT
         return self.integrator(self.rhs_unsplit, sol, dt, params)  
