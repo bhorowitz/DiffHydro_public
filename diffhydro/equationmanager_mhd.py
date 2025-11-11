@@ -10,7 +10,6 @@ class EquationManagerMHD:
     """
     def __init__(self,
                 use_glm = False):
-        # indices & meta to match your style
         self.use_glm = use_glm
         self.mass_ids = 0
         self.vel_ids = (1, 2, 3)          # velocity components in primitives
@@ -143,9 +142,9 @@ class EquationManagerMHD:
             F_m3 = F_m3 + ptot - B3 * Bd
     
         # induction (magnetic field) flux: v_d B - B_d v
-        F_B1 = vd * B1 - Bd * u
-        F_B2 = vd * B2 - Bd * v
-        F_B3 = vd * B3 - Bd * w
+        F_B1 = 1*(vd * B1 - Bd * u)
+        F_B2 = 1*(vd * B2 - Bd * v)
+        F_B3 = 1*(vd * B3 - Bd * w)
     
         # energy flux: (E + p + B^2/2) v_d - (v·B) B_d
         E = conservatives[self.energy_ids]
@@ -219,4 +218,7 @@ class EquationManagerMHD:
         
     def get_signal_speed(self, primitives, axis: int):
     # Euler managers can implement this too (return get_speed_of_sound from p,rho).
-        return self.get_fast_magnetosonic_speed(primitives, axis)
+        cf = self.get_fast_magnetosonic_speed(primitives, axis)
+       # v  = primitives[self.vel_ids[axis]]
+        return cf
+      #  return self.get_fast_magnetosonic_speed(primitives, axis)

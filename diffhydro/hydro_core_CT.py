@@ -216,7 +216,7 @@ class hydro:
             u = self._apply_ct_on_state(u, params, dt)
             return u
 
-    def _apply_ct_on_state(self, sol, params, dt):
+    def _apply_ct_on_state_old(self, sol, params, dt):
         """
         Constrained Transport applied to the *updated* state (MOL path).
        
@@ -295,7 +295,7 @@ class hydro:
         sol = sol.at[self.iBz].add(dt * dBz)
         return sol
 
-    def _apply_ct_on_state_old(self, sol, params, dt):
+    def _apply_ct_on_state(self, sol, params, dt):
         """
         This one actually keeps divergence down, but seems to introduce more wiggles sooner...
         Constrained Transport applied to the *updated* state (MOL path).
@@ -373,9 +373,9 @@ class hydro:
                +(Ex_corner - jnp.roll(Ex_corner, 1, axis=1)) / self.dy)
 
         # Update B fields (EMFs are already at cell centers after averaging)
-        sol = sol.at[self.iBx].add(dt * dBx)
-        sol = sol.at[self.iBy].add(dt * dBy)
-        sol = sol.at[self.iBz].add(dt * dBz)
+        sol = sol.at[self.iBx].add( dt * dBx)
+        sol = sol.at[self.iBy].add( dt * dBy)
+        sol = sol.at[self.iBz].add( dt * dBz)
 
         return sol
 
