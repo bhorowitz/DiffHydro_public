@@ -87,31 +87,41 @@ class ConvectiveFlux:
 
         
     def timestep(self, sol):
-        # Primitives once, then derive speeds axis-by-axis
-        primitives = self.eq_manage.get_primitives_from_conservatives(sol)
-    
-        # Pull velocities via indices (don’t slice 1:-1; that would include B in MHD)
-        u = primitives[self.eq_manage.vel_ids[0]]
-        v = primitives[self.eq_manage.vel_ids[1]]
-        # Handle 2D/3D transparently
-        w = primitives[self.eq_manage.vel_ids[2]] if len(self.eq_manage.vel_ids) > 2 else 0.0
-    
-        # Max wave speed per axis = |v_d| + signal_speed(prims, axis)
-        # Euler managers: signal_speed = c_s;  MHD managers: signal_speed = c_f (fast magnetosonic)
-        # axis numbering here matches flux() call convention (ax=1,2,3 are spatial axes)
-        speed_x = jnp.abs(u) + self.eq_manage.get_signal_speed(primitives, axis=0)
-        speed_y = jnp.abs(v) + self.eq_manage.get_signal_speed(primitives, axis=1)
-        speed_z = jnp.abs(w) + (self.eq_manage.get_signal_speed(primitives, axis=2) if sol.ndim >= 4 else 0.0)
-    
-        # Global max over the grid (and axes)
-        cmax = jnp.max(jnp.stack([
-            jnp.max(speed_x),
-            jnp.max(speed_y),
-            jnp.max(speed_z),
-        ]))
-    
-        # CFL timestep
-        dt = self.eq_manage.cfl * self.dx_o / (cmax + self.eq_manage.eps)
+        """
+        Multi-D CFL timestep for unsplit FV:
+          dt = CFL / max_x,y,z ( a_x/dx + a_y/dy + a_z/dz )
+        with a_d = |v_d| + signal_speed(prims, axis=d)
+        """
+        eq = self.eq_manage
+        prim = eq.get_primitives_from_conservatives(sol)
+
+        # velocities
+        u = prim[eq.vel_ids[0]]
+        v = prim[eq.vel_ids[1]] if len(eq.vel_ids) > 1 else 0.0
+        w = prim[eq.vel_ids[2]] if len(eq.vel_ids) > 2 else 0.0
+
+        # per-axis characteristic speeds (no velocity inside get_signal_speed!)
+        a_x = jnp.abs(u) + eq.get_signal_speed(prim, axis=0)
+        a_y = jnp.abs(v) + eq.get_signal_speed(prim, axis=1) if sol.ndim >= 3 else 0.0
+        a_z = jnp.abs(w) + eq.get_signal_speed(prim, axis=2) if sol.ndim >= 4 else 0.0
+
+        # grid spacing per axis; you’re using dx_o=1 for now
+        dx = float(self.dx_o)
+        dy = float(self.dx_o)
+        dz = float(self.dx_o)
+
+        # in general you want:
+        #   inv_dt_local = a_x/dx + a_y/dy (+ a_z/dz)
+        # then dt = CFL / max(inv_dt_local)
+        inv_dt_local = a_x / dx
+        if sol.ndim >= 3:
+            inv_dt_local = inv_dt_local + a_y / dy
+        if sol.ndim >= 4:
+            inv_dt_local = inv_dt_local + a_z / dz
+
+        inv_dt_max = jnp.max(inv_dt_local)
+
+        dt = eq.cfl / (inv_dt_max + eq.eps)
         return dt
     
     def compute_positivity_preserving_interpolation(self,
