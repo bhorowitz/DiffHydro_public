@@ -402,19 +402,6 @@ class hydro:
 
         fields = self.forcing(i, fields, params, dt/2)
         return (fields, params)
-    
-    # Wrap the *step* in pjit so named axes exist when rhs_unsplit runs.
-    def build_pjit_step(self):
-        def _step(fields, params, i):
-            # hydrostep_adapt expects (i, state) where state=(fields, params)
-            (fields_out, params_out),_t = self.hydrostep_adapt(i, (fields, params),0)
-            return fields_out, params_out
-
-        return pjit(
-            _step,
-            in_shardings=(self.FIELD_XYZ, None, None),  # (fields, params, i)
-            out_shardings=(self.FIELD_XYZ, None),       # (fields_out, params_out)
-        )
 
     
     def evolve_with_dt_schedule(self, input_fields, params, dt_array):
@@ -654,6 +641,99 @@ class hydro:
     def mol_solve_step(self, sol, dt, params):
         #normal solve without MHD CT
         return self.integrator(self.rhs_unsplit, sol, dt, params)  
+    
+    
+    ###
+    
+    def evolve_memory_efficient(self, input_fields, params, checkpoint_every=10):
+        """
+        Memory-efficient evolution with configurable checkpointing.
+
+        Parameters
+        ----------
+        input_fields : Array
+            Initial fields
+        params : Any
+            Parameters
+        checkpoint_every : int
+            Number of steps between checkpoints. Higher = less memory, more recomputation.
+            Typical values: 5-20 depending on your memory budget.
+        """
+        sh_arr = NamedSharding(self.mesh, self.FIELD_XYZ)
+        fields = jax.device_put(input_fields.astype(self.state_dtype), sh_arr)
+
+        def _single_step(fields, params, i):
+            """Single hydro step - not checkpointed"""
+            (fields_out, params_out), _t = self.hydrostep_adapt(i, (fields, params), 0)
+            return fields_out.astype(input_fields.dtype), params_out
+
+        def _block_of_steps(fields, params, block_idx):
+            """
+            Run checkpoint_every steps. Only this function is checkpointed,
+            so intermediate states within the block are recomputed during backprop.
+            """
+            start_i = block_idx * checkpoint_every
+
+            def substep(j, carry):
+                fields, params = carry
+                i = start_i + j
+                fields, params = _single_step(fields, params, i)
+                return (fields, params)
+
+            return lax.fori_loop(0, checkpoint_every, substep, (fields, params))
+
+        # Checkpoint only the blocks
+        checkpointed_block = remat(_block_of_steps)
+
+        pjit_block = pjit(
+            checkpointed_block,
+            in_shardings=(sh_arr, None, None),
+            out_shardings=(sh_arr, None),
+            donate_argnums=(0,)
+        )
+
+        # Main loop over checkpointed blocks
+        n_blocks = self.n_super_step // checkpoint_every
+
+        def body(block_idx, carry):
+            fields, params = carry
+            fields, params = pjit_block(fields, params, block_idx)
+            return (fields, params)
+
+        fields, params = lax.fori_loop(0, n_blocks, body, (fields, params))
+
+        # Handle remaining steps (if n_super_step not divisible by checkpoint_every)
+        remainder = self.n_super_step % checkpoint_every
+        if remainder > 0:
+            start_i = n_blocks * checkpoint_every
+
+            def final_substep(j, carry):
+                fields, params = carry
+                i = start_i + j
+                fields, params = _single_step(fields, params, i)
+                return (fields, params)
+
+            pjit_final = pjit(
+                lambda f, p: lax.fori_loop(0, remainder, final_substep, (f, p)),
+                in_shardings=(sh_arr, None),
+                out_shardings=(sh_arr, None),
+                donate_argnums=(0,)
+            )
+            fields, params = pjit_final(fields, params)
+
+        return fields, params
+
+
+    # Add this as a method to your hydro class:
+    def add_memory_efficient_evolve_method(hydro_class):
+        """
+        Monkey-patch to add the memory-efficient evolve method.
+        Usage:
+            hydro.evolve = hydro.evolve_memory_efficient.__get__(hydro, type(hydro))
+        """
+        hydro_class.evolve_memory_efficient = evolve_memory_efficient
+        return hydro_class
+
     
         # ---------------- MOL + CT-on-updated-state ----------------
 
