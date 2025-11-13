@@ -9,7 +9,6 @@ import jax.numpy as jnp
 import os
 
 #reorg into halo_helper sometime
-from jax.experimental import mesh_utils
 from jax.sharding import Mesh, NamedSharding, PartitionSpec as P
 from jax.experimental.pjit import pjit
 from .solver.integrator import INTEGRATOR_DICT

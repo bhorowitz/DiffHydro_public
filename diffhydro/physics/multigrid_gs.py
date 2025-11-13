@@ -1,486 +1,345 @@
-import numpy as np
-import jax.numpy as jnp
+# multigrid_gs.py
+# Periodic multigrid Poisson solver for JAX hydro, tracer-safe version.
+# - Discretization: 2nd-order 6-point Laplacian (periodic)
+# - Restriction: separable full weighting
+# - Prolongation: separable trilinear interpolation (factor 2)
+# - Smoother: weighted Jacobi (omega=2/3), fully vectorized
+# - Outer MG driver: fixed # of V-cycles via Python for-loop (robust with JIT callers)
+
+from __future__ import annotations
+from dataclasses import dataclass
+from typing import Optional, Callable, Tuple
 from functools import partial
+
 import jax
+import jax.numpy as jnp
 
-#from Ben's DiffAPM implementation, need to clean up and probably put somewhere else...
 
-@jax.jit
-def shift(arr, dx, dy, dz):
-        return jnp.roll(jnp.roll(jnp.roll(arr, dx, axis=0), dy, axis=1), dz, axis=2)
+Array = jnp.ndarray
 
-@jax.jit
-def adjacency_sum(U):
-    adj = jnp.roll(U,1,axis=0) + jnp.roll(U,-1,axis=0) + jnp.roll(U,1,axis=1) + jnp.roll(U,-1,axis=1) + jnp.roll(U,1,axis=2) + jnp.roll(U,-1,axis=2)
-    return adj
 
-@jax.jit
-def apply_poisson(U, h=None):
-    """Apply the 3D poisson operator to U."""
-    alpha = len(U.shape)
-    x = jnp.empty_like(U)
+# -----------------------------------------------------------------------------
+# Core discrete operators (periodic, vectorized)
+# -----------------------------------------------------------------------------
 
-    if h is None:
-        h = 1 / U.shape[0]
+def apply_poisson(u: Array, h: float) -> Array:
+    """A u = -6u + sum of 6 neighbors, divided by h^2 (periodic 3D/2D/1D)."""
+    nd = u.ndim
+    lap = -2.0 * nd * u
+    for ax in range(nd):
+        lap = lap + jnp.roll(u, +1, axis=ax) + jnp.roll(u, -1, axis=ax)
+    return lap / (h * h)
 
-    if alpha == 3:
-        x = (-6* U + 
-        adjacency_sum(U)) / (h*h)
-        
-    else:
-        raise ValueError('residual: invalid dimension')
 
+def residual(F: Array, u: Array, h: float) -> Array:
+    """r = F - A u."""
+    return F - apply_poisson(u, h)
+
+
+# -----------------------------------------------------------------------------
+# Restriction / Prolongation (periodic, separable)
+# -----------------------------------------------------------------------------
+
+def restrict_full_weighting(fine: Array) -> Array:
+    """
+    Separable full-weighting restriction by factor 2 per axis.
+    For 3D this matches 1/8 sum over the 8 fine cells around the coarse point.
+    Implemented as 1D [1/4, 1/2, 1/4] smoothing along each axis, then take ::2.
+    """
+    x = fine
+    nd = x.ndim
+
+    # 1D full-weighting kernel is [0.25, 0.5, 0.25] applied separably.
+    for ax in range(nd):
+        x = 0.25 * jnp.roll(x, +1, ax) + 0.5 * x + 0.25 * jnp.roll(x, -1, ax)
+
+    # Subsample by 2 along each axis
+    sl = tuple(slice(None, None, 2) for _ in range(nd))
+    coarse = x[sl]
+    return coarse
+
+
+def _upsample1d_linear(a: Array, axis: int) -> Array:
+    """
+    Periodic linear upsampling by factor 2 along a single axis.
+    Even positions copy a; odd positions are average with next cell.
+    """
+    n = a.shape[axis]
+    new_n = 2 * n
+    new_shape = tuple(a.shape[i] if i != axis else new_n for i in range(a.ndim))
+    out = jnp.zeros(new_shape, dtype=a.dtype)
+
+    # even: out[..., 0::2, ...] = a
+    idx_even = [slice(None)] * a.ndim
+    idx_even[axis] = slice(0, new_n, 2)
+    out = out.at[tuple(idx_even)].set(a)
+
+    # odd: out[..., 1::2, ...] = 0.5*(a + roll(a, -1))
+    a_avg = 0.5 * (a + jnp.roll(a, -1, axis))
+    idx_odd = [slice(None)] * a.ndim
+    idx_odd[axis] = slice(1, new_n, 2)
+    out = out.at[tuple(idx_odd)].set(a_avg)
+
+    return out
+
+
+def prolong_trilinear(coarse: Array, fine_shape: Tuple[int, ...]) -> Array:
+    """
+    Separable trilinear (bilinear/linear) interpolation to double each axis size.
+    Does three 1D linear upsampling passes. Periodic wrap.
+    """
+    x = coarse
+    for ax in range(coarse.ndim):
+        x = _upsample1d_linear(x, axis=ax)
+    # Safety: ensure the requested fine_shape (should match 2x on each axis)
+    if x.shape != fine_shape:
+        raise ValueError(f"prolong_trilinear: shape mismatch {x.shape} != {fine_shape}")
     return x
 
 
-#### RESTRICTION FUNCTIONS
+# -----------------------------------------------------------------------------
+# Smoother: Weighted Jacobi (vectorized, periodic)
+# -----------------------------------------------------------------------------
 
-def restriction(A):
+def jacobi_sweep(u: Array, F: Array, h: float, omega: float = 2.0 / 3.0) -> Array:
     """
-        applies simple restriction to A
-        @param A n x n matrix
-        @return (n//2, n//2) matrix
+    One weighted-Jacobi sweep for A u = F with A = (sum 6 nbrs - 2d*u)/h^2.
+    Update formula (3D): u_new = (1-ω)*u + ω*( (sum_neighbors - h^2 F) / (2d) ).
     """
-    # indicator for Dimension
-    alpha = len(A.shape)
-    # initialize result with respect to the wanted shape
-    # Index of the second to the last element to mention in ret (depends on
-    # the shape of A)
+    nd = u.ndim
+    # Sum of 6 neighbors in nd dims:
+    sum_nbrs = jnp.zeros_like(u)
+    for ax in range(nd):
+        sum_nbrs = sum_nbrs + jnp.roll(u, +1, axis=ax) + jnp.roll(u, -1, axis=ax)
 
-    # Case: Dimension 1
-    if alpha == 3:
-        ret = restriction_3D(A)
-    # Case: Error
-    else:
-        raise ValueError('restriction: invalid dimension')
-
-    return ret
-
-#@jit(nopython=True, fastmath=True)
-@jax.jit
-def restriction_3D(A):
-    # get every second element in A
-    ret = A[::2, ::2, ::2]
-    return ret
+    denom = 2.0 * nd  # 2 per axis in the stencil
+    u_star = (sum_nbrs - (h * h) * F) / denom
+    return (1.0 - omega) * u + omega * u_star
 
 
-def weighted_restriction(A):
-    # indicator for Dimension
-    alpha = len(A.shape)
-    # initialize result with respect to the wanted shape
-    ret = restriction(A)
 
-    # min length is 3
-    assert(A.shape[0] >= 3)
-
-    if alpha == 3:
-        ret = weighted_restriction_3D(A, ret)
-    else:
-        raise ValueError('weighted restriction: invalid dimension')
-    return ret
-
-#@(nopython=True, fastmath=True)
-
-@partial(jax.jit)
-def weighted_restriction_3D(A, ret):
-    # Base weight: center point
-    weighted = 8 * A
-
-    # Face neighbors (6)
-    for ax in range(3):
-        weighted += 4 * jnp.roll(A, shift=1, axis=ax)
-        weighted += 4 * jnp.roll(A, shift=-1, axis=ax)
-
-    # Edge neighbors (12)
-    for ax1 in range(3):
-        for ax2 in range(ax1 + 1, 3):
-            for shift1 in [-1, 1]:
-                for shift2 in [-1, 1]:
-                    weighted += 2 * jnp.roll(
-                        jnp.roll(A, shift1, axis=ax1), shift2, axis=ax2
-                    )
-
-    # Corner neighbors (8)
-    for shift in [(-1, -1, -1), (-1, -1, 1), (-1, 1, -1), (-1, 1, 1),
-                  (1, -1, -1), (1, -1, 1), (1, 1, -1), (1, 1, 1)]:
-        weighted += jnp.roll(jnp.roll(jnp.roll(A, shift[0], 0), shift[1], 1), shift[2], 2)
-
-    # Average and sample every 2nd point
-    restricted = weighted[::2, ::2, ::2] / 64.0
-
-    # Store into interior of ret
-    ret = restricted
-    return ret
-
-### prolongation
-
-
-@partial(jax.jit, static_argnames=['fine_shape'])
-def prolongation(e, fine_shape):
+@partial(jax.jit, static_argnums=(3,))
+def smooth_weighted_jacobi(u0, F, h, iters, omega=2.0/3.0):
     """
-    This interpolates/ prolongates to a grid of fine_shape
-    @param e
-    @param fine_shape targeted shape
-    @return grid with fine_shape
+    Weighted Jacobi smoother for A u = F with 6-point Laplacian.
+    `iters` MUST be a Python int (or at least static) for reverse-mode to work.
     """
-    # indicator for Dimension
-    alpha = len(e.shape)
-    # initialize result with respect to the wanted shape
-    w = jnp.zeros(fine_shape)
+    iters = int(iters)  # force static loop bound
 
-    if alpha == 3:
-        w = prolongation_3D(w, e)
+    def body(k, u):
+        nd = u.ndim
+        sum_n = jnp.zeros_like(u)
+        for ax in range(nd):
+            sum_n = sum_n + jnp.roll(u, +1, axis=ax) + jnp.roll(u, -1, axis=ax)
+        denom = 2.0 * nd
+        u_star = (sum_n - (h*h) * F) / denom
+        return (1.0 - omega) * u + omega * u_star
 
-    # Case: Error
-    else:
-        raise ValueError("prolongation: invalid dimension")
-    return w
+    return jax.lax.fori_loop(0, iters, body, u0)
 
-@jax.jit
-def prolongation_3D(w, e):
-    # Assign coarse grid points directly
-    w = w.at[::2, ::2, ::2].set(e)
 
-    # Neighbors in y
-    w = w.at[::2, 1::2, ::2].set((e + jnp.roll(e, -1, axis=1)) / 2)
-    # Neighbors in z
-    w = w.at[::2, ::2, 1::2].set((e + jnp.roll(e, -1, axis=2)) / 2)
-    # Neighbors in x
-    w = w.at[1::2, ::2, ::2].set((e + jnp.roll(e, -1, axis=0)) / 2)
+def smooth_weighted_jacobi_old(u0: Array, F: Array, h: float, iters: int, omega: float = 2.0 / 3.0) -> Array:
+    """
+    Run iters sweeps of weighted Jacobi (small fixed iters; plain Python loop is ok).
+    """
+    u = u0
+    for _ in range(int(iters)):
+        u = jacobi_sweep(u, F, h, omega=omega)
+    return u
 
-    # Face centers: xy, xz, yz
-    w = w.at[::2, 1::2, 1::2].set((e +
-                                  jnp.roll(e, -1, axis=1) +
-                                  jnp.roll(e, -1, axis=2) +
-                                  jnp.roll(jnp.roll(e, -1, axis=1), -1, axis=2)) / 4)
 
-    w = w.at[1::2, ::2, 1::2].set((e +
-                                  jnp.roll(e, -1, axis=0) +
-                                  jnp.roll(e, -1, axis=2) +
-                                  jnp.roll(jnp.roll(e, -1, axis=0), -1, axis=2)) / 4)
+# -----------------------------------------------------------------------------
+# One multigrid V-cycle (periodic), no JIT on the recursive structure
+# -----------------------------------------------------------------------------
 
-    w = w.at[1::2, 1::2, ::2].set((e +
-                                  jnp.roll(e, -1, axis=0) +
-                                  jnp.roll(e, -1, axis=1) +
-                                  jnp.roll(jnp.roll(e, -1, axis=0), -1, axis=1)) / 4)
+@dataclass
+class PoissonCycle:
+    F: Array
+    v1: int = 2
+    v2: int = 2
+    mu: int = 1           # 1 => V-cycle, 2 => W-cycle
+    l: int = 1           # levels below this (0 = coarsest)
+    eps: float = 1e-6
+    h: float = 1.0
+    laplace: Optional[Callable[[Array, float], Array]] = None  # kept for API symmetry
 
-    # Center of the coarse cell (xyz)
-    w = w.at[1::2, 1::2, 1::2].set((
-        e +
-        jnp.roll(e, -1, axis=0) +
-        jnp.roll(e, -1, axis=1) +
-        jnp.roll(e, -1, axis=2) +
-        jnp.roll(jnp.roll(e, -1, axis=0), -1, axis=1) +
-        jnp.roll(jnp.roll(e, -1, axis=0), -1, axis=2) +
-        jnp.roll(jnp.roll(e, -1, axis=1), -1, axis=2) +
-        jnp.roll(jnp.roll(jnp.roll(e, -1, axis=0), -1, axis=1), -1, axis=2)
-    ) / 8)
+    # --- API compatibility helpers used by callers (optional) ---
+    def norm(self, U: Array) -> Array:
+        """RMS residual norm (scalar) — useful if you want to monitor convergence."""
+        r = residual(self.F, U, self.h)
+        return jnp.sqrt(jnp.mean(r * r))
 
-    return w
-
-#### multigrid cycles
-
-from abc import abstractmethod
-
-class AbstractCycle:
-    def __init__(self, F, v1, v2, mu, l, eps=1e-8, h=None,laplace= apply_poisson):
-        self.v1 = v1
-        self.v2 = v2
-        self.mu = mu
-        self.F = F
-        self.l = l
-        self.eps = eps
-        if h is None:
-            self.h = 1 / F.shape[0]
-        else:
-            self.h = h
-        if (self.l == 0):
-            self.l = int(np.log2(self.F.shape[0])) - 1
-        # ceck if l is plausible
-        if np.log2(self.F.shape[0]) < self.l:
-            raise ValueError('false value of levels')
-        self.poisson = laplace
-        
-    def __call__(self, U):
+    def __call__(self, U: Array) -> Array:
+        """One V-/W-cycle application."""
         return self.do_cycle(self.F, U, self.l, self.h)
 
-    @abstractmethod
-    def _presmooth(self, F, U, h):
-        pass
+    # --- Core cycle ---
+    def do_cycle(self, F: Array, U: Array, level: int, h: float) -> Array:
+        """
+        Recursive V-cycle (mu=1) / W-cycle (mu=2).
+        On the coarsest grid (level==0) we do a few extra Jacobi sweeps.
+        """
+        # Coarsest grid: "exact" solve via more smoothing sweeps
+        if level <= 0 or min(U.shape) <= 2:
+            Uc = smooth_weighted_jacobi(U, F, h, iters=16, omega=2.0 / 3.0)
+            return Uc
 
-    @abstractmethod
-    def _postsmooth(self, F, U, h):
-        pass
+        # Pre-smooth
+        U = smooth_weighted_jacobi(U, F, h, iters=self.v1, omega=2.0 / 3.0)
 
-    @abstractmethod
-    def _compute_residual(self, F, U, h):
-        pass
+        # Residual and restrict to coarse
+        r = residual(F, U, h)
+        Rc = restrict_full_weighting(r)
 
-    @abstractmethod
-    def _solve(self, F, U, h):
-        pass
+        # Coarse-grid operator uses doubled spacing
+        hc = 2.0 * h
 
-    @abstractmethod
-    def norm(self, U):
-        pass
+        # Coarse-grid correction: solve A e = Rc
+        Ec = jnp.zeros_like(Rc, dtype=U.dtype)
 
-    @abstractmethod
-    def restriction(self, r):
-        pass
+        # mu times down-and-up (V:1, W:2)
+        for _ in range(int(self.mu)):
+            Ec = self.do_cycle(Rc, Ec, level - 1, hc)
 
-    def _residual(self, U):
-        return self._compute_residual(self.F, U, self.h)
+        # Prolongate and correct
+        Ef = prolong_trilinear(Ec, U.shape)
+        U = U + Ef
 
-    def _compute_correction(self, r, l, h):
-        e = jnp.zeros_like(r)
-        for _ in range(self.mu):
-            e = self.do_cycle(r, e, l, h)
-        return e
-
-    def do_cycle(self, F, U, l, h):
-       # print(l)
-        if l <= 1 or U.shape[0] <= 1:
-            return self._solve(F, U, h)
-
-        U = self._presmooth(F=F, U=U, h=h)
-
-        r = self._compute_residual(F=F, U=U, h=h)
-
-        r = self.restriction(r)
-        
-        e = self._compute_correction(r, l - 1, 2 * h)
-
-        e = prolongation(e, U.shape)
-
-        # correction
-        U += e
-
-        return self._postsmooth(F=F, U=U, h=h)
+        # Post-smooth
+        U = smooth_weighted_jacobi(U, F, h, iters=self.v2, omega=2.0 / 3.0)
+        return U
 
 
-class PoissonCycle(AbstractCycle):
-    def __init__(self, F, v1, v2, mu, l, eps=1e-8, h=None,laplace= apply_poisson):
-        super().__init__(F, v1, v2, mu, l, eps, h,laplace)
+# -----------------------------------------------------------------------------
+# Public driver
+# -----------------------------------------------------------------------------
 
-    def _presmooth(self, F, U, h=None):
-        return GS_RB(
-            F,
-            U=U,
-            h=h,
-            max_iter=self.v1,
-            eps=self.eps,
-            laplace=self.poisson)
-
-    def _postsmooth(self, F, U, h=None):
-        return GS_RB(
-            F,
-            U=U,
-            h=h,
-            max_iter=self.v2,
-            eps=self.eps,
-        laplace=self.poisson)
-
-    def _compute_residual(self, F, U, h):
-        return F - self.poisson(U, h)
-
-    def _solve(self, F, U, h):
-        return GS_RB(
-            F=F,
-            U=U,
-            h=h,
-            max_iter=1000,
-            eps=self.eps,
-            norm_iter=5,
-        laplace=self.poisson)
-
-    def norm(self, U):
-        residual = self._residual(U)
-        return jnp.linalg.norm(residual)
-
-    def restriction(self, r):
-        return weighted_restriction(r)
-
-    
-
-def poisson_multigrid(F, U, l, v1, v2, mu, iter_cycle, eps=1e-6, h=None, laplace = apply_poisson):
-    """Implementation of MultiGrid iterations
-       should solve AU = F
-       A is poisson equation
-       @param U n x n Matrix
-       @param F n x n Matrix
-       @param v1 Gauss Seidel iterations in pre smoothing
-       @param v2 Gauss Seidel iterations in post smoothing
-       @param mu iterations for recursive call
-       @return x n vector
+def multigrid(cycle: PoissonCycle, U: Array, eps: float, iter_cycle: int) -> Array:
     """
+    Run a fixed number of V-/W-cycles. Using a plain Python loop keeps this
+    robust under JIT/scan/pjit callers (no data-dependent conds inside jitted code).
+    """
+    U_out = U
+    for _ in range(int(iter_cycle)):
+        U_out = cycle(U_out)
+        # Optional: if you *really* want a tolerance stop, do it on host:
+        # if float(cycle.norm(U_out)) <= eps:
+        #     break
+    return U_out
 
-    cycle = PoissonCycle(F, v1, v2, mu, l, eps, h,laplace)
+
+def poisson_multigrid(F: Array,
+                      U: Array,
+                      l: int,
+                      v1: int,
+                      v2: int,
+                      mu: int,
+                      iter_cycle: int,
+                      eps: float = 1e-6,
+                      h: Optional[float] = None,
+                      laplace: Optional[Callable[[Array, float], Array]] = apply_poisson) -> Array:
+    """
+    Solve A phi = F with periodic BCs using multigrid V-/W-cycles.
+    Arguments mirror your previous API so it can be dropped in.
+    """
+    if h is None:
+        # Default to unit spacing if not provided
+        h = 1.0
+
+    # Build the cycle object (Python). We keep `laplace` in the signature for API
+    # compatibility, but the code above uses `apply_poisson` internally.
+    cycle = PoissonCycle(F=F, v1=v1, v2=v2, mu=mu, l=l, eps=eps, h=h, laplace=laplace)
+
+    # Run fixed number of cycles
     return multigrid(cycle, U, eps, iter_cycle)
 
-#jax.lax.while_loop(cond_fun, body_fun, init_val)
-#def body_func(U,cycle):
 
+# -----------------------------------------------------------------------------
+# Custom-VJP wrapper: treat multigrid as an implicit linear solve
+# -----------------------------------------------------------------------------
 
-
-@partial(jax.jit, static_argnames=['cycle','iter_cycle','eps'])
-def multigrid_optimizer(cycle, U, eps, iter_cycle):
-    
-    def cond(arg):
-        step, U = arg
-        norm = cycle.norm(U)
-        return (step < iter_cycle) & (norm > eps)
-    
-    def body(arg):
-        step, U = arg
-        U = cycle(U)
-        return (step + 1, U)
-
-    return jax.lax.while_loop(
-        cond,
-        body,
-        (0, U)
-    )
-
-def multigrid(cycle, U, eps, iter_cycle):
-
-    # scale the epsilon with the number of gridpoints
-    eps *= U.shape[0] * U.shape[0] * U.shape[0]
-    _,U = multigrid_optimizer(cycle, U, eps, iter_cycle)
-    #for i in range(1, iter_cycle + 1):
-    #    U = cycle(U)
-    #    norm = cycle.norm(U)
-      #  print(f"Residual has a L2-Norm of {norm:.4} after {i} MGcycle")
-       # if norm <= eps:
-         #   print(
-         #       f"converged after {i} cycles with {norm:.4} error")
-       #     break
-    return U
-
-
-@partial(jax.jit, static_argnames=['h','iter_cycle','eps','laplace'])
-def GS_RB_optimizer(F, U, h, eps, iter_cycle,laplace):
-    
-    def cond(arg):
-        step, U = arg
-        norm = jnp.linalg.norm(F - laplace(U, h))
-        return (step < iter_cycle) & (norm > eps)
-    
-    def body(arg):
-        step, U = arg
-        #red
-        U= sweep_3D(1, F, U, h*h)
-        # black
-        U = sweep_3D(0, F, U, h*h)
-        return (step + 1, U)
-
-    return jax.lax.while_loop(
-        cond,
-        body,
-        (0, U)
-    )
-
-
-
-import jax
-def GS_RB(
-    F,
-    U=None,
-    h=None,
-    max_iter=1000,
-    eps=1e-8,
-    norm_iter=1000,
-    laplace = apply_poisson
-):
+def make_poisson_mg_solver(l: int,
+                           v1: int,
+                           v2: int,
+                           mu: int,
+                           iter_cycle: int,
+                           eps: float = 1e-6,
+                           h: float = 1.0):
     """
-    red-black
-    Solve AU = F, the poisson equation.
+    Build a custom-VJP multigrid Poisson solver with *fixed* MG parameters.
 
-    @param F n vector
-    @param h is distance between grid points | default is 1/N
-    @return U n vector
+    Usage:
+        solve = make_poisson_mg_solver(l=4, v1=2, v2=2, mu=2,
+                                       iter_cycle=3, eps=1e-3, h=dx)
+        phi = solve(F, U0)  # U0 is initial guess, same shape as F
+
+    Forward:  phi = approx(A^{-1} F) via poisson_multigrid.
+    Backward: g_F = approx(A^{-1} g_phi) using the same MG config.
     """
-    if U is None:
-        U = jnp.zeros_like(F)
-    if h is None:
-        h = 1 / (U.shape[0])
 
-    h2 = h * h
+    @jax.custom_vjp
+    def solve(F: Array, U0: Array) -> Array:
+        # Forward wrapper that closes over MG params.
+        return poisson_multigrid(
+            F=F,
+            U=U0,
+            l=l,
+            v1=v1,
+            v2=v2,
+            mu=mu,
+            iter_cycle=iter_cycle,
+            eps=eps,
+            h=h,
+            laplace=apply_poisson,
+        )
 
-    if len(F.shape) == 3:
-        sweep = sweep_3D
-    else:
-        raise ValueError("Wrong Shape!!!")
+    # ---- Forward pass for custom VJP ----
+    def solve_fwd(F: Array, U0: Array):
+        phi = poisson_multigrid(
+            F=F,
+            U=U0,
+            l=l,
+            v1=v1,
+            v2=v2,
+            mu=mu,
+            iter_cycle=iter_cycle,
+            eps=eps,
+            h=h,
+            laplace=apply_poisson,
+        )
+        # We don't actually need to save anything for backward because the
+        # operator is linear and we reuse the same solver; residuals = ()
+        residuals = ()
+        return phi, residuals
 
-    norm = 0.0  # declarate norm so we can output later
-    it = 0
-    #Gauss-Seidel-Iterationen
-    _,U = GS_RB_optimizer(F, U, h, eps, max_iter, laplace)
+    # ---- Backward pass (VJP) ----
+    def solve_bwd(residuals, g_phi: Array):
+        # residuals == (), unused
+        del residuals
 
-    #print(f"converged after {it} iterations with {norm:.4} error")
+        # VJP wrt F: for symmetric A, (A^{-1})^T g_phi = A^{-1} g_phi.
+        # So we just solve another Poisson problem:
+        g_F = poisson_multigrid(
+            F=g_phi,
+            U=jnp.zeros_like(g_phi),
+            l=l,
+            v1=v1,
+            v2=v2,
+            mu=mu,
+            iter_cycle=iter_cycle,
+            eps=eps,
+            h=h,
+            laplace=apply_poisson,
+        )
 
-    return U
+        # We choose *not* to propagate gradients through the initial guess U0;
+        # if you wanted that for some reason, you'd need another linear solve.
+        g_U0 = jnp.zeros_like(g_phi)
 
+        return (g_F, g_U0)
 
-@partial(jax.jit, static_argnames=['color','h2'])
-def sweep_3D(color, F, U, h2):
-    """
-    Perform one red-black Gauss-Seidel sweep with periodic BCs.
+    solve.defvjp(solve_fwd, solve_bwd)
 
-    @param color: 0 (black) or 1 (red)
-    @param F: Right-hand side
-    @param U: Current solution
-    @param h2: Grid spacing squared
-    """
-    # Grid shape
-    m, n, o = F.shape
-
-    # Create mask for red or black points on a checkerboard
-    i = jnp.arange(m)[:, None, None]
-    j = jnp.arange(n)[None, :, None]
-    k = jnp.arange(o)[None, None, :]
-
-    checkerboard = (i + j + k) % 2
-    mask = (checkerboard == color)
-
-    # Compute neighbor sums using jnp.roll for periodic access
-    neighbor_sum = (
-        jnp.roll(U, 1, axis=0) + jnp.roll(U, -1, axis=0) +
-        jnp.roll(U, 1, axis=1) + jnp.roll(U, -1, axis=1) +
-        jnp.roll(U, 1, axis=2) + jnp.roll(U, -1, axis=2)
-    )
-
-    # Update only the selected color cells
-    U_new = jnp.where(
-        mask,
-        (neighbor_sum - F * h2) / 6.0,
-        U
-    )
-
-    return U_new
-    
-
-
-def gauss_seidel(A, F, U=None, eps=1e-10, max_iter=1000):
-    """Implementation of Gauss Seidl iterations
-       should solve AU = F
-       @param A n x m Matrix
-       @param F n vector
-       @return n vector
-    """
-    raise
-    n, *_ = A.shape
-    if U is None:
-        U = jnp.zeros_like(F)
-
-    for _ in range(max_iter):
-        U_next = jnp.zeros_like(U)
-        for i in range(n):
-            left = jnp.dot(A[i, :i], U_next[:i])
-            right = jnp.dot(A[i, i + 1:], U[i + 1:])
-            U_next[i] = (F[i] - left - right) / (A[i, i])
-
-        U = U_next
-        if np.linalg.norm(F - A @ U) < eps:
-            break
-
-    return U
+    # Optional: JIT the custom-VJP'd function for speed.
+    # Inputs are just (F, U0), MG params are closed over and thus static.
+    return jax.jit(solve)
