@@ -338,7 +338,7 @@ class HLLD_MHD(RiemannSolver):
         self.gamma = getattr(equation_manager, "gamma", 5.0/3.0)
         # Common indices
         self.mass_ids = getattr(equation_manager, "mass_ids", 0)
-        self.energy_ids = getattr(equation_manager, "energy_ids", 4)  
+        self.energy_ids = getattr(equation_manager, "energy_ids", -1)  
     # ---------------------- helpers ---------------------- #
     @staticmethod
     def _axis_unpack(prims, axis, vel_ids, mag_ids):
@@ -347,7 +347,7 @@ class HLLD_MHD(RiemannSolver):
         B1_i, B2_i, B3_i = mag_ids
         u_i, v_i, w_i = vel_ids
         rho = prims[0]  # assuming mass density first in primitives
-        p = prims[4]    # in your code, primitives[energy_i] stores gas pressure
+        p = prims[-1]    # in your code, primitives[energy_i] stores gas pressure
 
         B1, B2, B3 = prims[B1_i], prims[B2_i], prims[B3_i]
         if axis == 0:
