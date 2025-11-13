@@ -252,7 +252,7 @@ class EquationManager:
         else:
             raise
     
-    def get_thermal_conductivity(
+    def get_thermal_conductivity_old(
             self,
             temperature: Array,
             primitives: Array,
@@ -327,3 +327,52 @@ class EquationManager:
             raise NotImplementedError
 
         return thermal_conductivity
+    
+    def get_thermal_conductivity(self, temperature, primitives, 
+                                           density=None, partial_densities=None, 
+                                           volume_fractions=None):
+        """
+        Corrected thermal conductivity matching Athena++ implementation.
+        This returns κ in "code units" that already includes unit adjustments.
+        """
+        T = temperature
+
+        if self.thermal_conductivity_model == "ELBADRY":
+            # Constants (same as Athena++)
+            MHKB = 115.98518596699539
+            EPSILON = 3468.366826027353
+
+            rho = primitives[self.mass_ids]
+            p   = primitives[self.energy_ids]
+
+            # Temperature in Kelvin (matching Athena++ line 416)
+            T_phys = 1.272727 * MHKB * p / (rho + self.eps)
+
+            # Hot vs. cool branches (matching Athena++ lines 418-427)
+            temp7 = T_phys / 1.0e7
+            temp4 = T_phys / 1.0e4
+            ne2   = EPSILON * rho
+
+            # Spitzer conductivity for hot gas (T > 6.6e4 K)
+            kappa_hot = (1.7e11 * temp7**2.5) / (1.0 + 0.029 * jnp.log(temp7 / jnp.sqrt(ne2)))
+
+            # Parker conductivity for cool gas (T < 6.6e4 K)
+            kappa_cool = 2.5e5 * jnp.sqrt(temp4)
+
+            # Branch selection
+            kappa = jnp.where(T_phys > 6.6e4, kappa_hot, kappa_cool)
+
+            # Adjust for Athena++ units (line 430)
+            # This converts from physical units to code units
+            kappa = kappa * 1.4 * MHKB / (rho + self.eps)
+
+            return kappa
+
+        elif self.thermal_conductivity_model == "SUTHERLAND":
+            t_1 = ((self.T_ref_kappa + self.C_kappa)/(T + self.C_kappa))
+            t_2 = (T/self.T_ref_kappa)**1.5
+            thermal_conductivity = self.kappa_ref * t_1 * t_2
+            return thermal_conductivity
+
+        else:
+            raise NotImplementedError
