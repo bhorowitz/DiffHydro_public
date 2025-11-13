@@ -170,3 +170,73 @@ class TurbulentForce:
         work = rho*(u*a[0] + v*a[1] + w*a[2])*dt
         U = U.at[self.i_E].add(jnp.nan_to_num(work))
         return U
+
+def init_turbulent_velocity_cpu(eq, Lbox, rho0, p0,
+                                kmin=1, kmax=3, solenoidal_frac=1.0,
+                                pslope=-2.0, target_M=1.0, seed=123):
+    #initializing this field is the bottleneck on GPU, needs to materialize over whole thing...
+    #fairly fast on CPU, don't need to backprop...
+    nx, ny, nz = eq.mesh_shape
+
+    rng = np.random.default_rng(seed)
+
+    # k-grid (fundamental k0 = 2π/L)
+    k0 = 2.0 * np.pi / Lbox
+    kx = k0 * np.fft.fftfreq(nx) * nx
+    ky = k0 * np.fft.fftfreq(ny) * ny
+    kz = k0 * np.fft.fftfreq(nz) * nz
+    KX, KY, KZ = np.meshgrid(kx, ky, kz, indexing="ij")
+    K2 = KX**2 + KY**2 + KZ**2
+    K = np.sqrt(np.maximum(K2, 1e-30))
+
+    # band-pass mask
+    kmag = np.sqrt((KX/k0)**2 + (KY/k0)**2 + (KZ/k0)**2)
+    band = (kmag >= kmin) & (kmag <= kmax)
+
+    # random complex field
+    def rand_complex():
+        a = rng.normal(size=(nx, ny, nz))
+        b = rng.normal(size=(nx, ny, nz))
+        return a + 1j * b
+
+    g1 = rand_complex()
+    g2 = rand_complex()
+    g3 = rand_complex()
+    G = np.stack([g1, g2, g3], axis=0)   # (3, nx, ny, nz)
+
+    # amplitude spectrum ~ k^{pslope}
+    Amp = (K**(0.5*pslope)) * band
+    Amp = Amp / np.sqrt(np.mean(Amp**2) + 1e-30)
+
+    # project to solenoidal/compressive mix
+    kk_over_k = np.stack([KX, KY, KZ], 0) / np.maximum(K, 1e-30)
+    C = np.einsum("i...,j...->ij...", kk_over_k, kk_over_k)
+    I = np.eye(3)[:, :, None, None, None]
+    P = I - C
+    zeta = solenoidal_frac
+    Proj = zeta * P + (1.0 - zeta) * C
+
+    Uhat = np.einsum("ij...,j...->i...", Proj, G) * Amp   # (3, nx, ny, nz)
+    u = np.fft.ifftn(Uhat, axes=(1,2,3)).real            # (3, nx, ny, nz)
+
+    # normalize to target Mach
+    rho = rho0 * np.ones((nx, ny, nz))
+    p = p0 * np.ones_like(rho)
+    cs = np.sqrt(eq.gamma * p / rho)
+    urms = np.sqrt(np.mean(np.sum(u**2, axis=0)))
+    alpha = (target_M * np.mean(cs)) / (urms + 1e-30)
+    v = alpha * u
+
+    U = np.zeros((5, nx, ny, nz), dtype=np.float64)
+    U[0] = rho
+    U[1] = rho * v[0]
+    U[2] = rho * v[1]
+    U[3] = rho * v[2]
+    E_th = p / (eq.gamma - 1.0)
+    E_kin = 0.5 * rho * (v**2).sum(axis=0)
+    U[4] = E_th + E_kin
+
+    # convert to jax array (still on CPU, but that’s fine)
+    return jnp.asarray(U, dtype=eq.real_dtype)
+
+
