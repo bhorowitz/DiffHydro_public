@@ -13,4 +13,8 @@ Main new features complete or under development
  - [ ] Self Gravity via jaxdecomp and multigrid methods, both as forcing and as new flux term
  - [ ] Adaptive Mesh Refinement schemes in 3d (the biggest challenge!)
 
+I'm currently working on organizing the examples better. If you don't want to wade through the notebooks there are some basic examples in this colab notebook:
+
+- [Turbulence and Blast Wave](https://colab.research.google.com/drive/14GuxwW_s4_OfuUXNsYOShAuySOoUay_b?usp=sharing)
+
 Let me know if you want to be involved and add any features! ben.horowitz@ipmu.jp or open a pull request! :D 
