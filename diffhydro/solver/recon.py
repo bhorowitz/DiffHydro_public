@@ -287,36 +287,25 @@ class PLM:
         self.eps = eps
 
     def reconstruct_xi(self, buffer: Array, axis: int, j: int) -> Array:
-        # cell-centered values around a given face (i+1/2)
         qim1 = jnp.roll(buffer, +1, axis=axis)
         qi   = buffer
         qip1 = jnp.roll(buffer, -1, axis=axis)
 
-        # one-sided raw slopes
-        dqm = qi   - qim1
+        dqm = qi - qim1
         dqp = qip1 - qi
 
-        # ratio r = dqp / dqm with robust eps handling
-        r = jnp.where(dqm >= self.eps,
-                      dqp / (dqm + self.eps),
-                      (dqp + self.eps) / (dqm + self.eps))
+        r = jnp.where(jnp.abs(dqm) >= self.eps,
+                      dqp / (dqm + jnp.sign(dqm) * self.eps),
+                      0.0)
 
-        # limited slope (phi(r) * dqm); same limiter interface as MUSCL3
         phi = self.limiter_fun(r)
-        dq  = phi * dqm
+        dq = phi * dqm
 
-        # left/right face states at i+1/2 (same j convention as MUSCL3/PPM)
-        qL_iphalf = qi   + 0.5 * dq     # from cell i
-        qR_iphalf = qip1 - 0.5 * (jnp.roll(buffer, -2, axis=axis) - qip1) * \
-                    self.limiter_fun(
-                        jnp.where((qip1 - qi) >= self.eps,
-                                  (jnp.roll(buffer, -2, axis=axis) - qip1) / ((qip1 - qi) + self.eps),
-                                  ((jnp.roll(buffer, -2, axis=axis) - qip1) + self.eps) / ((qip1 - qi) + self.eps))
-                    )
+        qL_iphalf = qi + 0.5 * dq
+        qR_iphalf = qip1 - 0.5 * jnp.roll(dq, -1, axis=axis)
 
         return qL_iphalf if j == 0 else qR_iphalf
     
-
 class PPM:
     """
     Piecewise Parabolic Method (Colella–Woodward style, simplified) with MUSCL-style
@@ -383,20 +372,20 @@ class PPM:
         # delta_i   ~ phi(r_i)   * (q_i   - q_{i-1})
         # delta_ip1 ~ phi(r_ip1) * (q_{i+2} - q_{i+1})  (note: right-biased per MUSCL3) :contentReference[oaicite:5]{index=5}
         delta_i   = phi_i   * (qi   - qim1)
-        delta_ip1 = phi_ip1 * (qip2 - qip1)
+        delta_ip1 = phi_ip1 * (qip1 - qi)
 
         # --- PPM 4th-order face prediction with curvature correction ---
         curv_i   = (qip1 - qi)   - (qi   - qim1)
         curv_ip1 = (qip2 - qip1) - (qip1 - qi)
 
         # Left state at i+1/2 from cell i, Right state at i+1/2 from cell i+1
-        qL_iphalf = qi   + 0.5*delta_i   - (1.0/6.0)*curv_i
-        qR_iphalf = qip1 - 0.5*delta_ip1 + (1.0/6.0)*curv_ip1
+        qL_iphalf = qi   + 0.5*delta_i   + (1.0/6.0)*curv_i   # Plus, not minus!
+        qR_iphalf = qip1 - 0.5*delta_ip1 - (1.0/6.0)*curv_ip1 # Minus, not plus!
 
         # --- monotonic bracketing at the face (TVD-ish safety) ---
         if self.use_clip:
-            qmin = jnp.minimum(qi, qip1)
-            qmax = jnp.maximum(qi, qip1)
+            qmin = jnp.minimum(jnp.minimum(qim1, qi), jnp.minimum(qip1, qip2))
+            qmax = jnp.maximum(jnp.maximum(qim1, qi), jnp.maximum(qip1, qip2))
             qL_iphalf = jnp.clip(qL_iphalf, qmin, qmax)
             qR_iphalf = jnp.clip(qR_iphalf, qmin, qmax)
 

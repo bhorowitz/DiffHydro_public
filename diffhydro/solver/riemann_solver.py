@@ -142,6 +142,49 @@ class LaxFriedrichs_MHD(RiemannSolver):
         fluxes_xi = 0.5 * (F_L + F_R) - 0.5 * alpha * (conservatives_R - conservatives_L)
         return fluxes_xi, None, None
 
+class LaxFriedrichs_safe(RiemannSolver):
+
+    def __init__(self, equation_manager, signal_speed: Callable, **kwargs) -> None:
+        super().__init__(equation_manager, signal_speed)
+
+    def _solve_riemann_problem_xi_single_phase(
+            self, 
+            primitives_L: Array,
+            primitives_R: Array, 
+            conservatives_L: Array,
+            conservatives_R: Array, 
+            axis: int,
+            **kwargs
+            ) -> Tuple[Array, Array, Array]:
+
+        fluxes_L = self.equation_manager.get_fluxes_xi(primitives_L, conservatives_L, axis)
+        fluxes_R = self.equation_manager.get_fluxes_xi(primitives_R, conservatives_R, axis)
+
+        # local velocidades & sound speeds
+        uL = primitives_L[self.velocity_ids[axis]]
+        uR = primitives_R[self.velocity_ids[axis]]
+
+        speed_of_sound_L = self.equation_manager.get_speed_of_sound(
+            primitives_L[self.equation_manager.energy_ids],
+            primitives_L[self.equation_manager.mass_ids],
+        )
+        speed_of_sound_R = self.equation_manager.get_speed_of_sound(
+            primitives_R[self.equation_manager.energy_ids],
+            primitives_R[self.equation_manager.mass_ids],
+        )
+
+        alpha_L = jnp.abs(uL) + speed_of_sound_L
+        alpha_R = jnp.abs(uR) + speed_of_sound_R
+        alpha = jnp.maximum(alpha_L, alpha_R)
+
+        # optional robustness tweaks:
+        alpha = jnp.where(jnp.isfinite(alpha), alpha, 0.0)
+        alpha = jnp.maximum(alpha, self.eps)
+
+        fluxes_xi = 0.5 * (fluxes_L + fluxes_R) - 0.5 * alpha * (conservatives_R - conservatives_L)
+
+        return fluxes_xi, None, None
+    
 class LaxFriedrichs(RiemannSolver):
 
     def __init__(
@@ -280,6 +323,80 @@ class HLLC(RiemannSolver):
                   + 0.5 * (1 - jnp.sign(wave_speed_contact)) * flux_star_R
         return fluxes_xi, None, None
 
+class HLL(RiemannSolver):
+    """
+    Two-wave HLL Riemann solver for ideal hydrodynamics (Euler).
+    Uses Davis-type bounds S_L, S_R from the same signal_speed
+    function as HLLC.
+    """
+    def __init__(self, equation_manager, signal_speed, **kwargs):
+        super().__init__(equation_manager, signal_speed)
+
+    def _solve_riemann_problem_xi_single_phase(
+            self,
+            primitives_L,
+            primitives_R,
+            conservatives_L,
+            conservatives_R,
+            axis: int,
+            **kwargs):
+
+        # Physical fluxes
+        F_L = self.equation_manager.get_fluxes_xi(primitives_L, conservatives_L, axis)
+        F_R = self.equation_manager.get_fluxes_xi(primitives_R, conservatives_R, axis)
+
+        # Normal velocities
+        uL = primitives_L[self.velocity_ids[axis]]
+        uR = primitives_R[self.velocity_ids[axis]]
+
+        # Speed of sound (same as HLLC)
+        cs_L = self.equation_manager.get_speed_of_sound(
+            primitives_L[self.equation_manager.energy_ids],
+            primitives_L[self.equation_manager.mass_ids],
+        )
+        cs_R = self.equation_manager.get_speed_of_sound(
+            primitives_R[self.equation_manager.energy_ids],
+            primitives_R[self.equation_manager.mass_ids],
+        )
+
+        # Davis-type bounds from the SAME signal_speed as HLLC
+        S_L_raw, S_R_raw = self.signal_speed(
+            uL, uR,
+            cs_L, cs_R,
+            rho_L=primitives_L[self.mass_ids],
+            rho_R=primitives_R[self.mass_ids],
+            p_L=primitives_L[self.energy_ids],
+            p_R=primitives_R[self.energy_ids],
+            gamma=self.equation_manager.gamma,
+        )
+
+        # Enforce upwind: left waves negative, right waves positive
+        S_L = jnp.minimum(S_L_raw, 0.0)
+        S_R = jnp.maximum(S_R_raw, 0.0)
+
+        # HLL flux (only used where S_L < 0 < S_R)
+        # Safe denominator for that region
+        denom = S_R - S_L
+        denom_safe = jnp.where(jnp.abs(denom) < self.eps, 1.0, denom)
+
+        F_hll = (
+            S_R * F_L
+            - S_L * F_R
+            + S_L * S_R * (conservatives_R - conservatives_L)
+        ) / denom_safe
+
+        # Piecewise selection to avoid spurious division / NaNs
+        fluxes_xi = jnp.where(
+            S_L >= 0.0,
+            F_L,  # all waves go right
+            jnp.where(
+                S_R <= 0.0,
+                F_R,  # all waves go left
+                F_hll,
+            ),
+        )
+
+        return fluxes_xi, None, None
 
 class HLL_MHD(RiemannSolver):
     """
@@ -338,7 +455,7 @@ class HLLD_MHD(RiemannSolver):
         self.gamma = getattr(equation_manager, "gamma", 5.0/3.0)
         # Common indices
         self.mass_ids = getattr(equation_manager, "mass_ids", 0)
-        self.energy_ids = getattr(equation_manager, "energy_ids", 4)  
+        self.energy_ids = getattr(equation_manager, "energy_ids", -1)  
     # ---------------------- helpers ---------------------- #
     @staticmethod
     def _axis_unpack(prims, axis, vel_ids, mag_ids):
@@ -347,7 +464,7 @@ class HLLD_MHD(RiemannSolver):
         B1_i, B2_i, B3_i = mag_ids
         u_i, v_i, w_i = vel_ids
         rho = prims[0]  # assuming mass density first in primitives
-        p = prims[4]    # in your code, primitives[energy_i] stores gas pressure
+        p = prims[-1]    # in your code, primitives[energy_i] stores gas pressure
 
         B1, B2, B3 = prims[B1_i], prims[B2_i], prims[B3_i]
         if axis == 0:

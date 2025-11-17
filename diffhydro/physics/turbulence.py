@@ -66,7 +66,7 @@ def init_turbulent_velocity(eq, Lbox, rho0, p0,
     U = U.at[4].set(E_th + E_kin)
     return U
 
-
+@jax.tree_util.register_pytree_node_class
 class TurbulentForce:
     """NaN-safe Ornstein–Uhlenbeck turbulent driver (Athena-style)."""
 
@@ -170,3 +170,23 @@ class TurbulentForce:
         work = rho*(u*a[0] + v*a[1] + w*a[2])*dt
         U = U.at[self.i_E].add(jnp.nan_to_num(work))
         return U
+    
+    def tree_flatten(self):
+        # Dynamic state that changes
+        children = (self.accel_k, self.key)
+        # Static config that doesn't change
+        aux_data = {
+            'kmin': self.kmin, 'kmax': self.kmax,
+            'sol_frac': self.sol_frac, 'tau': self.tau,
+            'a_rms_target': self.a_rms_target,
+            'nx': self.nx, 'ny': self.ny, 'nz': self.nz,
+        }
+        return (children, aux_data)
+    
+    @classmethod
+    def tree_unflatten(cls, aux_data, children):
+        obj = cls.__new__(cls)
+        obj.accel_k, obj.key = children
+        for k, v in aux_data.items():
+            setattr(obj, k, v)
+        return obj
