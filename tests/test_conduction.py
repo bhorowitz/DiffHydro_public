@@ -27,7 +27,6 @@ def test_conduction_blob_expansion():
         n_super_step=120,
         fluxes=[conductive_flux],
     #    splitting_schemes=[[1, 2, 3]],
-        maxjit=False,
     )
 
     state = hydrosim.evolve(init_sol, {})

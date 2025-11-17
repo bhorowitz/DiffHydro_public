@@ -4,10 +4,10 @@ import os
 import numpy as np
 
 import diffhydro as dh
-from diffhydro.prob_gen import sedov_2d, sedov
+from diffhydro.prob_gen import sedov_2d, sedov, make_gaussian_blob
 from diffhydro.utils.diagnostics import isotropy_score
-    
-def test_shapes():
+
+def test_sedov_singepoint_strangsplit():
     print("############# SEDOV SYMMETRY TEST #################")
     print("Should take about 1 minute on GPU")
 
@@ -16,7 +16,7 @@ def test_shapes():
     ss = dh.signal_speed_Rusanov
     solver = dh.HLLC(equation_manager=eq,signal_speed=ss)
     cf = dh.ConvectiveFlux(eq,solver,dh.MUSCL3(limiter="SUPERBEE"))
-    hydrosim = dh.hydro(n_super_step=200,fluxes=[cf],maxjit=True)
+    hydrosim = dh.hydro(n_super_step=200,fluxes=[cf],use_mol=False)
     
     U, _ = sedov_2d(1e7, 0.1, eq)
     
@@ -32,14 +32,17 @@ def test_shapes_MOL():
     print("Should take about ~1 minute on GPU")
 
     eq = dh.equationmanager.EquationManager()
-    eq.cfl=0.2
+    eq.mesh_shape = [100,100,100]
+    eq.cfl=0.1
     eq.box_size = (1.0, 1.0, 1.0)
     ss = dh.signal_speed_Rusanov
     solver = dh.HLLC(equation_manager=eq,signal_speed=ss)
     cf = dh.ConvectiveFlux(eq,solver,dh.MUSCL3(limiter="SUPERBEE"))
-    hydrosim = dh.hydro(n_super_step=100,fluxes=[cf],maxjit=True,use_mol=True)
+    hydrosim = dh.hydro(n_super_step=100,fluxes=[cf],use_mol=True)
     
-    U, _ = sedov(1e7, 0.1, eq) #3d version
+    U, _ = make_gaussian_blob(eq, eq.mesh_shape)
+
+    #U, _ = sedov(1e7, 0.1, eq) #3d version
     
     params = {}
     q = hydrosim.evolve(U,params)
