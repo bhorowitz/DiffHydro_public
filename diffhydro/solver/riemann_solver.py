@@ -464,7 +464,7 @@ class HLLD_MHD(RiemannSolver):
         B1_i, B2_i, B3_i = mag_ids
         u_i, v_i, w_i = vel_ids
         rho = prims[0]  # assuming mass density first in primitives
-        p = prims[-1]    # in your code, primitives[energy_i] stores gas pressure
+        p = prims[-1]    # in code, primitives[energy_i] stores gas pressure
 
         B1, B2, B3 = prims[B1_i], prims[B2_i], prims[B3_i]
         if axis == 0:
