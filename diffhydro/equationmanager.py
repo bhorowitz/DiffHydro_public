@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from jax import Array 
 from functools import partial
 from typing import List
@@ -9,25 +11,61 @@ import jax
 
 #need to figure out where cfl goes, probably into flux directly?
 
+
+from dataclasses import dataclass, field
+import jax.numpy as jnp
+
+
+@dataclass
 class EquationManager:
-    """ The EquationManager stores information on the system of equations that is being solved.
-    Besides providing indices for the different variables, the EquationManager provides the 
-    equation-specific primitive/conservative conversions and the flux calculation.
-
-    NOTE! For DiffHydro it also rolls in the materials properties as an (safe) Ideal Gas. Might go back to 
-    materials class if lots of weird fluids emerge...
     """
-    def __init__(
-            self,
-           # material_manager: MaterialManager,
-          #  equation_information: EquationInformation
-            ) -> None:
+    Generic compressible Euler equation manager with optional passive scalars.
 
-       # self.equation_information = equation_information
+    Active variables (always first, fixed order for compatibility):
+      primitives active:  [rho, vx, vy, vz, p]
+      conservatives active: [rho, rho*vx, rho*vy, rho*vz, Etot]
 
-        self.mass_ids = 0#equation_information.mass_ids 
-        self.vel_ids = (1,2,3)#equation_information.velocity_ids 
-        self.energy_ids = -1
+    Passive variables (any extra slots beyond active):
+      primitives passive:  s_k
+      conservatives passive: rho * s_k
+
+    The code below avoids hard-coded indices in the numerics by:
+      - defining active indices once in __post_init__
+      - using active_slice/passive_slice everywhere else.
+    """
+    gamma: float = 1.4
+    n_cons: int = 5
+    eps: float = 1e-12
+
+    # Active variable names/order (single source of truth)
+    active_names: tuple[str, ...] = ("rho", "vx", "vy", "vz", "p")
+
+    # Derived index maps (filled in __post_init__)
+    active_map: dict[str, int] = field(init=False, repr=False)
+    mass_ids: int = field(init=False)
+    vel_ids: tuple[int, int, int] = field(init=False)
+    energy_ids: int = field(init=False)  # p in primitives, Etot in conservatives
+    n_active: int = field(init=False)
+
+    def __post_init__(self):
+        self.n_active = len(self.active_names)
+        if self.n_active != 5:
+            raise ValueError(
+                f"Expected 5 active vars (rho,vx,vy,vz,p). Got {self.n_active}."
+            )
+        if self.n_cons < self.n_active:
+            raise ValueError(
+                f"n_cons={self.n_cons} must be >= n_active={self.n_active}."
+            )
+
+        self.active_map = {name: i for i, name in enumerate(self.active_names)}
+        self.mass_ids = self.active_map["rho"]
+        self.vel_ids = (
+            self.active_map["vx"],
+            self.active_map["vy"],
+            self.active_map["vz"],
+        )
+        self.energy_ids = self.active_map["p"]
         self.velocity_minor_axes = ((2, 3), (3, 1), (1, 2))
         self.equation_type = "SINGLE-PHASE"#equation_information.equation_type
         self.gamma = 1.6
@@ -38,109 +76,149 @@ class EquationManager:
         self.mesh_shape = [100,100,100]
         self.R = 1.0
         self.cp = self.gamma / (self.gamma - 1.0) * self.R
-        self.n_cons = 5
-        
-    def get_conservatives_from_primitives(self, primitives: Array) -> Array:
-        """Converts primitive variables to conservative ones.
-        Wrapper for 5 equation DIM and single-phase/level-set model.
 
-        :param primitives: _description_
-        :type primitives: Array
-        :return: _description_
-        :rtype: Array
+    # ---------------------------
+    # Convenience slices
+    # ---------------------------
+    @property
+    def active_slice(self):
+        return slice(0, self.n_active)
+
+    @property
+    def passive_slice(self):
+        return slice(self.n_active, self.n_cons)
+
+    @property
+    def n_passive(self) -> int:
+        return max(0, self.n_cons - self.n_active)
+
+    # ---------------------------
+    # Thermodynamics
+    # ---------------------------
+    def get_specific_energy(self, p, rho):
+        rho_safe = jnp.maximum(rho, self.eps)
+        return p / ((self.gamma - 1.0) * rho_safe)
+
+    def get_pressure(self, e, rho):
+        rho_safe = jnp.maximum(rho, self.eps)
+        e_safe = jnp.maximum(e, self.eps)
+        return (self.gamma - 1.0) * rho_safe * e_safe
+
+    def get_sound_speed(self, p, rho):
+        rho_safe = jnp.maximum(rho, self.eps)
+        p_safe = jnp.maximum(p, self.eps)
+        return jnp.sqrt(self.gamma * p_safe / rho_safe)
+
+    # ---------------------------
+    # Primitive <-> Conservative
+    # ---------------------------
+    def get_conservatives_from_primitives(self, primitives):
         """
-        if self.equation_type == "SINGLE-PHASE":
-            rho = primitives[self.mass_ids] # = rho
-            e = self.get_specific_energy(primitives[self.energy_ids], rho)
-            rhou = rho * primitives[self.vel_ids[0]] # = rho * u
-            rhov = rho * primitives[self.vel_ids[1]] # = rho * v
-            rhow = rho * primitives[self.vel_ids[2]] # = rho * w
-            E = rho * (0.5 * (
-                primitives[self.vel_ids[0]] * primitives[self.vel_ids[0]] \
-                + primitives[self.vel_ids[1]] * primitives[self.vel_ids[1]] \
-                + primitives[self.vel_ids[2]] * primitives[self.vel_ids[2]]) + e)  # E = rho * (1/2 u^2 + e)
-            conservatives = jnp.stack([rho, rhou, rhov, rhow, E], axis=0)
-        
-        else:
-            raise NotImplementedError
-
-        return conservatives
-
-    def get_primitives_from_conservatives(self, conservatives: Array) -> Array:
-        """Converts conservative variables to primitive variables.
-
-        :param conservatives: Buffer of conservative variables
-        :type conservatives: Array
-        :return: Buffer of primitive variables
-        :rtype: Array
-        """           
-
-        if self.equation_type == "SINGLE-PHASE":
-            rho = conservatives[self.mass_ids]
-            rho_safe = jnp.maximum(rho, self.eps)
-            inv_rho  = 1.0 / rho_safe
-            
-            u = conservatives[self.vel_ids[0]] * inv_rho
-            v = conservatives[self.vel_ids[1]] * inv_rho
-            w = conservatives[self.vel_ids[2]] * inv_rho
-            
-            # specific internal energy (per mass)
-            e = conservatives[self.energy_ids] * inv_rho - 0.5 * (u*u + v*v + w*w)
-            e = jnp.maximum(e, self.eps)          # prevent negative/internal-energy NaNs
-            
-            # build pressure with safe rho
-            p = self.get_pressure(e, rho_safe)
-            
-            primitives = jnp.stack([rho_safe, u, v, w, p], axis=0)
-        else:
-            raise NotImplementedError
-
-        return primitives
-
-    def get_fluxes_xi(
-            self,
-            primitives: Array,
-            conservatives: Array,
-            axis: int
-            ) -> Array:
-        """Computes the physical flux in a specified spatial direction.
-        Cf. Eq. (3.65) in Toro.
-
-        :param primitives: Buffer of primitive variables
-        :type primitives: Array
-        :param conservatives: Buffer of conservative variables
-        :type conservatives: Array
-        :param axis: Spatial direction along which fluxes are calculated
-        :type axis: int
-        :return: Physical fluxes in axis direction
-        :rtype: Array
+        primitives: (>= n_active, ...)
+        returns conservatives: (>= n_active, ...)
         """
+        prim_a = primitives[self.active_slice]
 
-        if self.equation_type == "SINGLE-PHASE":
-            rho_ui = conservatives[axis+1] # (rho u_i)
-            rho_ui_u1 = conservatives[axis+1] * primitives[self.vel_ids[0]] # (rho u_i) * u_1
-            rho_ui_u2 = conservatives[axis+1] * primitives[self.vel_ids[1]] # (rho u_i) * u_2
-            rho_ui_u3 = conservatives[axis+1] * primitives[self.vel_ids[2]] # (rho u_i) * u_3
-            ui_Ep = primitives[axis+1] * (conservatives[self.energy_ids] + primitives[self.energy_ids])
-            if axis == 0:
-                rho_ui_u1 += primitives[self.energy_ids]
-            elif axis == 1:
-                rho_ui_u2 += primitives[self.energy_ids]
-            elif axis == 2:
-                rho_ui_u3 += primitives[self.energy_ids]
+        rho = prim_a[self.mass_ids]
+        u, v, w = (prim_a[i] for i in self.vel_ids)
+        p = prim_a[self.energy_ids]
 
-            flux_xi = jnp.stack([
-                rho_ui,
-                rho_ui_u1,
-                rho_ui_u2,
-                rho_ui_u3,
-                ui_Ep],
-                axis=0)
-        
+        e = self.get_specific_energy(p, rho)
+        kin = 0.5 * (u*u + v*v + w*w)
+        Etot = rho * (kin + e)
+
+        cons_a = jnp.stack([rho, rho*u, rho*v, rho*w, Etot], axis=0)
+
+        if primitives.shape[0] > self.n_active:
+            prim_p = primitives[self.passive_slice]                 # (n_passive,...)
+            cons_p = rho[jnp.newaxis, ...] * prim_p                 # rho*s_k
+            return jnp.concatenate([cons_a, cons_p], axis=0)
+
+        return cons_a
+
+    def get_primitives_from_conservatives(self, conservatives):
+        """
+        conservatives: (>= n_active, ...)
+        returns primitives: (>= n_active, ...)
+        """
+        cons_a = conservatives[self.active_slice]
+
+        rho = cons_a[self.mass_ids]
+        rho_safe = jnp.maximum(rho, self.eps)
+        inv_rho = 1.0 / rho_safe
+
+        u = cons_a[1] * inv_rho
+        v = cons_a[2] * inv_rho
+        w = cons_a[3] * inv_rho
+
+        E = cons_a[4] * inv_rho
+        kin = 0.5 * (u*u + v*v + w*w)
+        e = jnp.maximum(E - kin, self.eps)
+
+        p = self.get_pressure(e, rho_safe)
+
+        prim_a = jnp.stack([rho_safe, u, v, w, p], axis=0)
+
+        if conservatives.shape[0] > self.n_active:
+            cons_p = conservatives[self.passive_slice]              # (n_passive,...)
+            prim_p = cons_p * inv_rho[jnp.newaxis, ...]             # s_k
+            return jnp.concatenate([prim_a, prim_p], axis=0)
+
+        return prim_a
+
+    # ---------------------------
+    # Physical fluxes
+    # ---------------------------
+    def get_fluxes_xi(self, primitives, conservatives, axis: int):
+        """
+        Physical flux in direction axis=0,1,2.
+        Returns flux array same leading dim as conservatives/primitives.
+        """
+        prim_a = primitives[self.active_slice]
+        cons_a = conservatives[self.active_slice]
+
+        rho = prim_a[self.mass_ids]
+        u, v, w = (prim_a[i] for i in self.vel_ids)
+        p = prim_a[self.energy_ids]
+        Etot = cons_a[-1]  # last active conservative slot
+
+        vel = (u, v, w)
+        ui = vel[axis]
+        rho_ui = rho * ui
+
+        # momentum flux components
+        fx_rhou = rho_ui * u
+        fx_rhov = rho_ui * v
+        fx_rhow = rho_ui * w
+
+        if axis == 0:
+            fx_rhou = fx_rhou + p
+        elif axis == 1:
+            fx_rhov = fx_rhov + p
         else:
-            raise NotImplementedError
+            fx_rhow = fx_rhow + p
 
-        return flux_xi
+        fx_E = ui * (Etot + p)
+
+        flux_a = jnp.stack([rho_ui, fx_rhou, fx_rhov, fx_rhow, fx_E], axis=0)
+
+        if conservatives.shape[0] > self.n_active:
+            cons_p = conservatives[self.passive_slice]              # (n_passive,...)
+            flux_p = cons_p * ui                                    # (rho*s_k)*ui
+            return jnp.concatenate([flux_a, flux_p], axis=0)
+
+        return flux_a
+
+    # ---------------------------
+    # Wavespeeds (for CFL / solvers)
+    # ---------------------------
+    def get_wavespeeds_xi(self, primitives, axis: int):
+        prim_a = primitives[self.active_slice]
+        rho = prim_a[self.mass_ids]
+        p = prim_a[self.energy_ids]
+        ui = prim_a[self.vel_ids[axis]]
+        a = self.get_sound_speed(p, rho)
+        return ui - a, ui + a
 
     def get_specific_heat_capacity(self, T: Array): #-> Union[float, Array]:
         """Calculates the specific heat coefficient per unit mass.

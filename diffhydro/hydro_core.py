@@ -322,8 +322,8 @@ class hydro:
     
     def forcing(self,i,sol,params,dt): #all axis independant? 
         for force in self.forces:
-            sol = force.force(i, sol, params, dt)  # each returns UPDATED fields
-        return sol
+            sol,params = force.force(i, sol, params, dt)  # each returns UPDATED fields
+        return sol,params
 
     def split_solve_step(self, sol, dt, ax, params):
         """RK2 method, need to put in integrator choice at some point..."""
@@ -349,8 +349,8 @@ class hydro:
                 sol = self.boundary.impose(sol,ax)
                 sol = self.split_solve_step(sol,dt/(len(self.splitting_schemes)),int(ax),params)                 
                 # experimental
-                sol = sol.at[0].set(jnp.abs(sol[0])) #experimental...
-                sol = sol.at[-1].set(jnp.abs(sol[-1])) #experimental...
+                sol = sol.at[self.eq_manage.mass_ids].set(jnp.abs(sol[self.eq_manage.mass_ids]))
+                sol = sol.at[self.eq_manage.energy_ids].set(jnp.abs(sol[self.eq_manage.energy_ids]))
     
         return sol
     
@@ -388,7 +388,7 @@ class hydro:
     def _hydrostep(self, i, state, dt):
         # split forcing outside of core hydro loop
         fields, params = state
-        fields = self.forcing(i, fields, params, dt/2)
+        fields, params = self.forcing(i, fields, params, dt/2)
 
         if self.use_mol and self.use_ct:
             jax.debug.print("use ct")
@@ -399,7 +399,7 @@ class hydro:
         else:
             fields = self.sweep_stack(state, dt, i)
 
-        fields = self.forcing(i, fields, params, dt/2)
+        fields, params = self.forcing(i, fields, params, dt/2)
         return (fields, params)
 
     
@@ -723,7 +723,6 @@ class hydro:
         return fields, params
 
 
-    # Add this as a method to your hydro class:
     def add_memory_efficient_evolve_method(hydro_class):
         """
         Monkey-patch to add the memory-efficient evolve method.

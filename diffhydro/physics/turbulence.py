@@ -66,10 +66,80 @@ def init_turbulent_velocity(eq, Lbox, rho0, p0,
     U = U.at[4].set(E_th + E_kin)
     return U
 
+def init_turbulent_velocity_cpu(eq, Lbox, rho0, p0,
+                                kmin=1, kmax=3, solenoidal_frac=1.0,
+                                pslope=-2.0, target_M=1.0, seed=123):
+    #initializing this field is the bottleneck on GPU, needs to materialize over whole thing...
+    #fairly fast on CPU, don't need to backprop...
+    nx, ny, nz = eq.mesh_shape
 
+    rng = np.random.default_rng(seed)
+
+    # k-grid (fundamental k0 = 2π/L)
+    k0 = 2.0 * np.pi / Lbox
+    kx = k0 * np.fft.fftfreq(nx) * nx
+    ky = k0 * np.fft.fftfreq(ny) * ny
+    kz = k0 * np.fft.fftfreq(nz) * nz
+    KX, KY, KZ = np.meshgrid(kx, ky, kz, indexing="ij")
+    K2 = KX**2 + KY**2 + KZ**2
+    K = np.sqrt(np.maximum(K2, 1e-30))
+
+    # band-pass mask
+    kmag = np.sqrt((KX/k0)**2 + (KY/k0)**2 + (KZ/k0)**2)
+    band = (kmag >= kmin) & (kmag <= kmax)
+
+    # random complex field
+    def rand_complex():
+        a = rng.normal(size=(nx, ny, nz))
+        b = rng.normal(size=(nx, ny, nz))
+        return a + 1j * b
+
+    g1 = rand_complex()
+    g2 = rand_complex()
+    g3 = rand_complex()
+    G = np.stack([g1, g2, g3], axis=0)   # (3, nx, ny, nz)
+
+    # amplitude spectrum ~ k^{pslope}
+    Amp = (K**(0.5*pslope)) * band
+    Amp = Amp / np.sqrt(np.mean(Amp**2) + 1e-30)
+
+    # project to solenoidal/compressive mix
+    kk_over_k = np.stack([KX, KY, KZ], 0) / np.maximum(K, 1e-30)
+    C = np.einsum("i...,j...->ij...", kk_over_k, kk_over_k)
+    I = np.eye(3)[:, :, None, None, None]
+    P = I - C
+    zeta = solenoidal_frac
+    Proj = zeta * P + (1.0 - zeta) * C
+
+    Uhat = np.einsum("ij...,j...->i...", Proj, G) * Amp   # (3, nx, ny, nz)
+    u = np.fft.ifftn(Uhat, axes=(1,2,3)).real            # (3, nx, ny, nz)
+
+    # normalize to target Mach
+    rho = rho0 * np.ones((nx, ny, nz))
+    p = p0 * np.ones_like(rho)
+    cs = np.sqrt(eq.gamma * p / rho)
+    urms = np.sqrt(np.mean(np.sum(u**2, axis=0)))
+    alpha = (target_M * np.mean(cs)) / (urms + 1e-30)
+    v = alpha * u
+
+    U = np.zeros((5, nx, ny, nz), dtype=np.float64)
+    U[0] = rho
+    U[1] = rho * v[0]
+    U[2] = rho * v[1]
+    U[3] = rho * v[2]
+    E_th = p / (eq.gamma - 1.0)
+    E_kin = 0.5 * rho * (v**2).sum(axis=0)
+    U[4] = E_th + E_kin
+
+    # convert to jax array (still on CPU, but that’s fine)
+    return jnp.asarray(U, dtype=eq.real_dtype)
+
+
+@jax.tree_util.register_pytree_node_class
 class TurbulentForce:
     """NaN-safe Ornstein–Uhlenbeck turbulent driver (Athena-style)."""
-
+    #old, will get depreciated...
+    
     def __init__(
         self,
         equation_manager,
@@ -169,74 +239,192 @@ class TurbulentForce:
 
         work = rho*(u*a[0] + v*a[1] + w*a[2])*dt
         U = U.at[self.i_E].add(jnp.nan_to_num(work))
-        return U
+        return U,params
 
-def init_turbulent_velocity_cpu(eq, Lbox, rho0, p0,
-                                kmin=1, kmax=3, solenoidal_frac=1.0,
-                                pslope=-2.0, target_M=1.0, seed=123):
-    #initializing this field is the bottleneck on GPU, needs to materialize over whole thing...
-    #fairly fast on CPU, don't need to backprop...
-    nx, ny, nz = eq.mesh_shape
-
-    rng = np.random.default_rng(seed)
-
-    # k-grid (fundamental k0 = 2π/L)
-    k0 = 2.0 * np.pi / Lbox
-    kx = k0 * np.fft.fftfreq(nx) * nx
-    ky = k0 * np.fft.fftfreq(ny) * ny
-    kz = k0 * np.fft.fftfreq(nz) * nz
-    KX, KY, KZ = np.meshgrid(kx, ky, kz, indexing="ij")
-    K2 = KX**2 + KY**2 + KZ**2
-    K = np.sqrt(np.maximum(K2, 1e-30))
-
-    # band-pass mask
-    kmag = np.sqrt((KX/k0)**2 + (KY/k0)**2 + (KZ/k0)**2)
-    band = (kmag >= kmin) & (kmag <= kmax)
-
-    # random complex field
-    def rand_complex():
-        a = rng.normal(size=(nx, ny, nz))
-        b = rng.normal(size=(nx, ny, nz))
-        return a + 1j * b
-
-    g1 = rand_complex()
-    g2 = rand_complex()
-    g3 = rand_complex()
-    G = np.stack([g1, g2, g3], axis=0)   # (3, nx, ny, nz)
-
-    # amplitude spectrum ~ k^{pslope}
-    Amp = (K**(0.5*pslope)) * band
-    Amp = Amp / np.sqrt(np.mean(Amp**2) + 1e-30)
-
-    # project to solenoidal/compressive mix
-    kk_over_k = np.stack([KX, KY, KZ], 0) / np.maximum(K, 1e-30)
-    C = np.einsum("i...,j...->ij...", kk_over_k, kk_over_k)
-    I = np.eye(3)[:, :, None, None, None]
-    P = I - C
-    zeta = solenoidal_frac
-    Proj = zeta * P + (1.0 - zeta) * C
-
-    Uhat = np.einsum("ij...,j...->i...", Proj, G) * Amp   # (3, nx, ny, nz)
-    u = np.fft.ifftn(Uhat, axes=(1,2,3)).real            # (3, nx, ny, nz)
-
-    # normalize to target Mach
-    rho = rho0 * np.ones((nx, ny, nz))
-    p = p0 * np.ones_like(rho)
-    cs = np.sqrt(eq.gamma * p / rho)
-    urms = np.sqrt(np.mean(np.sum(u**2, axis=0)))
-    alpha = (target_M * np.mean(cs)) / (urms + 1e-30)
-    v = alpha * u
-
-    U = np.zeros((5, nx, ny, nz), dtype=np.float64)
-    U[0] = rho
-    U[1] = rho * v[0]
-    U[2] = rho * v[1]
-    U[3] = rho * v[2]
-    E_th = p / (eq.gamma - 1.0)
-    E_kin = 0.5 * rho * (v**2).sum(axis=0)
-    U[4] = E_th + E_kin
-
-    # convert to jax array (still on CPU, but that’s fine)
-    return jnp.asarray(U, dtype=eq.real_dtype)
+    
+    def tree_flatten(self):
+        # Dynamic state that changes
+        children = (self.accel_k, self.key)
+        # Static config that doesn't change
+        aux_data = {
+            'kmin': self.kmin, 'kmax': self.kmax,
+            'sol_frac': self.sol_frac, 'tau': self.tau,
+            'a_rms_target': self.a_rms_target,
+            'nx': self.nx, 'ny': self.ny, 'nz': self.nz,
+        }
+        return (children, aux_data)
+    
+    @classmethod
+    def tree_unflatten(cls, aux_data, children):
+        obj = cls.__new__(cls)
+        obj.accel_k, obj.key = children
+        for k, v in aux_data.items():
+            setattr(obj, k, v)
+        return obj
 
 
+@jax.tree_util.register_pytree_node_class
+class TurbulentForce_MCSTATE:
+    """NaN-safe Ornstein–Uhlenbeck turbulent driver (Athena-style), pure + params-threaded."""
+
+    def __init__(
+        self,
+        equation_manager,
+        *,
+        kmin=1.0, kmax=3.0,
+        solenoidal_fraction=1.0,
+        tau_corr=0.5,
+        rms_accel=1.0,
+    ):
+        self.eq = equation_manager
+        self.kmin, self.kmax = float(kmin), float(kmax)
+        self.sol_frac = float(solenoidal_fraction)
+        self.tau = float(tau_corr)
+        self.a_rms_target = float(rms_accel)
+
+        shape = tuple(self.eq.mesh_shape)
+        if len(shape) == 2:
+            nx, ny, nz = shape[0], shape[1], 1
+        else:
+            nx, ny, nz = shape
+        self.nx, self.ny, self.nz = nx, ny, nz
+
+        Lx, Ly, Lz = getattr(self.eq, "box_size", (1.0, 1.0, 1.0))
+        self.Lx, self.Ly, self.Lz = float(Lx), float(Ly), float(Lz)
+
+        kx = 2*jnp.pi*jnp.fft.fftfreq(nx, d=self.Lx/nx)
+        ky = 2*jnp.pi*jnp.fft.fftfreq(ny, d=self.Ly/ny)
+        kz = 2*jnp.pi*jnp.fft.fftfreq(nz, d=self.Lz/nz) if nz > 1 else jnp.array([0.0])
+
+        self.KX, self.KY, self.KZ = jnp.meshgrid(kx, ky, kz, indexing="ij")
+        self.K2 = self.KX**2 + self.KY**2 + self.KZ**2
+        self.K = jnp.sqrt(self.K2)
+        self.nonzero_mask = self.K2 > 0.0
+
+        self.i_rho = self.eq.mass_ids
+        self.i_mom = self.eq.vel_ids
+        self.i_E   = self.eq.energy_ids
+
+    # -------------------------------------------------------------
+    def _step_accel_k(self, accel_k_state, key, dt):
+        """
+        PURE OU update in k-space.
+
+        accel_k_state: (3, nx, ny, nz) complex64/complex128
+        key: PRNGKey
+        dt: scalar
+
+        returns: a(x), accel_k_state_new, key_new
+        """
+        key, sub = jax.random.split(key)
+
+        noise = jax.random.normal(
+            sub, accel_k_state.real.shape, dtype=jnp.float32
+        )
+
+        decay = jnp.exp(-jnp.clip(dt/self.tau, 0.0, 50.0))
+        drive = jnp.sqrt(jnp.maximum(1.0 - decay**2, 0.0))
+        accel_k_state = decay*accel_k_state + (drive*noise).astype(accel_k_state.dtype)
+
+        kmin_abs = self.kmin*(2*jnp.pi/self.Lx)
+        kmax_abs = self.kmax*(2*jnp.pi/self.Lx)
+        band = (self.K >= kmin_abs) & (self.K <= kmax_abs)
+        accel_k_state = jnp.where(band, accel_k_state, 0.0)
+
+        # projection
+        kx, ky, kz = self.KX, self.KY, self.KZ
+        dot = kx*accel_k_state[0] + ky*accel_k_state[1] + kz*accel_k_state[2]
+        invK2 = jnp.where(self.nonzero_mask, 1.0/self.K2, 0.0)
+
+        proj_divfree = jnp.stack([
+            accel_k_state[0] - kx*dot*invK2,
+            accel_k_state[1] - ky*dot*invK2,
+            accel_k_state[2] - kz*dot*invK2,
+        ], axis=0)
+        proj_comp = jnp.stack([kx*dot*invK2, ky*dot*invK2, kz*dot*invK2], axis=0)
+
+        accel_k_state = self.sol_frac*proj_divfree + (1.0-self.sol_frac)*proj_comp
+        accel_k_state = jnp.where(self.nonzero_mask, accel_k_state, 0.0)
+
+        # real-space acceleration
+        a = jnp.fft.ifftn(accel_k_state, axes=(1,2,3)).real
+        rms = jnp.sqrt(jnp.maximum(jnp.mean(a**2), 1e-30))
+        a = a * (self.a_rms_target / rms)
+        a = jnp.nan_to_num(a, nan=0.0, posinf=0.0, neginf=0.0)
+
+        return a, accel_k_state, key
+
+    # -------------------------------------------------------------
+    def timestep(self, U):
+        return 1e10  # defer to CFL limiter
+
+    def force(self, i_step, U, params, dt):
+        """
+        Apply turbulent acceleration.
+
+        Dynamic state comes ONLY from params:
+          - params["turb_key"] : PRNGKey (preferred)
+          - params["turb_seed"]: int seed (used only if turb_key missing)
+          - params["accel_k_state"]: complex k-space OU state (required)
+
+        Returns: (U_new, params_new)
+        """
+        dt = jnp.maximum(dt, 0.0)
+
+        # --- key handling from params ---
+        seed = params.get("turb_seed", 12345)
+        key0 = jax.random.PRNGKey(jnp.asarray(seed, dtype=jnp.int32))
+        key  = jax.random.fold_in(key0, i_step)   # deterministic per step
+        # --- OU state from params ---
+        accel_k_state = params["accel_k_state"]  # must exist, shape (3,nx,ny,nz)
+
+        a, accel_k_state, key = self._step_accel_k(accel_k_state, key, dt)
+
+        # --- apply forcing to hydro ---
+        W = self.eq.get_primitives_from_conservatives(U)
+
+        rho = jnp.maximum(W[self.i_rho], 1e-30)
+        u, v, w = W[self.i_mom[0]], W[self.i_mom[1]], W[self.i_mom[2]]
+
+        d_mx = rho*a[0]*dt
+        d_my = rho*a[1]*dt
+        d_mz = rho*a[2]*dt
+
+        U = U.at[self.i_mom[0]].add(jnp.nan_to_num(d_mx))
+        U = U.at[self.i_mom[1]].add(jnp.nan_to_num(d_my))
+        U = U.at[self.i_mom[2]].add(jnp.nan_to_num(d_mz))
+
+        work = rho*(u*a[0] + v*a[1] + w*a[2])*dt
+        U = U.at[self.i_E].add(jnp.nan_to_num(work))
+
+        # --- thread updated state back into params ---
+        params = dict(params)
+        params["turb_key"] = key
+        params["accel_k_state"] = accel_k_state
+
+        return U, params
+
+    # -------------------------------------------------------------
+    # PyTree: everything on self is static config
+    def tree_flatten(self):
+        children = ()
+        aux_data = {
+            "eq": self.eq,
+            "kmin": self.kmin, "kmax": self.kmax,
+            "sol_frac": self.sol_frac, "tau": self.tau,
+            "a_rms_target": self.a_rms_target,
+            "nx": self.nx, "ny": self.ny, "nz": self.nz,
+            "Lx": self.Lx, "Ly": self.Ly, "Lz": self.Lz,
+            "KX": self.KX, "KY": self.KY, "KZ": self.KZ,
+            "K2": self.K2, "K": self.K,
+            "nonzero_mask": self.nonzero_mask,
+            "i_rho": self.i_rho, "i_mom": self.i_mom, "i_E": self.i_E,
+        }
+        return children, aux_data
+
+    @classmethod
+    def tree_unflatten(cls, aux_data, children):
+        obj = cls.__new__(cls)
+        for k, v in aux_data.items():
+            setattr(obj, k, v)
+        return obj

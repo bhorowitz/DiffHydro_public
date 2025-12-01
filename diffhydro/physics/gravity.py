@@ -143,7 +143,7 @@ class FFTSelfGravityForce:
         power = rho * (ux * ax + uy * ay + uz * az)
         U_new = U_new.at[self.i_E].add(power * dt)
 
-        return U_new
+        return U_new, params
 
 
 def _infer_levels(shape: tuple[int, ...]) -> int:
@@ -290,4 +290,4 @@ class MGSelfGravityForce:
         power = rho * (ux * ax + uy * ay + uz * az)
         U_new = U_new.at[self.i_E].add(power * dt)
 
-        return U_new
+        return U_new, params
