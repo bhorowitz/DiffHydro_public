@@ -41,10 +41,25 @@ We provide a few examples in this repository, but if you don't want to wade thro
 
 - [Turbulence and Blast Wave](https://colab.research.google.com/drive/14GuxwW_s4_OfuUXNsYOShAuySOoUay_b?usp=sharing)
 
+Basic install is 
+```
+git clone https://github.com/bhorowitz/DiffHydro_public.git
+cd ./DiffHydro_public
+pip install -e
+```
+
+You can run tests with 
+```
+pytest -q
+```
+Note, depending on your system this might take all GPUs and break the tests default API which assumes one GPU. You can use a command like below to specifiy one GPU:
+```
+CUDA_VISIBLE_DEVICES=0 pytest -q
+```
+
 ### Getting Involved
 
 diffhydro is under active development and we are looking to build a broader team! Let me know if you want to be involved and add any features! ben.horowitz@ipmu.jp or open a pull request! :D 
-
 
 ### Rough Roadmap
 
@@ -54,12 +69,8 @@ Main new features complete or under development
  - [x] Demonstration of solver/corrector-in-loop approach for speeding up simulations and capturing (possibly unknown) physics
  - [x] MHD with various possible numerical schemes for divergence (Constrained Transport, Corner Transport Upwind, Positivity Preserving CT)
  - [ ] More testing of MHD through various Athena benchmarks
- - [ ] Self Gravity via jaxdecomp and multigrid methods, both as forcing and as new flux term
+ - [X] Self Gravity via multigrid methods
  - [ ] Adaptive Mesh Refinement schemes in 3d (the biggest challenge!)
-
-I'm currently working on organizing the examples better. If you don't want to wade through the notebooks there are some basic examples in this colab notebook:
-
-- [Turbulence and Blast Wave](https://colab.research.google.com/drive/14GuxwW_s4_OfuUXNsYOShAuySOoUay_b?usp=sharing)
 
 Let me know if you want to be involved and add any features! ben.horowitz@ipmu.jp or open a pull request! :D 
 
