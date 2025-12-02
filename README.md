@@ -78,9 +78,8 @@ Let me know if you want to be involved and add any features! ben.horowitz@ipmu.j
 
 2d shocks (1024^2)
 
-![DiffHydro_Animation](./animations/diffhydro_rho_web.gif){width=75%}
-
+<img src="https://github.com/bhorowitz/DiffHydro_public/blob/main/animations/diffhydro_rho_web.gif?raw=true" width="500" />
 
 3d gravity with Gaussian Random Field Prior (256^3)
 
-![DiffHydro_Animation](./animations/gauss_grav_recon.gif){width=75%}
+<img src="https://github.com/bhorowitz/DiffHydro_public/blob/main/animations/gauss_grav_recon.gif?raw=true" width="500" />
