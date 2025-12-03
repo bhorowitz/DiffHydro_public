@@ -57,6 +57,19 @@ Note, depending on your system this might take all GPUs and break the tests defa
 CUDA_VISIBLE_DEVICES=0 pytest -q
 ```
 
+### Note on Evolve Methods
+
+The code provides a number of (probably confusingly named) evolved methods. This is since depending on what you are trying to optimize for (readability, pure speed, long run memory conservation, embedding with larger inference loops) different APIs might be better or worse. We'll hopefully get around to making a cleaner automatic selector-type function. In general though we recommend the following:
+
+**hydrosim.evolve()** or **evolve_memory_efficient()** for most integrated applications (i.e. optimization, Solver-in-the-loop, etc.)
+
+**hydrosim.evolve_with_callbacks()** for debugging and providing snapshots (read to CPU and to npy) beyond final time output
+
+**hydrosim.evolve_till_time()** if you MUST have dynamic number of timesteps. This likely has the worst performance in terms of compile time and backprop. jax.while loops aren't great yet (at least in the specific JAX versions I was using).
+
+**hydrosim.evolve_with_dt_schedule()** mostly niche applications where you want to provide an array with dt-per-timesteps. I used it for solver-in-loop applications. In this setup there is NO CFL checking, so you will run into nans quickly if you aren't conservative/careful...
+
+
 ### Getting Involved
 
 diffhydro is under active development and we are looking to build a broader team! Let me know if you want to be involved and add any features! ben.horowitz@ipmu.jp or open a pull request! :D 
