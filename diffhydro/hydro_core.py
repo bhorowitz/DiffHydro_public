@@ -113,7 +113,7 @@ class hydro:
                  snapshots = False,
                 splitting_schemes=[[3,1,2,2,1,3],[1,2,3,3,2,1],[2,3,1,1,3,2]], #cyclic permutations
                 fluxes = None, #convection, conduction
-                forces = [NoForcing()], #gravity, etc.
+                forces = [], #gravity, etc.
                 use_mol=True,
                 use_ct=False,
                 pmesh_shape= (1,1,1) ,
@@ -128,12 +128,9 @@ class hydro:
         self.boundary = None
         #supersteps, each superstep has len(splitting_schemes) time steps
         self.n_super_step = n_super_step
-        self.snapshots = snapshots #poorly names/
-        self.outputs = []
         self.fluxes = fluxes
         self.forces = forces
         self.dx_o = 1.0
-        self.timescale = jnp.zeros(self.n_super_step)
         self.use_mol = use_mol
         self.integrator = INTEGRATOR_DICT[integrator]  # callable
         self._integrator_name = integrator
@@ -349,28 +346,10 @@ class hydro:
                 sol = self.boundary.impose(sol,ax)
                 sol = self.split_solve_step(sol,dt/(len(self.splitting_schemes)),int(ax),params)                 
                 # experimental
-                sol = sol.at[self.eq_manage.mass_ids].set(jnp.abs(sol[self.eq_manage.mass_ids]))
-                sol = sol.at[self.eq_manage.energy_ids].set(jnp.abs(sol[self.eq_manage.energy_ids]))
+                sol = sol.at[0].set(jnp.abs(sol[0]))
+                sol = sol.at[-1].set(jnp.abs(sol[-1]))
     
         return sol
-    
-   # @jax.jit
-    def evolve_old(self,input_fields,params):
-        self.outputs=[]
-        #main loop
-      #  state = (input_fields,params)
-        sharding = NamedSharding(self.mesh, self.FIELD_XYZ)
-        state = (jax.device_put(input_fields, sharding), params)
-        #need to rework the UI to get out snapshots from jitted function, hack for now...
-        if True:
-            state  = jax.lax.fori_loop(0, self.n_super_step, self.hydrostep_adapt, state)
-        else:
-            for i in range(0,self.n_super_step):
-                state,_t = self.hydrostep_adapt(i,state,0)
-                if self.snapshots:
-                    if i%self.snapshots==0: #comment out most times...
-                        self.outputs.append(state)
-        return state
         
  #   @partial(jit, static_argnums=0)
 
@@ -594,11 +573,6 @@ class hydro:
         fields, params = lax.fori_loop(
             0, self.n_super_step, body, (fields, params)
         )
-       # self.outputs = []
-       # for i in range(self.n_super_step):
-       #     fields, params = pjit_step(fields, params, i)
-       ##     if self.snapshots and i % self.snapshots == 0:
-        #        self.outputs.append((fields, params))
 
         return fields, params
     
@@ -879,7 +853,6 @@ class hydro:
         children = ()  # arrays / dynamic values
         aux_data = {
                     "boundary":self.boundary,
-                    "snapshots":self.snapshots,
                    "splitting_schemes":self.splitting_schemes,
                     "fluxes":self.fluxes,"forces":self.forces,
                 "use_mol":self.use_mol,"use_ct":self.use_ct, "pmesh_shape":self.pmesh_shape}  # static values
