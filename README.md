@@ -29,17 +29,20 @@ The paper demonstrates several novel use cases:
 
 * Initial condition reconstruction: Recover complex initial conditions from final states, even through highly nonlinear dynamics
 * Solver-in-the-loop ML: Train neural networks to correct numerical errors while maintaining physical accuracy
-* Forward modeling: Standard hydrodynamics simulations of supernova remnants, turbulence, and self-gravitating systems
+* (Less Novel) Forward modeling: Standard hydrodynamics simulations of supernova remnants, turbulence, and self-gravitating systems
 
 ### Getting Started
 
 Built on the JAX ecosystem for scientific computing, diffhydro provides a Python-first, interactive workflow that integrates naturally with modern data science tools and machine learning frameworks.
+
+- [Intro to Jax](https://docs.jax.dev/en/latest/notebooks/thinking_in_jax.html)
 
 Whether you're doing traditional forward modeling or cutting-edge simulation-based inference, diffhydro offers a flexible platform that bridges classical computational astrophysics with differentiable programming and machine learning.
 
 We provide a few examples in this repository, but if you don't want to wade through the notebooks there are some basic quick-start examples in this colab notebook:
 
 - [Turbulence and Blast Wave](https://colab.research.google.com/drive/14GuxwW_s4_OfuUXNsYOShAuySOoUay_b?usp=sharing)
+- [Basic Gradient Use for Optimization](https://colab.research.google.com/drive/1E8ATlxOiwS6RkOljdfp2SSHcX0pk83KD?usp=sharing)
 
 Basic install is 
 ```
