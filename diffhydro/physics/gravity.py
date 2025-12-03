@@ -96,7 +96,7 @@ class FFTSelfGravityForce:
 
         # ----- Precompute k-grids for rFFT (half-spectrum on last axis) -----
         nx, ny, nz = self.eq.mesh_shape
-        # Full-grid spacing doesn't matter if you keep consistent units; match your old code:
+        # Full-grid spacing doesn't matter if you keep consistent units; 
         kx = jnp.fft.fftfreq(nx, d=1.0) * (2.0 * jnp.pi)
         ky = jnp.fft.fftfreq(ny, d=1.0) * (2.0 * jnp.pi)
         kz_r = jnp.fft.rfftfreq(nz, d=1.0) * (2.0 * jnp.pi)        # half-spectrum last axis
@@ -109,7 +109,7 @@ class FFTSelfGravityForce:
         self.kx_r, self.ky_r, self.kz_r = jnp.meshgrid(kx, ky, kz_r, indexing="ij")
         self.k2_r = (self.kx_r*self.kx_r + self.ky_r*self.ky_r + self.kz_r*self.kz_r).astype(jnp.float32)
 
-    # Optional: cheaper timestep (no FFT) — you can keep yours if you prefer
+    # Optional: cheaper timestep (no FFT) 
     def timestep(self, U):
         U = lax.stop_gradient(U)
         rho = jnp.maximum(jnp.asarray(U[self.i_rho], jnp.float32), self.eps)
@@ -173,7 +173,7 @@ class MGSelfGravityForce:
     Periodic self-gravity via multigrid Poisson solve.
 
     - Zero-mean RHS for solvability on a torus: F = 4πG (ρ - ⟨ρ⟩).
-    - Uses your poisson_multigrid(F, U0, l, v1, v2, mu, iter_cycle, eps, h).
+    - Uses poisson_multigrid(F, U0, l, v1, v2, mu, iter_cycle, eps, h).
     - No evolving state kept on `self` (jit- and scan-friendly).
     """
 
