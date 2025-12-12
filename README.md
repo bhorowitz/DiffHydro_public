@@ -21,6 +21,7 @@ Think of it like this: traditional simulation codes are like one-way streets—y
 ### Why does this matter?
 
 * **Inverse problems:** Instead of guessing initial conditions and hoping they match observations, you can optimize them directly to reproduce what telescopes actually see.
+* **Hierarchical bayesian modelling:** Beyond optimizing the initial conditions, you can also infer the underlying system parameters in a Bayesian framework. This can be done via marginalizing over initial conditions (i.e. latent variables) either explicitly (i.e joint sampling via HMC) or implicitly (i.e. using summary statistics like powerspectra).
 * **Machine learning integration:** Train neural networks inside your simulations to learn and correct physics at scales you can’t resolve.
 * **Parameter inference:** Efficiently explore how uncertain physical parameters affect predictions.
 * **Data-driven discovery:** Connect simulations directly to observational data.
