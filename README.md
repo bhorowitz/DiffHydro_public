@@ -10,6 +10,14 @@ diffhydro is a modern computational fluid dynamics code designed for astrophysic
 
 Think of it like this: traditional simulation codes are like one-way streets—you set up initial conditions, run the simulation forward, and see what happens. diffhydro is a two-way street—you can also work backward from a desired outcome to figure out what initial conditions/parameters would produce it.
 
+"Normal Simulations"
+
+<img src="https://github.com/bhorowitz/DiffHydro_public/blob/main/animations/pure_forward.jpg?raw=true" width="500" />
+
+DiffHydro
+
+<img src="https://github.com/bhorowitz/DiffHydro_public/blob/main/animations/schematic_ic.jpg?raw=true" width="500" />
+
 ### Why does this matter?
 
 * **Inverse problems:** Instead of guessing initial conditions and hoping they match observations, you can optimize them directly to reproduce what telescopes actually see.
