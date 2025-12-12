@@ -66,13 +66,15 @@ CUDA_VISIBLE_DEVICES=0 pytest -q
 
 The code provides a number of (probably confusingly named) evolve methods. Depending on what you are trying to optimize for (readability, pure speed, long-run memory conservation, embedding within larger inference loops), different APIs might be better or worse. We’ll make a cleaner automatic selector-type function soon. In general, we recommend the following:
 
-**`hydrosim.evolve()`** or **`evolve_memory_efficient()`** for most integrated applications (i.e., optimization, solver-in-the-loop, etc.)
+** `hydrosim.evolve()` lightest weight evolve method, okay for quick testing but probably other methods are better for any real workflow...
+
+**`evolve_memory_efficient()`** for most integrated applications, particularly in multi-gpu setups (i.e., optimization, solver-in-the-loop, etc.)
 
 **`hydrosim.evolve_with_callbacks()`** for debugging and providing snapshots (read to CPU and to `.npy`) beyond final-time output.
 
 **`hydrosim.evolve_till_time()`** if you **must** have a dynamic number of timesteps. This likely has the worst performance in terms of compile time and backprop. `jax.while` loops aren’t great yet (at least in the specific JAX versions I was using).
 
-**`hydrosim.evolve_with_dt_schedule()`** for niche applications where you want to provide an array of `dt` per timestep. I used it for solver-in-the-loop applications. In this setup there is **no CFL checking**, so you will run into NaNs quickly if you aren’t conservative/careful.
+**`hydrosim.evolve_with_dt_schedule()`** for niche applications where you want to provide an array of `dt` per timestep. I used it for solver-in-the-loop applications. In this setup there is **no CFL checking**, so you will run into NaNs quickly if you aren’t conservative/careful. This method might be nice if you are running into memory limitations with certian workflows (see below).
 
 ### Some general strategy notes for backpropagation, optimization, and numerical stability
 
@@ -91,6 +93,8 @@ So far, the best optimization package/implementation I found for both IC reconst
 - It is always good to be conservative with CFL, particularly for backprop. Certain examples in the paper let me get away with `cfl = 0.8`, but many ended up closer to `0.2`. There are separate timestep safety scalings in other forcing functions, so be careful with those choices. `HeatingCooling` is particularly sensitive.
 
 - If you run into memory issues while backpropagating through certain forcing functions with dynamic timestepping, it might be beneficial to use `stop_gradients` (i.e., `U = lax.stop_gradient(U)`) in the timestep so you don’t backprop through the timestep choice itself. Even more drastically, you can use `evolve_with_dt` and a fixed-timestep scheme.
+
+- There are a couple of implementations for certian forcing functions (i.e. gravity, turbulence, cooling, etc.) Some might have better backprop performance for your particular application, so it is worth checking.
 
 ### Getting Involved
 
@@ -119,3 +123,7 @@ Let me know if you want to be involved or add any features! ben.horowitz@ipmu.jp
 3D gravity with Gaussian Random Field prior (256³)
 
 <img src="https://github.com/bhorowitz/DiffHydro_public/blob/main/animations/gauss_grav_recon.gif?raw=true" width="500" />
+
+3D Forced Turbulence with Turbulent prior (256³)
+
+<img src="https://github.com/bhorowitz/bhorowitz.github.io/blob/master/assets/img/forced_v2.gif?raw=true" width="500" />

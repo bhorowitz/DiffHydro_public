@@ -40,7 +40,7 @@ except AttributeError:
     REMAT_POLICY = None
 
 def remat(fn):
-    # Use a policy if available in your JAX; otherwise plain remat/checkpoint
+    # Use a policy if available in your JAX version; otherwise plain remat/checkpoint
     return _remat(fn) if REMAT_POLICY is None else _remat(fn, policy=REMAT_POLICY)
 # ---------------------------------------------
 
