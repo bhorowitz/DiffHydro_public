@@ -275,7 +275,9 @@ class TurbulentForce_MCSTATE:
         solenoidal_fraction=1.0,
         tau_corr=0.5,
         rms_accel=1.0,
+        pslope = 0.0
     ):
+        self.slope = float(pslope)
         self.eq = equation_manager
         self.kmin, self.kmax = float(kmin), float(kmax)
         self.sol_frac = float(solenoidal_fraction)
@@ -329,8 +331,12 @@ class TurbulentForce_MCSTATE:
         kmin_abs = self.kmin*(2*jnp.pi/self.Lx)
         kmax_abs = self.kmax*(2*jnp.pi/self.Lx)
         band = (self.K >= kmin_abs) & (self.K <= kmax_abs)
-        accel_k_state = jnp.where(band, accel_k_state, 0.0)
 
+        # desired forcing power slope: P_force(k) ∝ k^{slope}
+        K_safe = jnp.where(self.nonzero_mask, self.K, 1.0)
+        weight = jnp.where(band, K_safe**(0.5*self.slope), 0.0)
+
+        accel_k_state = accel_k_state * weight[None, ...]
         # projection
         kx, ky, kz = self.KX, self.KY, self.KZ
         dot = kx*accel_k_state[0] + ky*accel_k_state[1] + kz*accel_k_state[2]
@@ -351,7 +357,7 @@ class TurbulentForce_MCSTATE:
         rms = jnp.sqrt(jnp.maximum(jnp.mean(a**2), 1e-30))
         a = a * (self.a_rms_target / rms)
         a = jnp.nan_to_num(a, nan=0.0, posinf=0.0, neginf=0.0)
-
+        
         return a, accel_k_state, key
 
     # -------------------------------------------------------------

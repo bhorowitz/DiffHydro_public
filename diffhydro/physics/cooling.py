@@ -54,7 +54,8 @@ class HeatCoolForce:
         temp_floor = 1.0e4,
         subcycles = 10,
         early_exit = True,
-        eps = 1e-30
+        eps = 1e-30,
+        heat_scale = 2
     ):
         self.eq = equation_manager
         self.pressure_fn = pressure_fn
@@ -62,7 +63,7 @@ class HeatCoolForce:
         self.logL = jnp.asarray(logLambda_m20_table)
         self.ALPHA = ALPHA
         self.BETA  = BETA
-        self.GAMMA = GAMMA
+        self.GAMMA = GAMMA #Heating
         self.MHKB = MHKB
         self.include_heating = include_heating
         self.ctime = ctime
@@ -71,7 +72,7 @@ class HeatCoolForce:
         self.subcycles = int(subcycles)
         self.early_exit = early_exit
         self.eps = eps
-
+        self.heat_scale = heat_scale
         self.i_rho = self.eq.mass_ids
         self.i_E   = self.eq.energy_ids
 
@@ -87,14 +88,18 @@ class HeatCoolForce:
         """Single consistent temperature calculation method."""
         return self._Tcoef * self.MHKB * P / jnp.maximum(rho, self.eps)
 
-    def _Et_floor_from_rho(self, rho):
+    def _Et_floor_from_rho_old(self, rho):
         """Compute minimum thermal energy density for given density."""
         if self.temp_floor is None:
             return 0.0
         Tf = self.temp_floor
         # Et = rho * R * T / (gamma - 1) for ideal gas
         return (rho * self.Rgas * Tf) / (self.gamma - 1.0)
-        
+    def _Et_floor_from_rho(self, rho):
+        if self.temp_floor is None:
+            return 0.0
+        Tf = self.temp_floor
+        return rho * Tf / ((self.gamma - 1.0) * self._Tcoef * self.MHKB)
     def _interp_logLambda_m20(self, logT):
         """Fixed interpolation formula."""
         # Grid spacing assumed to be 0.05
@@ -123,7 +128,7 @@ class HeatCoolForce:
             1.0e7 * jnp.exp(-118400.0 / (T + 1000.0)) + 
             0.014 * jnp.sqrt(jnp.maximum(T, 0.0)) * jnp.exp(-92.0 / jnp.maximum(T, self.eps))
         )
-        low_heat = jnp.where(self.include_heating, self.GAMMA * rho * rho, 0.0)
+        low_heat = jnp.where(self.include_heating, self.GAMMA * rho ** self.heat_scale, 0.0)
         dotE_low = -low_cool + low_heat
 
         # High-T branch: Sutherland & Dopita 1993
@@ -247,7 +252,13 @@ class HeatCoolForce:
         
         # --- Write back ---
         dE = Et_final - Et0
-        return U.at[self.i_E].add(dE)
+        
+        
+        has_nan = jnp.any(jnp.isnan(Et_final))
+        jax.debug.print("NaN check: has_nan={n}, min_Et={e}", 
+                        n=has_nan, 
+                        e=jnp.min(Et_final))
+        return U.at[self.i_E].add(dE), params
     
 
 class HeatCoolForce_old:
@@ -402,104 +413,73 @@ class HeatCoolForce_old:
     # -----------------------
     def force(self, i_step, U, params, dt):
         """
-        Cooling/heating source update with safe early-exit:
-          - Subcycling path: explicit with symmetric fractional cap (no extra fac throttle).
-          - Early-exit path: only when safe; trapezoidal update + fractional cap.
+        Cooling/heating update with stable explicit subcycling.
+
+        Key changes vs old version:
+          1) Limit |dE| BEFORE applying the floor.
+          2) Limit relative to margin = Et - Et_floor (not Et itself).
+          3) Apply floor once at end of each substep.
         """
-        # --- state & thermodynamics ---
-        W     = self.eq.get_primitives_from_conservatives(U)
-        rho   = jnp.maximum(W[self.i_rho], self.eps)
-        P     = jnp.maximum(W[self.i_E],   self.eps)         # primitives' "energy" slot is pressure
-        gamma = getattr(self.eq, "gamma", 5.0/3.0)
-        Et0   = P / (gamma - 1.0)
-    
-        # Kelvin-like "Athena" temperature: T = (14/11)*(mH/kB)*P/rho
-        def T_phys(P_, rho_):
-            return (14.0/11.0) * self.MHKB * P_ / jnp.maximum(rho_, self.eps)
-    
-        T0 = T_phys(P, rho)
+        # --- pull conservative state (assumes Euler ordering) ---
+        rho = jnp.maximum(U[0], self.eps)
+        mom = U[1:4]
+        Etot = U[4]
+
+        # kinetic + thermal split
+        v2 = jnp.sum((mom / rho)**2, axis=0)
+        Ekin = 0.5 * rho * v2
+        Et0  = jnp.maximum(Etot - Ekin, self.eps)
+
+        # temperature from (rho, P)
+        P0 = (self.gamma - 1.0) * Et0
+        T0 = self._temp_from_rhoP(rho, P0)
+
+        # floor (density-dependent) and floor temperature
+        Et_floor = self._Et_floor_from_rho(rho)
         Tf = self.temp_floor if self.temp_floor is not None else 0.0
-    
-        # --- early-exit predicate (compute on current state) ---
-        T_eff0 = jnp.maximum(T0, Tf)
-        dotE0  = self._cooling_heating_rate(rho, T_eff0)
-        tcool0 = jnp.abs(Et0 / jnp.maximum(jnp.abs(dotE0), 1e-30))
-    
-        # cells already at/near the floor: do NOT early-exit; keep subcycling (safer)
-        near_floor0 = (T_eff0 <= 1.01 * Tf)
-    
-        # if the physical (raw-T) rate would flip sign relative to floored-T rate, avoid early-exit
-        dotE_raw0 = self._cooling_heating_rate(rho, T0)
-        sign_flip = (dotE0 * dotE_raw0) < 0.0
-    
-        # also require that a full-step kick would be small compared to Et (otherwise subcycle)
-        f_ee = 0.3  # max fractional change allowed in slow path
-        small_kick = jnp.abs(dotE0 * dt) <= (f_ee * jnp.maximum(Et0, self.eps))
-    
-        # more conservative threshold than dt/ctime (avoid marginal cases)
-        cand = tcool0 > (5.0 * dt / jnp.maximum(self.ctime, self.eps))
-    
-        slow = (self.early_exit &
-                cand &
-                (~near_floor0) &
-                (~sign_flip) &
-                small_kick)
-    
-        # --- subcycling path (explicit; strong but stable) ---
-        dt_loc    = dt / float(self.subcycles)
-        f_max_hi  = 0.9   # aggressive cap at high T (smooth regime)
-        f_max_lo  = 0.3   # conservative cap near the floor
-    
-        def body(_, carry):
-            Tcur, Etcur = carry
-    
-            # rate at this substep (heating/cooling off right at the floor)
-            T_eff     = jnp.maximum(Tcur, Tf)
-            near_floor = (T_eff <= 1.01 * Tf)
-            dotE      = jnp.where(near_floor, 0.0, self._cooling_heating_rate(rho, T_eff))
-    
-            # single symmetric fractional limiter (no extra stability factor)
-            dE    = dotE * dt_loc
-            f_max = jnp.where(T_eff >= 1.0e4, f_max_hi, f_max_lo)
-            dE    = jnp.clip(dE, -f_max * Etcur, f_max * Etcur)
-    
-            Etnew = jnp.maximum(Etcur + dE, 1e-20)  # numerical floor only
-            Pnew  = (gamma - 1.0) * Etnew
-            Tnew  = T_phys(Pnew, rho)
-            return (Tnew, Etnew)
-    
-        T_sub, Et_sub = lax.fori_loop(0, int(self.subcycles), body, (T0, Et0))
-    
-        # --- early-exit (slow) path: trapezoidal update + fractional cap ---
-        # predictor using start-of-step rate
-        Et_pred = Et0 + dotE0 * dt
-        P_pred  = (gamma - 1.0) * jnp.maximum(Et_pred, self.eps)
-        T_pred  = T_phys(P_pred, rho)
-    
-        # corrector rate at predicted state (respect floor for the rate)
-        dotE1   = self._cooling_heating_rate(rho, jnp.maximum(T_pred, Tf))
-    
-        # trapezoidal increment, then cap to the same f_ee fraction
-        dE_trap = 0.5 * (dotE0 + dotE1) * dt
-        dE_trap = jnp.clip(dE_trap, -f_ee * jnp.maximum(Et0, self.eps), f_ee * jnp.maximum(Et0, self.eps))
-        Et_slow = jnp.maximum(Et0 + dE_trap, 1e-20)
-    
-        # --- choose path per-cell ---
-        Et_final = jnp.where(slow, Et_slow, Et_sub)
-    
-        # --- write back thermal-energy change into total energy slot ---
-        # Compute the physical Et floor corresponding to the temp floor
-        gamma = getattr(self.eq, "gamma", 5.0/3.0)
-        Rgas  = getattr(self.eq, "R", 1.0)  # EOS gas constant in code units
-        Tf    = self.temp_floor if self.temp_floor is not None else 0.0
-        Et_floor = (rho * Rgas * Tf) / (gamma - 1.0)
-        
-        # Enforce only at write-back (no per-substep injection)
-        Et_final = jnp.maximum(Et_final, Et_floor)
-        
-        # Write back into total energy slot
-        dE = Et_final - Et0
-        return U.at[self.i_E].add(dE)
+
+        # number of substeps and local dt
+        nsub = int(self.subcycles)
+        dt_loc = dt / nsub
+
+        max_frac_change = 0.3 / jnp.sqrt(self.subcycles / 10.0)  # per-substep cap; you can expose if you want
+
+        def substep(Et_cur, _):
+            # current thermodynamics
+            P_cur = (self.gamma - 1.0) * Et_cur
+            T_cur = self._temp_from_rhoP(rho, P_cur)
+
+            # effective T for rate evaluation
+            T_eff = jnp.maximum(T_cur, Tf)
+
+            # heating/cooling rate (per volume)
+            dotE = self._cooling_heating_rate(rho, T_eff)
+
+            # near-floor freeze-out (prevents chatter at floor)
+            if self.temp_floor is not None:
+                dotE = jnp.where(T_cur <= 1.05 * Tf, 0.0, dotE)
+
+            # explicit energy increment
+            dE = dotE * dt_loc
+
+            # --- robust limiter BEFORE flooring ---
+            margin = jnp.maximum(Et_cur - Et_floor, 0.0)
+            max_abs = max_frac_change * jnp.maximum(margin, self.eps)
+            dE = jnp.clip(dE, -max_abs, max_abs)
+
+            # apply update and floor
+            Et_new = jnp.maximum(Et_cur + dE, Et_floor)
+            return Et_new, None
+
+        # subcycle loop
+        Et_final, _ = jax.lax.scan(substep, Et0, None, length=nsub)
+
+        # rebuild total energy and conservatives
+        P_final = (self.gamma - 1.0) * Et_final
+        Etot_new = Et_final + Ekin
+
+        U_new = U.at[4].set(Etot_new)
+        return U_new
     
     def force_sec(self, i_step, U, params, dt):
         ## SEEMS TO UNDER/OVERCOOL EASILY! Need to debug more, might be more efficient/faster than the subcycling thing

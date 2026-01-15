@@ -282,9 +282,27 @@ class HLLC(RiemannSolver):
         wave_speed_L = jnp.minimum(wave_speed_simple_L, 0.0)
         wave_speed_R = jnp.maximum(wave_speed_simple_R, 0.0)
 
-        # Toro 10.73
-        pre_factor_L = (wave_speed_simple_L - primitives_L[self.velocity_ids[axis]]) / (wave_speed_simple_L - wave_speed_contact) * primitives_L[self.mass_ids]
-        pre_factor_R = (wave_speed_simple_R - primitives_R[self.velocity_ids[axis]]) / (wave_speed_simple_R - wave_speed_contact) * primitives_R[self.mass_ids]
+        # Toro 10.73 OLD VERSION
+        if False:
+            pre_factor_L = (wave_speed_simple_L - primitives_L[self.velocity_ids[axis]]) / (wave_speed_simple_L - wave_speed_contact) * primitives_L[self.mass_ids]
+            pre_factor_R = (wave_speed_simple_R - primitives_R[self.velocity_ids[axis]]) / (wave_speed_simple_R - wave_speed_contact) * primitives_R[self.mass_ids]
+
+        ##SAFE VERSION?
+        if True:
+            
+            uL = primitives_L[self.velocity_ids[axis]]
+            uR = primitives_R[self.velocity_ids[axis]]
+            rhoL = jnp.maximum(primitives_L[0], self.eps)
+            rhoR = jnp.maximum(primitives_R[0], self.eps)
+            pL   = jnp.maximum(primitives_L[-1], self.eps)
+            pR   = jnp.maximum(primitives_R[-1], self.eps)
+            denL = wave_speed_simple_L - wave_speed_contact
+            denR = wave_speed_simple_R - wave_speed_contact
+            denL = jnp.where(jnp.abs(denL) < self.eps, jnp.sign(denL)*self.eps, denL)
+            denR = jnp.where(jnp.abs(denR) < self.eps, jnp.sign(denR)*self.eps, denR)
+
+            pre_factor_L = (wave_speed_simple_L - uL) / denL * rhoL
+            pre_factor_R = (wave_speed_simple_R - uR) / denR * rhoR
 
         # TODO check out performance with u_star_L = jnp.expand_dims(prefactor_L) / jnp.ones_like() 
         # to avoid list + jnp.stack
