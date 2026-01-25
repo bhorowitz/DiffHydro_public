@@ -370,7 +370,7 @@ class hydro:
         fields, params = self.forcing(i, fields, params, dt/2)
 
         if self.use_mol and self.use_ct:
-            jax.debug.print("use ct")
+            #jax.debug.print("use ct")
             fields = self.mol_solve_step_ct(fields, dt, params)  # <<< unsplit (MOL + CT-on-state)
         elif self.use_mol:
             fields = self.mol_solve_step(fields, dt, params)  # <<< unsplit (MOL + CT-on-state)
@@ -761,7 +761,53 @@ class hydro:
 
     # ---------------- CT on updated state ----------------
 
+
+    
     def _apply_ct_on_state(self, sol, params, dt):
+        """
+        BORIS-style 2D CT:
+          - build corner Ez directly from face fluxes (Fx[By], Fy[Bx])
+          - update face-centered B via curl(-Ez)
+          - average face->center and add to sol's cell-centered B
+        """
+        if sol.shape[0] <= self.iBy:
+            return sol
+    
+        Fx = self.flux(sol, 1, params)  # axis=1 means x
+        Fy = self.flux(sol, 2, params)  # axis=2 means y
+    
+        # BORIS corner EMF (Ez) at (i+1/2, j+1/2):
+        # Ez = 0.25 * ( -Fx(By)_i,j - Fx(By)_i,j+1 + Fy(Bx)_i,j + Fy(Bx)_i+1,j )
+        # Using rolls:
+        FxBy = Fx[self.iBy]              # shape (x,y)
+        FyBx = Fy[self.iBx]              # shape (x,y)
+    
+        Ez_corner = 0.25 * (
+            -FxBy
+            -jnp.roll(FxBy, -1, axis=1)          # j+1
+            +FyBx
+            +jnp.roll(FyBx, -1, axis=0)          # i+1
+        )
+    
+        # BORIS then calls get_curl(-Ez, dx):
+        # bx =  (Az - roll(Az,1,y))/dx
+        # by = -(Az - roll(Az,1,x))/dx
+        # with Az = -Ez (EMF). So:
+        # dbx_face = ( (-Ez) - roll((-Ez),1,y) )/dx = -(Ez - roll(Ez,1,y))/dx
+        # dby_face = -( (-Ez) - roll((-Ez),1,x) )/dx = +(Ez - roll(Ez,1,x))/dx
+        dbx_face = -(Ez_corner - jnp.roll(Ez_corner, 1, axis=1)) / self.dx_o  # ∂(-Ez)/∂y
+        dby_face = +(Ez_corner - jnp.roll(Ez_corner, 1, axis=0)) / self.dx_o  # -∂(-Ez)/∂x
+    
+        # If you're storing cell-centered B in sol, you need face->center averaging.
+        # Match BORIS: they evolve face bx/by then average to centers for the Riemann solve.
+        dBx = 0.5 * (dbx_face + jnp.roll(dbx_face, 1, axis=0))  # average x-faces -> centers
+        dBy = 0.5 * (dby_face + jnp.roll(dby_face, 1, axis=1))  # average y-faces -> centers
+    
+        sol = sol.at[self.iBx].add(dt * dBx)
+        sol = sol.at[self.iBy].add(dt * dBy)
+        return sol
+        
+    def _apply_ct_on_state_3D(self, sol, params, dt):
         """
         Constrained Transport applied to the *updated* state (MOL path).
         - Build edge-centered EMFs from face fluxes on the updated state.
