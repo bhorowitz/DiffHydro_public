@@ -24,6 +24,7 @@ class EquationManagerMHD:
         self.eps = 1e-20
         self.cfl = 0.3
         self.mesh_shape = [100, 100, 100]  # will be overwritten by caller
+        self.n_active = 8
         if use_glm:
             self.n_cons = 9
             self.psi_id = 8
@@ -221,4 +222,8 @@ class EquationManagerMHD:
         cf = self.get_fast_magnetosonic_speed(primitives, axis)
        # v  = primitives[self.vel_ids[axis]]
         return cf
+
+    @property
+    def active_slice(self):
+        return slice(0, 8)
       #  return self.get_fast_magnetosonic_speed(primitives, axis)

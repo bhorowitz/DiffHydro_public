@@ -18,6 +18,10 @@ def van_albada_fun(r: Array) -> Array:
 def van_leer_fun(r: Array) -> Array:
     return jnp.maximum(0, 2*r) / (1 + jnp.abs(r))
 
+
+def identity_fun(r: Array) -> Array:
+    return r
+
 def mc_fun(r: Array) -> Array:
     return jnp.maximum(0, jnp.minimum(2 * r, jnp.minimum((1 + r) / 2, 2)))
 
@@ -32,5 +36,7 @@ LIMITER_DICT = {
     "SUPERBEE": superbee_fun,
     "VANALBADA": van_albada_fun,
     "VANLEER": van_leer_fun,
-    "MC": mc_fun 
+    "MC": mc_fun ,
+    "IDENTITY": identity_fun
+    
 }
