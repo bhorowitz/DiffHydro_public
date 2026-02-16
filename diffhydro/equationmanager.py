@@ -36,6 +36,8 @@ class EquationManager:
     gamma: float = 1.4
     n_cons: int = 5
     eps: float = 1e-12
+    isothermal: bool = False
+    isothermal_sound_speed: float = 1.0
 
     # Active variable names/order (single source of truth)
     active_names: tuple[str, ...] = ("rho", "vx", "vy", "vz", "p")
@@ -76,6 +78,9 @@ class EquationManager:
         self.mesh_shape = [100,100,100]
         self.R = 1.0
         self.cp = self.gamma / (self.gamma - 1.0) * self.R
+        self.isothermal_sound_speed = float(self.isothermal_sound_speed)
+        if self.isothermal_sound_speed <= 0.0:
+            raise ValueError("isothermal_sound_speed must be > 0.")
 
     # ---------------------------
     # Convenience slices
@@ -92,20 +97,32 @@ class EquationManager:
     def n_passive(self) -> int:
         return max(0, self.n_cons - self.n_active)
 
+    def get_isothermal_pressure(self, rho):
+        rho_safe = jnp.maximum(rho, self.eps)
+        cs2 = self.isothermal_sound_speed * self.isothermal_sound_speed
+        return cs2 * rho_safe
+
     # ---------------------------
     # Thermodynamics
     # ---------------------------
     def get_specific_energy(self, p, rho):
         rho_safe = jnp.maximum(rho, self.eps)
-        return p / ((self.gamma - 1.0) * rho_safe)
+        p_safe = jnp.maximum(p, self.eps)
+        if self.isothermal:
+            p_safe = self.get_isothermal_pressure(rho_safe)
+        return p_safe / ((self.gamma - 1.0) * rho_safe + self.eps)
 
     def get_pressure(self, e, rho):
+        if self.isothermal:
+            return self.get_isothermal_pressure(rho)
         rho_safe = jnp.maximum(rho, self.eps)
         e_safe = jnp.maximum(e, self.eps)
         return (self.gamma - 1.0) * rho_safe * e_safe
 
     def get_sound_speed(self, p, rho):
         rho_safe = jnp.maximum(rho, self.eps)
+        if self.isothermal:
+            return jnp.full_like(rho_safe, self.isothermal_sound_speed)
         p_safe = jnp.maximum(p, self.eps)
         return jnp.sqrt(self.gamma * p_safe / rho_safe)
 
@@ -122,6 +139,8 @@ class EquationManager:
         rho = prim_a[self.mass_ids]
         u, v, w = (prim_a[i] for i in self.vel_ids)
         p = prim_a[self.energy_ids]
+        if self.isothermal:
+            p = self.get_isothermal_pressure(rho)
 
         e = self.get_specific_energy(p, rho)
         kin = 0.5 * (u*u + v*v + w*w)
@@ -155,7 +174,10 @@ class EquationManager:
         kin = 0.5 * (u*u + v*v + w*w)
         e = jnp.maximum(E - kin, self.eps)
 
-        p = self.get_pressure(e, rho_safe)
+        if self.isothermal:
+            p = self.get_isothermal_pressure(rho_safe)
+        else:
+            p = self.get_pressure(e, rho_safe)
 
         prim_a = jnp.stack([rho_safe, u, v, w, p], axis=0)
 
@@ -253,9 +275,14 @@ class EquationManager:
 
     def get_speed_of_sound(self, p: Array, rho: Array) -> Array:
         """See base class. """
+        if self.isothermal:
+            rho_safe = jnp.maximum(rho, self.eps)
+            return jnp.full_like(rho_safe, self.isothermal_sound_speed)
         return jnp.sqrt( self.gamma * jnp.maximum( p, self.eps) / jnp.maximum( rho, self.eps ) )
 
     def get_pressure(self, e, rho):
+        if self.isothermal:
+            return self.get_isothermal_pressure(rho)
         return (self.gamma - 1.0) * jnp.maximum(e, self.eps) * jnp.maximum(rho, self.eps)
 
     def get_temperature(self, p, rho):
@@ -266,9 +293,18 @@ class EquationManager:
         return jnp.clip(T, 0.10, 10.0**10.5) 
 
     def get_specific_energy(self, p, rho):
-        p_safe   = jnp.maximum(p,   self.eps)
+        if self.isothermal:
+            p_safe = self.get_isothermal_pressure(rho)
+        else:
+            p_safe = jnp.maximum(p, self.eps)
         rho_safe = jnp.maximum(rho, self.eps)
         return p_safe / (rho_safe * (self.gamma - 1.0) + self.eps)
+
+    def project_conservatives_to_eos(self, conservatives):
+        if not self.isothermal:
+            return conservatives
+        primitives = self.get_primitives_from_conservatives(conservatives)
+        return self.get_conservatives_from_primitives(primitives)
 
     def get_total_energy(
             self,
