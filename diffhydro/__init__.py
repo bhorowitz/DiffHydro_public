@@ -13,6 +13,7 @@ from .solver.integrator import INTEGRATOR_DICT
 
 from .solver.stencils import *
 from .solver.recon import *
+from .units import *
 
 from .hydro_core import *
 from .fluxes import *
