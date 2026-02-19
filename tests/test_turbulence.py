@@ -155,7 +155,7 @@ def test_turbulent_force_no_net_momentum_injection():
     U = U.at[-1].set(p0 / (eq.gamma - 1.0))  # zero velocity, all thermal
 
     tf = TurbulentForce(eq, rms_accel=1.0)
-    U_new = tf.force(0, U, {}, 0.1)
+    U_new,_ = tf.force(0, U, {}, 0.1)
 
     dU = np.asarray(U_new - U)
     d_mom = dU[1:4]  # mx,my,mz

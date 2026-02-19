@@ -204,6 +204,12 @@ class hydro:
             u2 = self._apply_ct_on_state(u2_pred, params, 0.5*dt) #0.5 dt?
             return u2
 
+        elif name in ("RK4",):
+            # Fallback: apply CT once after a classic RK4 step using provided integrator?
+            u = self.integrator(self.rhs_unsplit, sol, dt, params)
+            u = self._apply_ct_on_state(u, params, dt)
+            return u
+
         else:
             # Unknown integrator: apply CT once
             u = self.integrator(self.rhs_unsplit, sol, dt, params)

@@ -4,7 +4,8 @@ from .__about__ import __version__
 from .prob_gen.initial_conditions import *
 from .boundary.boundary import *
 from .physics.forcing import *
-from .physics import mhd, cooling, gravity, turbulence
+from .physics import mhd, cooling, gravity, turbulence, eos_projection
+from .physics.eos_projection import EOSProjectionForce
 
 from .solver.signal_speeds import *
 from .solver.riemann_solver import *
@@ -13,6 +14,7 @@ from .solver.integrator import INTEGRATOR_DICT
 
 from .solver.stencils import *
 from .solver.recon import *
+from .units import *
 
 from .hydro_core import *
 from .fluxes import *

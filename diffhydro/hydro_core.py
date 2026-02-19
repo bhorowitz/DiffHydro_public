@@ -40,7 +40,7 @@ except AttributeError:
     REMAT_POLICY = None
 
 def remat(fn):
-    # Use a policy if available in your JAX; otherwise plain remat/checkpoint
+    # Use a policy if available in your JAX version; otherwise plain remat/checkpoint
     return _remat(fn) if REMAT_POLICY is None else _remat(fn, policy=REMAT_POLICY)
 # ---------------------------------------------
 
@@ -113,7 +113,7 @@ class hydro:
                  snapshots = False,
                 splitting_schemes=[[3,1,2,2,1,3],[1,2,3,3,2,1],[2,3,1,1,3,2]], #cyclic permutations
                 fluxes = None, #convection, conduction
-                forces = [NoForcing()], #gravity, etc.
+                forces = [], #gravity, etc.
                 use_mol=True,
                 use_ct=False,
                 pmesh_shape= (1,1,1) ,
@@ -128,12 +128,9 @@ class hydro:
         self.boundary = None
         #supersteps, each superstep has len(splitting_schemes) time steps
         self.n_super_step = n_super_step
-        self.snapshots = snapshots #poorly names/
-        self.outputs = []
         self.fluxes = fluxes
         self.forces = forces
         self.dx_o = 1.0
-        self.timescale = jnp.zeros(self.n_super_step)
         self.use_mol = use_mol
         self.integrator = INTEGRATOR_DICT[integrator]  # callable
         self._integrator_name = integrator
@@ -322,8 +319,8 @@ class hydro:
     
     def forcing(self,i,sol,params,dt): #all axis independant? 
         for force in self.forces:
-            sol = force.force(i, sol, params, dt)  # each returns UPDATED fields
-        return sol
+            sol,params = force.force(i, sol, params, dt)  # each returns UPDATED fields
+        return sol,params
 
     def split_solve_step(self, sol, dt, ax, params):
         """RK2 method, need to put in integrator choice at some point..."""
@@ -349,28 +346,10 @@ class hydro:
                 sol = self.boundary.impose(sol,ax)
                 sol = self.split_solve_step(sol,dt/(len(self.splitting_schemes)),int(ax),params)                 
                 # experimental
-                sol = sol.at[0].set(jnp.abs(sol[0])) #experimental...
-                sol = sol.at[-1].set(jnp.abs(sol[-1])) #experimental...
+                sol = sol.at[0].set(jnp.abs(sol[0]))
+                sol = sol.at[-1].set(jnp.abs(sol[-1]))
     
         return sol
-    
-   # @jax.jit
-    def evolve_old(self,input_fields,params):
-        self.outputs=[]
-        #main loop
-      #  state = (input_fields,params)
-        sharding = NamedSharding(self.mesh, self.FIELD_XYZ)
-        state = (jax.device_put(input_fields, sharding), params)
-        #need to rework the UI to get out snapshots from jitted function, hack for now...
-        if True:
-            state  = jax.lax.fori_loop(0, self.n_super_step, self.hydrostep_adapt, state)
-        else:
-            for i in range(0,self.n_super_step):
-                state,_t = self.hydrostep_adapt(i,state,0)
-                if self.snapshots:
-                    if i%self.snapshots==0: #comment out most times...
-                        self.outputs.append(state)
-        return state
         
  #   @partial(jit, static_argnums=0)
 
@@ -388,10 +367,10 @@ class hydro:
     def _hydrostep(self, i, state, dt):
         # split forcing outside of core hydro loop
         fields, params = state
-        fields = self.forcing(i, fields, params, dt/2)
+        fields, params = self.forcing(i, fields, params, dt/2)
 
         if self.use_mol and self.use_ct:
-            jax.debug.print("use ct")
+            #jax.debug.print("use ct")
             fields = self.mol_solve_step_ct(fields, dt, params)  # <<< unsplit (MOL + CT-on-state)
         elif self.use_mol:
             fields = self.mol_solve_step(fields, dt, params)  # <<< unsplit (MOL + CT-on-state)
@@ -399,7 +378,7 @@ class hydro:
         else:
             fields = self.sweep_stack(state, dt, i)
 
-        fields = self.forcing(i, fields, params, dt/2)
+        fields, params = self.forcing(i, fields, params, dt/2)
         return (fields, params)
 
     
@@ -594,11 +573,6 @@ class hydro:
         fields, params = lax.fori_loop(
             0, self.n_super_step, body, (fields, params)
         )
-       # self.outputs = []
-       # for i in range(self.n_super_step):
-       #     fields, params = pjit_step(fields, params, i)
-       ##     if self.snapshots and i % self.snapshots == 0:
-        #        self.outputs.append((fields, params))
 
         return fields, params
     
@@ -723,7 +697,6 @@ class hydro:
         return fields, params
 
 
-    # Add this as a method to your hydro class:
     def add_memory_efficient_evolve_method(hydro_class):
         """
         Monkey-patch to add the memory-efficient evolve method.
@@ -788,7 +761,53 @@ class hydro:
 
     # ---------------- CT on updated state ----------------
 
+
+    
     def _apply_ct_on_state(self, sol, params, dt):
+        """
+        BORIS-style 2D CT:
+          - build corner Ez directly from face fluxes (Fx[By], Fy[Bx])
+          - update face-centered B via curl(-Ez)
+          - average face->center and add to sol's cell-centered B
+        """
+        if sol.shape[0] <= self.iBy:
+            return sol
+    
+        Fx = self.flux(sol, 1, params)  # axis=1 means x
+        Fy = self.flux(sol, 2, params)  # axis=2 means y
+    
+        # BORIS corner EMF (Ez) at (i+1/2, j+1/2):
+        # Ez = 0.25 * ( -Fx(By)_i,j - Fx(By)_i,j+1 + Fy(Bx)_i,j + Fy(Bx)_i+1,j )
+        # Using rolls:
+        FxBy = Fx[self.iBy]              # shape (x,y)
+        FyBx = Fy[self.iBx]              # shape (x,y)
+    
+        Ez_corner = 0.25 * (
+            -FxBy
+            -jnp.roll(FxBy, -1, axis=1)          # j+1
+            +FyBx
+            +jnp.roll(FyBx, -1, axis=0)          # i+1
+        )
+    
+        # BORIS then calls get_curl(-Ez, dx):
+        # bx =  (Az - roll(Az,1,y))/dx
+        # by = -(Az - roll(Az,1,x))/dx
+        # with Az = -Ez (EMF). So:
+        # dbx_face = ( (-Ez) - roll((-Ez),1,y) )/dx = -(Ez - roll(Ez,1,y))/dx
+        # dby_face = -( (-Ez) - roll((-Ez),1,x) )/dx = +(Ez - roll(Ez,1,x))/dx
+        dbx_face = -(Ez_corner - jnp.roll(Ez_corner, 1, axis=1)) / self.dx_o  # ∂(-Ez)/∂y
+        dby_face = +(Ez_corner - jnp.roll(Ez_corner, 1, axis=0)) / self.dx_o  # -∂(-Ez)/∂x
+    
+        # If you're storing cell-centered B in sol, you need face->center averaging.
+        # Match BORIS: they evolve face bx/by then average to centers for the Riemann solve.
+        dBx = 0.5 * (dbx_face + jnp.roll(dbx_face, 1, axis=0))  # average x-faces -> centers
+        dBy = 0.5 * (dby_face + jnp.roll(dby_face, 1, axis=1))  # average y-faces -> centers
+    
+        sol = sol.at[self.iBx].add(dt * dBx)
+        sol = sol.at[self.iBy].add(dt * dBy)
+        return sol
+        
+    def _apply_ct_on_state_3D(self, sol, params, dt):
         """
         Constrained Transport applied to the *updated* state (MOL path).
         - Build edge-centered EMFs from face fluxes on the updated state.
@@ -880,7 +899,6 @@ class hydro:
         children = ()  # arrays / dynamic values
         aux_data = {
                     "boundary":self.boundary,
-                    "snapshots":self.snapshots,
                    "splitting_schemes":self.splitting_schemes,
                     "fluxes":self.fluxes,"forces":self.forces,
                 "use_mol":self.use_mol,"use_ct":self.use_ct, "pmesh_shape":self.pmesh_shape}  # static values

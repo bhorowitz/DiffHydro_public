@@ -240,7 +240,6 @@ def poisson_multigrid(F: Array,
                       laplace: Optional[Callable[[Array, float], Array]] = apply_poisson) -> Array:
     """
     Solve A phi = F with periodic BCs using multigrid V-/W-cycles.
-    Arguments mirror your previous API so it can be dropped in.
     """
     if h is None:
         # Default to unit spacing if not provided

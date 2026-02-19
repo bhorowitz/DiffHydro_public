@@ -28,9 +28,9 @@ def test_fft_and_mg_selfgravity_agree_on_small_blob():
     fft = FFTSelfGravityForce(eq)
 
     dt = 1e-3
-
-    U_mg = mg.force(0.0, U, {}, dt)
-    U_fft = fft.force(0.0, U, {}, dt)
+    #force functions now return params as well...
+    U_mg,_ = mg.force(0.0, U, {}, dt)
+    U_fft,_ = fft.force(0.0, U, {}, dt)
 
     a_mg = _accelerations_from_update(eq, U, U_mg, dt)
     a_fft = _accelerations_from_update(eq, U, U_fft, dt)
