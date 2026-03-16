@@ -320,10 +320,15 @@ class hydro:
             total_flux += flux.flux(sol,ax,params,total_flux)
         return total_flux
     
-    def forcing(self,i,sol,params,dt): #all axis independant? 
-        for force in self.forces:
-            sol = force.force(i, sol, params, dt)  # each returns UPDATED fields
-        return sol
+    def forcing(self,i,sol,params,dt,reverse: bool = False): #all axis independant?
+        forces = self.forces[::-1] if reverse else self.forces
+        for force in forces:
+            out = force.force(i, sol, params, dt)
+            if isinstance(out, tuple) and len(out) == 2:
+                sol, params = out
+            else:
+                sol = out
+        return sol, params
 
     def split_solve_step(self, sol, dt, ax, params):
         """RK2 method, need to put in integrator choice at some point..."""
@@ -388,7 +393,7 @@ class hydro:
     def _hydrostep(self, i, state, dt):
         # split forcing outside of core hydro loop
         fields, params = state
-        fields = self.forcing(i, fields, params, dt/2)
+        fields, params = self.forcing(i, fields, params, dt/2, reverse=False)
 
         if self.use_mol and self.use_ct:
             jax.debug.print("use ct")
@@ -399,7 +404,7 @@ class hydro:
         else:
             fields = self.sweep_stack(state, dt, i)
 
-        fields = self.forcing(i, fields, params, dt/2)
+        fields, params = self.forcing(i, fields, params, dt/2, reverse=True)
         return (fields, params)
 
     

@@ -21,13 +21,15 @@ class EquationManager:
             self,
            # material_manager: MaterialManager,
           #  equation_information: EquationInformation
+            n_cons: int = 5,
+            dual_energy: bool | None = None,
             ) -> None:
 
        # self.equation_information = equation_information
 
         self.mass_ids = 0#equation_information.mass_ids 
         self.vel_ids = (1,2,3)#equation_information.velocity_ids 
-        self.energy_ids = -1
+        self.energy_ids = 4
         self.velocity_minor_axes = ((2, 3), (3, 1), (1, 2))
         self.equation_type = "SINGLE-PHASE"#equation_information.equation_type
         self.gamma = 1.6
@@ -38,7 +40,19 @@ class EquationManager:
         self.mesh_shape = [100,100,100]
         self.R = 1.0
         self.cp = self.gamma / (self.gamma - 1.0) * self.R
-        self.n_cons = 5
+        if dual_energy is None:
+            dual_energy = (int(n_cons) >= 6)
+        self.dual_energy = bool(dual_energy)
+        self.n_cons = 6 if self.dual_energy else int(n_cons)
+        if self.n_cons < 5:
+            raise ValueError("EquationManager requires at least 5 conservative channels.")
+        # Switch criterion for dual-energy pressure recovery:
+        # use rho*e channel when thermal energy from total energy is tiny.
+        self.dual_energy_eta = 1.0e-4
+
+        # Optional passive dual-energy channel(s): index 5 is the primary rho*e channel.
+        self.dual_energy_ids = 5 if self.n_cons > 5 else None
+        self.passive_ids = tuple(range(5, self.n_cons))
         
     def get_conservatives_from_primitives(self, primitives: Array) -> Array:
         """Converts primitive variables to conservative ones.
@@ -60,6 +74,20 @@ class EquationManager:
                 + primitives[self.vel_ids[1]] * primitives[self.vel_ids[1]] \
                 + primitives[self.vel_ids[2]] * primitives[self.vel_ids[2]]) + e)  # E = rho * (1/2 u^2 + e)
             conservatives = jnp.stack([rho, rhou, rhov, rhow, E], axis=0)
+
+            if self.n_cons > 5:
+                # Keep additional channels passive by default. If provided in primitives,
+                # use them directly as conservative densities; otherwise initialize rho*e.
+                rhoe_default = rho * e
+                extra_cons = []
+                for i_passive in self.passive_ids:
+                    if primitives.shape[0] > i_passive:
+                        extra_cons.append(jnp.maximum(primitives[i_passive], self.eps))
+                    else:
+                        extra_cons.append(rhoe_default)
+                conservatives = jnp.concatenate(
+                    [conservatives, jnp.stack(extra_cons, axis=0)], axis=0
+                )
         
         else:
             raise NotImplementedError
@@ -84,14 +112,33 @@ class EquationManager:
             v = conservatives[self.vel_ids[1]] * inv_rho
             w = conservatives[self.vel_ids[2]] * inv_rho
             
-            # specific internal energy (per mass)
-            e = conservatives[self.energy_ids] * inv_rho - 0.5 * (u*u + v*v + w*w)
-            e = jnp.maximum(e, self.eps)          # prevent negative/internal-energy NaNs
+            # specific internal energy (per mass) from total energy.
+            e_tot = conservatives[self.energy_ids] * inv_rho - 0.5 * (u*u + v*v + w*w)
+            e = jnp.maximum(e_tot, self.eps)          # prevent negative/internal-energy NaNs
+
+            # Dual-energy recovery (Nyx-style intent): when thermal energy is a
+            # tiny fraction of total specific energy, use rho*e channel.
+            if self.dual_energy and self.dual_energy_ids is not None and conservatives.shape[0] > self.dual_energy_ids:
+                rhoe_dual = jnp.maximum(conservatives[self.dual_energy_ids], self.eps)
+                e_dual = rhoe_dual * inv_rho
+                etot_specific = jnp.maximum(conservatives[self.energy_ids] * inv_rho, self.eps)
+                use_dual = e_tot <= self.dual_energy_eta * etot_specific
+                e = jnp.where(use_dual, jnp.maximum(e_dual, self.eps), e)
             
             # build pressure with safe rho
             p = self.get_pressure(e, rho_safe)
-            
+
             primitives = jnp.stack([rho_safe, u, v, w, p], axis=0)
+            if self.n_cons > 5:
+                extra_prims = []
+                for i_passive in self.passive_ids:
+                    if conservatives.shape[0] > i_passive:
+                        extra_prims.append(jnp.maximum(conservatives[i_passive], self.eps))
+                    else:
+                        extra_prims.append(rho_safe * e)
+                primitives = jnp.concatenate(
+                    [primitives, jnp.stack(extra_prims, axis=0)], axis=0
+                )
         else:
             raise NotImplementedError
 
@@ -136,6 +183,12 @@ class EquationManager:
                 rho_ui_u3,
                 ui_Ep],
                 axis=0)
+
+            if self.n_cons > 5:
+                # Passive channels are advected with the contact/face velocity.
+                ui = primitives[axis + 1]
+                extra_fluxes = [ui * conservatives[i_passive] for i_passive in self.passive_ids]
+                flux_xi = jnp.concatenate([flux_xi, jnp.stack(extra_fluxes, axis=0)], axis=0)
         
         else:
             raise NotImplementedError
