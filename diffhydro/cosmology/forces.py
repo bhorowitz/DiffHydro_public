@@ -108,17 +108,11 @@ class JaxPMCoupledGravityForce:
         self.gas_kick_factor = None if gas_kick_factor is None else float(gas_kick_factor)
         self.eps = float(eps)
         self.cfl_ff = float(cfl_ff)
+        nx, ny, nz = self.mesh_shape
 
         self.i_rho = self.eq.mass_ids
         self.i_mx, self.i_my, self.i_mz = self.eq.vel_ids
         self.i_E = self.eq.energy_ids
-
-        nx, ny, nz = self.mesh_shape
-        gx = jnp.arange(nx, dtype=jnp.float32) + 0.5
-        gy = jnp.arange(ny, dtype=jnp.float32) + 0.5
-        gz = jnp.arange(nz, dtype=jnp.float32) + 0.5
-        xx, yy, zz = jnp.meshgrid(gx, gy, gz, indexing="ij")
-        self._gas_cell_positions = jnp.stack([xx, yy, zz], axis=-1).reshape((-1, 3))
 
         kx = jnp.fft.fftfreq(nx, d=1.0) * (2.0 * jnp.pi)
         ky = jnp.fft.fftfreq(ny, d=1.0) * (2.0 * jnp.pi)
@@ -157,10 +151,13 @@ class JaxPMCoupledGravityForce:
         idx = jnp.mod(jnp.floor(positions).astype(jnp.int32), jnp.asarray(self.mesh_shape, dtype=jnp.int32))
         return acc[idx[:, 0], idx[:, 1], idx[:, 2]]
 
+    def _gas_mesh_acceleration(self, delta):
+        return self._mesh_acceleration_fallback(delta)
+
     def _as_particle_weight(self, positions, weight):
         w = jnp.asarray(weight, dtype=jnp.float32)
         if w.ndim == 0:
-            return jnp.ones((positions.shape[0],), dtype=jnp.float32) * w
+            return w
         return w
 
     def _make_delta(self, rho_gas, dm_positions=None, dm_weight=None):
@@ -262,9 +259,7 @@ class JaxPMCoupledGravityForce:
 
         # 1) old-force solve and first half-kick
         delta_old = self._make_delta(rho_gas, dm_positions, dm_weight)
-        gas_accel_old = self._sample_forces(self._gas_cell_positions, delta_old).reshape(
-            self.mesh_shape + (3,)
-        )
+        gas_accel_old = self._gas_mesh_acceleration(delta_old)
         U_half = self._apply_gas_kick(U_gas, rho_gas, gas_accel_old, dtau_half, gas_kick_factor)
 
         if dm_positions is not None:
@@ -277,9 +272,7 @@ class JaxPMCoupledGravityForce:
 
             # 3) new-force solve and second half-kick
             delta_new = self._make_delta(rho_gas, dm_positions_drift, dm_weight)
-            gas_accel_new = self._sample_forces(self._gas_cell_positions, delta_new).reshape(
-                self.mesh_shape + (3,)
-            )
+            gas_accel_new = self._gas_mesh_acceleration(delta_new)
             U_new = self._apply_gas_kick(U_half, rho_gas, gas_accel_new, dtau_half, gas_kick_factor)
 
             dm_accel_new = self._sample_forces(dm_positions_drift, delta_new)

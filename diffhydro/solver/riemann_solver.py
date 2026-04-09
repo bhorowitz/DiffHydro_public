@@ -177,6 +177,82 @@ class LaxFriedrichs(RiemannSolver):
         return fluxes_xi, None, None
     
 
+class HLL(RiemannSolver):
+    """
+    Two-wave HLL Riemann solver for ideal hydrodynamics (Euler).
+    Uses Davis-type bounds S_L, S_R from the same signal_speed
+    function as HLLC.
+    """
+    def __init__(self, equation_manager, signal_speed, **kwargs):
+        super().__init__(equation_manager, signal_speed)
+
+    def _solve_riemann_problem_xi_single_phase(
+            self,
+            primitives_L,
+            primitives_R,
+            conservatives_L,
+            conservatives_R,
+            axis: int,
+            **kwargs):
+
+        # Physical fluxes
+        F_L = self.equation_manager.get_fluxes_xi(primitives_L, conservatives_L, axis)
+        F_R = self.equation_manager.get_fluxes_xi(primitives_R, conservatives_R, axis)
+
+        # Normal velocities
+        uL = primitives_L[self.velocity_ids[axis]]
+        uR = primitives_R[self.velocity_ids[axis]]
+
+        # Speed of sound (same as HLLC)
+        cs_L = self.equation_manager.get_speed_of_sound(
+            primitives_L[self.equation_manager.energy_ids],
+            primitives_L[self.equation_manager.mass_ids],
+        )
+        cs_R = self.equation_manager.get_speed_of_sound(
+            primitives_R[self.equation_manager.energy_ids],
+            primitives_R[self.equation_manager.mass_ids],
+        )
+
+        # Davis-type bounds from the SAME signal_speed as HLLC
+        S_L_raw, S_R_raw = self.signal_speed(
+            uL, uR,
+            cs_L, cs_R,
+            rho_L=primitives_L[self.mass_ids],
+            rho_R=primitives_R[self.mass_ids],
+            p_L=primitives_L[self.energy_ids],
+            p_R=primitives_R[self.energy_ids],
+            gamma=self.equation_manager.gamma,
+        )
+
+        # Enforce upwind: left waves negative, right waves positive
+        S_L = jnp.minimum(S_L_raw, 0.0)
+        S_R = jnp.maximum(S_R_raw, 0.0)
+
+        # HLL flux (only used where S_L < 0 < S_R)
+        # Safe denominator for that region
+        denom = S_R - S_L
+        denom_safe = jnp.where(jnp.abs(denom) < self.eps, 1.0, denom)
+
+        F_hll = (
+            S_R * F_L
+            - S_L * F_R
+            + S_L * S_R * (conservatives_R - conservatives_L)
+        ) / denom_safe
+
+        # Piecewise selection to avoid spurious division / NaNs
+        fluxes_xi = jnp.where(
+            S_L >= 0.0,
+            F_L,  # all waves go right
+            jnp.where(
+                S_R <= 0.0,
+                F_R,  # all waves go left
+                F_hll,
+            ),
+        )
+
+        return fluxes_xi, None, None
+
+
 class HLLC(RiemannSolver):
     """HLLC Riemann Solver
     Toro et al. 1994
@@ -254,6 +330,13 @@ class HLLC(RiemannSolver):
         u_star_L[self.velocity_ids[axis]] *= wave_speed_contact
         u_star_L[self.velocity_minor[axis][0]] *= primitives_L[self.velocity_minor[axis][0]]
         u_star_L[self.velocity_minor[axis][1]] *= primitives_L[self.velocity_minor[axis][1]]
+
+        n_cons = conservatives_L.shape[0]
+        if n_cons > 5:
+            rhoL_safe = jnp.maximum(conservatives_L[self.mass_ids], self.eps)
+            for i_passive in range(5, n_cons):
+                qL = conservatives_L[i_passive] / rhoL_safe
+                u_star_L.append(pre_factor_L * qL)
         u_star_L = jnp.stack(u_star_L)
 
         u_star_R = [
@@ -265,6 +348,11 @@ class HLLC(RiemannSolver):
         u_star_R[self.velocity_ids[axis]] *= wave_speed_contact
         u_star_R[self.velocity_minor[axis][0]] *= primitives_R[self.velocity_minor[axis][0]]
         u_star_R[self.velocity_minor[axis][1]] *= primitives_R[self.velocity_minor[axis][1]]
+        if n_cons > 5:
+            rhoR_safe = jnp.maximum(conservatives_R[self.mass_ids], self.eps)
+            for i_passive in range(5, n_cons):
+                qR = conservatives_R[i_passive] / rhoR_safe
+                u_star_R.append(pre_factor_R * qR)
         u_star_R = jnp.stack(u_star_R)
 
         # Phyiscal fluxes
@@ -278,6 +366,311 @@ class HLLC(RiemannSolver):
         # Kind of Toro 10.71
         fluxes_xi = 0.5 * (1 + jnp.sign(wave_speed_contact)) * flux_star_L \
                   + 0.5 * (1 - jnp.sign(wave_speed_contact)) * flux_star_R
+        return fluxes_xi, None, None
+
+
+class NyxRiemannEuler(RiemannSolver):
+    """
+    Nyx-style approximate Euler Riemann solver.
+
+    This follows the iterative p*/u* construction used in Nyx's
+    `Source/Hydro/Riemann.H`, then builds interface states and Euler fluxes.
+    """
+
+    def __init__(
+        self,
+        equation_manager,
+        signal_speed: Callable | None = None,
+        *,
+        small: float = 1.0e-6,
+        small_dens: float = 1.0e-12,
+        small_pres: float = 1.0e-12,
+        weakwv: float = 1.0e-3,
+        max_iter: int = 3,
+        blend_hll_shocks: bool = True,
+        shock_blend_start: float = 1.0,
+        shock_blend_width: float = 2.0,
+        eos_consistent_interface_energy: bool = True,
+        **kwargs,
+    ) -> None:
+        super().__init__(equation_manager, signal_speed)
+        self.small = float(small)
+        self.small_dens = float(small_dens)
+        self.small_pres = float(small_pres)
+        self.weakwv = float(weakwv)
+        self.max_iter = int(max_iter)
+        self.blend_hll_shocks = bool(blend_hll_shocks)
+        self.shock_blend_start = float(shock_blend_start)
+        self.shock_blend_width = float(shock_blend_width)
+        self.eos_consistent_interface_energy = bool(eos_consistent_interface_energy)
+
+    def _solve_riemann_problem_xi_single_phase(
+        self,
+        primitives_L: Array,
+        primitives_R: Array,
+        conservatives_L: Array,
+        conservatives_R: Array,
+        axis: int,
+        **kwargs,
+    ) -> Tuple[Array, Array, Array]:
+        del kwargs
+
+        gamma = jnp.asarray(self.equation_manager.gamma, dtype=primitives_L.dtype)
+        gm1 = gamma - 1.0
+        small = jnp.asarray(self.small, dtype=primitives_L.dtype)
+        small_dens = jnp.asarray(self.small_dens, dtype=primitives_L.dtype)
+        small_pres = jnp.asarray(self.small_pres, dtype=primitives_L.dtype)
+        weakwv = jnp.asarray(self.weakwv, dtype=primitives_L.dtype)
+        eps = jnp.asarray(self.eps, dtype=primitives_L.dtype)
+
+        iv1, iv2 = self.velocity_minor[axis]
+        inorm = self.velocity_ids[axis]
+
+        # Left/right primitive states at the interface.
+        rl = jnp.maximum(primitives_L[self.mass_ids], small_dens)
+        rr = jnp.maximum(primitives_R[self.mass_ids], small_dens)
+
+        ul = primitives_L[inorm]
+        ur = primitives_R[inorm]
+        vl = primitives_L[iv1]
+        vr = primitives_R[iv1]
+        wl = primitives_L[iv2]
+        wr = primitives_R[iv2]
+
+        pl = jnp.maximum(primitives_L[self.energy_ids], small_pres)
+        pr = jnp.maximum(primitives_R[self.energy_ids], small_pres)
+
+        rel = pl / gm1
+        rer = pr / gm1
+
+        cl = jnp.sqrt(jnp.maximum(gamma * pl / jnp.maximum(rl, eps), eps))
+        cr = jnp.sqrt(jnp.maximum(gamma * pr / jnp.maximum(rr, eps), eps))
+        cav = 0.5 * (cl + cr)
+        csmall = jnp.maximum(small, jnp.maximum(small * cl, small * cr))
+        wsmall = csmall * small_dens
+
+        wl_bar = jnp.maximum(jnp.sqrt(jnp.maximum(gamma * pl * rl, eps)), wsmall)
+        wr_bar = jnp.maximum(jnp.sqrt(jnp.maximum(gamma * pr * rr, eps)), wsmall)
+
+        cleft = wl_bar / jnp.maximum(rl, eps)
+        cright = wr_bar / jnp.maximum(rr, eps)
+
+        # Initial p* estimate.
+        pstar = (wl_bar * pr + wr_bar * pl - wr_bar * wl_bar * (ur - ul)) / jnp.maximum(wl_bar + wr_bar, eps)
+        pstar = jnp.maximum(pstar, small_pres)
+        pstnm1 = pstar
+
+        wlsq = (0.5 * gm1 * (pstar + pl) + pstar) * rl
+        wrsq = (0.5 * gm1 * (pstar + pr) + pstar) * rr
+
+        wl_tmp = jnp.sqrt(jnp.maximum(wlsq, eps))
+        wr_tmp = jnp.sqrt(jnp.maximum(wrsq, eps))
+
+        ustarp = ul - (pstar - pl) / jnp.maximum(wl_tmp, eps)
+        ustarm = ur + (pstar - pr) / jnp.maximum(wr_tmp, eps)
+        pstar = (wl_tmp * pr + wr_tmp * pl - wr_tmp * wl_tmp * (ur - ul)) / jnp.maximum(wl_tmp + wr_tmp, eps)
+        pstar = jnp.maximum(pstar, small_pres)
+        ustar = 0.5 * (ustarm + ustarp)
+
+        # Nyx-style fixed small iteration count.
+        for _ in range(max(0, self.max_iter)):
+            wlsq = (0.5 * gm1 * (pstar + pl) + pstar) * rl
+            wrsq = (0.5 * gm1 * (pstar + pr) + pstar) * rr
+
+            wl_inv = 1.0 / jnp.sqrt(jnp.maximum(wlsq, eps))
+            wr_inv = 1.0 / jnp.sqrt(jnp.maximum(wrsq, eps))
+
+            ustnm1 = ustarm
+            ustnp1 = ustarp
+
+            ustarm = ur - (pr - pstar) * wr_inv
+            ustarp = ul + (pl - pstar) * wl_inv
+
+            dpditer = jnp.abs(pstnm1 - pstar)
+            zp = jnp.abs(ustarp - ustnp1)
+            zm = jnp.abs(ustarm - ustnm1)
+
+            zp = jnp.where(zp - weakwv * cleft < 0.0, dpditer * wl_inv, zp)
+            zm = jnp.where(zm - weakwv * cright < 0.0, dpditer * wr_inv, zm)
+
+            denom = dpditer / jnp.maximum(zp + zm, small * (cleft + cright))
+            pstnm1 = pstar
+            pstar = jnp.maximum(pstar - denom * (ustarm - ustarp), small_pres)
+            ustar = 0.5 * (ustarm + ustarp)
+
+        mask_u_pos = ustar > 0.0
+        mask_u_zero = ustar == 0.0
+
+        ro = jnp.where(mask_u_pos, rl, rr)
+        uo = jnp.where(mask_u_pos, ul, ur)
+        po = jnp.where(mask_u_pos, pl, pr)
+        reo = jnp.where(mask_u_pos, rel, rer)
+
+        ro = jnp.where(mask_u_zero, 0.5 * (rl + rr), ro)
+        uo = jnp.where(mask_u_zero, 0.5 * (ul + ur), uo)
+        po = jnp.where(mask_u_zero, 0.5 * (pl + pr), po)
+        reo = jnp.where(mask_u_zero, 0.5 * (rel + rer), reo)
+
+        qint_iv1 = jnp.where(mask_u_pos, vl, vr)
+        qint_iv2 = jnp.where(mask_u_pos, wl, wr)
+        qint_iv1 = jnp.where(mask_u_zero, 0.5 * (vl + vr), qint_iv1)
+        qint_iv2 = jnp.where(mask_u_zero, 0.5 * (wl + wr), qint_iv2)
+
+        ro = jnp.maximum(ro, small_dens)
+        co = jnp.maximum(csmall, jnp.sqrt(jnp.maximum(jnp.abs(gamma * po / jnp.maximum(ro, eps)), eps)))
+
+        drho = (pstar - po) / jnp.maximum(co * co, eps)
+        rstar = jnp.maximum(small_dens, ro + drho)
+
+        entho = (reo + po) / jnp.maximum(ro * co * co, eps)
+        estar = reo + (pstar - po) * entho
+
+        cstar = jnp.maximum(jnp.sqrt(jnp.maximum(jnp.abs(gamma * pstar / jnp.maximum(rstar, eps)), eps)), csmall)
+        sgnm = jnp.where(ustar >= 0.0, 1.0, -1.0)
+
+        spout = co - sgnm * uo
+        spin = cstar - sgnm * ustar
+        ushock = 0.5 * (spin + spout)
+
+        mask_raref = pstar < po
+        spout = jnp.where(mask_raref, spout, ushock)
+        spin = jnp.where(mask_raref, spin, ushock)
+
+        scr = jnp.where(spout == spin, small * cav, spout - spin)
+        frac = jnp.clip(0.5 * (1.0 + (spout + spin) / jnp.maximum(scr, eps)), 0.0, 1.0)
+
+        rgd = frac * rstar + (1.0 - frac) * ro
+        qint_iu = frac * ustar + (1.0 - frac) * uo
+        qint_gdpres = frac * pstar + (1.0 - frac) * po
+
+        gdnv_state_p = jnp.maximum(qint_gdpres, small_pres)
+        regd = gdnv_state_p / gm1
+
+        mask_spout = spout < 0.0
+        rgd = jnp.where(mask_spout, ro, rgd)
+        qint_iu = jnp.where(mask_spout, uo, qint_iu)
+        qint_gdpres = jnp.where(mask_spout, po, qint_gdpres)
+        regd = jnp.where(mask_spout, reo, regd)
+
+        mask_spin = spin >= 0.0
+        rgd = jnp.where(mask_spin, rstar, rgd)
+        qint_iu = jnp.where(mask_spin, ustar, qint_iu)
+        qint_gdpres = jnp.where(mask_spin, pstar, qint_gdpres)
+        regd = jnp.where(mask_spin, estar, regd)
+
+        gdnv_state_p = jnp.maximum(qint_gdpres, small_pres)
+        qint_gdpres = jnp.maximum(qint_gdpres, small_pres)
+        # Enforce EOS consistency at the interface by default:
+        #   e_int = p / (gamma - 1)
+        # This keeps energy flux thermodynamically consistent with the interface
+        # pressure state and avoids slow pressure/temperature drift.
+        if self.eos_consistent_interface_energy:
+            regd = qint_gdpres / gm1
+        else:
+            regd = jnp.maximum(regd, small_pres / gm1)
+
+        # Interface Euler fluxes.
+        uflx_rho = rgd * qint_iu
+        uflx_u = uflx_rho * qint_iu + gdnv_state_p
+        uflx_v = uflx_rho * qint_iv1
+        uflx_w = uflx_rho * qint_iv2
+
+        rhoetot = regd + 0.5 * rgd * (qint_iu * qint_iu + qint_iv1 * qint_iv1 + qint_iv2 * qint_iv2)
+        uflx_eden = qint_iu * (rhoetot + gdnv_state_p)
+
+        # Map normal/tangential momenta back to Cartesian ordering.
+        if axis == 0:
+            flx_mx, flx_my, flx_mz = uflx_u, uflx_v, uflx_w
+        elif axis == 1:
+            # axis=1 => normal velocity is y (v), tangentials are z (iv1=w) and x (iv2=u)
+            # so momentum flux mapping is:
+            #   F(rho*u) = rho*v*u -> iv2 -> uflx_w
+            #   F(rho*v) = rho*v*v + p -> normal -> uflx_u
+            #   F(rho*w) = rho*v*w -> iv1 -> uflx_v
+            flx_mx, flx_my, flx_mz = uflx_w, uflx_u, uflx_v
+        else:
+            flx_mx, flx_my, flx_mz = uflx_v, uflx_w, uflx_u
+
+        fluxes_xi = jnp.stack([uflx_rho, flx_mx, flx_my, flx_mz, uflx_eden], axis=0)
+
+        # Optional passive channels (e.g., dual-energy rho*e) advected with the
+        # upwinded interface state used for mass flux.
+        n_cons = conservatives_L.shape[0]
+        if n_cons > 5:
+            q_fluxes = []
+            for i_passive in range(5, n_cons):
+                qL = conservatives_L[i_passive] / jnp.maximum(rl, eps)
+                qR = conservatives_R[i_passive] / jnp.maximum(rr, eps)
+                qint = jnp.where(mask_u_pos, qL, qR)
+                qint = jnp.where(mask_u_zero, 0.5 * (qL + qR), qint)
+                q_fluxes.append(uflx_rho * qint)
+            fluxes_xi = jnp.concatenate([fluxes_xi, jnp.stack(q_fluxes, axis=0)], axis=0)
+
+        # Robust face-wise fallback: if Nyx interface state becomes pathological,
+        # switch to conservative two-wave HLL flux for that face.
+        F_L = self.equation_manager.get_fluxes_xi(primitives_L, conservatives_L, axis)
+        F_R = self.equation_manager.get_fluxes_xi(primitives_R, conservatives_R, axis)
+
+        if self.signal_speed is not None:
+            S_L_raw, S_R_raw = self.signal_speed(
+                ul,
+                ur,
+                cl,
+                cr,
+                rho_L=rl,
+                rho_R=rr,
+                p_L=pl,
+                p_R=pr,
+                gamma=self.equation_manager.gamma,
+            )
+        else:
+            S_L_raw = jnp.minimum(ul - cl, ur - cr)
+            S_R_raw = jnp.maximum(ul + cl, ur + cr)
+
+        S_L = jnp.minimum(S_L_raw, 0.0)
+        S_R = jnp.maximum(S_R_raw, 0.0)
+        denom = jnp.where(jnp.abs(S_R - S_L) < self.eps, 1.0, S_R - S_L)
+        F_hll_mid = (
+            S_R * F_L
+            - S_L * F_R
+            + S_L * S_R * (conservatives_R - conservatives_L)
+        ) / denom
+        F_hll = jnp.where(
+            S_L >= 0.0,
+            F_L,
+            jnp.where(S_R <= 0.0, F_R, F_hll_mid),
+        )
+
+        p_ref = jnp.maximum(jnp.maximum(pl, pr), small_pres)
+        rho_ref = jnp.maximum(jnp.maximum(rl, rr), small_dens)
+        p_ratio = qint_gdpres / p_ref
+        rho_ratio = rgd / rho_ref
+
+        state_bad = (
+            ~jnp.isfinite(qint_gdpres)
+            | ~jnp.isfinite(rgd)
+            | ~jnp.isfinite(qint_iu)
+            | ~jnp.isfinite(regd)
+            | (p_ratio < 1.0e-6)
+            | (p_ratio > 1.0e6)
+            | (rho_ratio < 1.0e-6)
+            | (rho_ratio > 1.0e6)
+        )
+        flux_bad = jnp.any(~jnp.isfinite(fluxes_xi), axis=0)
+        bad_face = state_bad | flux_bad
+
+        fluxes_xi = jnp.where(bad_face[None, ...], F_hll, fluxes_xi)
+        fluxes_xi = jnp.where(jnp.isfinite(fluxes_xi), fluxes_xi, F_hll)
+
+        if self.blend_hll_shocks:
+            shock_ratio = jnp.abs(pr - pl) / jnp.maximum(jnp.minimum(pl, pr), small_pres)
+            alpha = jnp.clip(
+                (shock_ratio - self.shock_blend_start)
+                / jnp.maximum(self.shock_blend_width, self.eps),
+                0.0,
+                1.0,
+            )
+            fluxes_xi = (1.0 - alpha[None, ...]) * fluxes_xi + alpha[None, ...] * F_hll
         return fluxes_xi, None, None
 
 
