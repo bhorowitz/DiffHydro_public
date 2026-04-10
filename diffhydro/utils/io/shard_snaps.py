@@ -110,11 +110,13 @@ def load_snapshot(hydrosim, step_i, snapshot_dir=None):
     
     # Load all shards into a dictionary indexed by (x, y, z)
     shards = {}
+    # Utiliser le snapshot_prefix de hydrosim s'il existe, sinon défaut à "fields"
+    prefix = getattr(hydrosim, 'snapshot_prefix', 'fields')
     for x in range(nx):
         for y in range(ny):
             for z in range(nz):
                 linear_idx = x * (ny * nz) + y * nz + z
-                path = os.path.join(snapshot_dir, f"fields_step_{step_i:06d}_device_{linear_idx}.npy")
+                path = os.path.join(snapshot_dir, f"{prefix}_step_{step_i:06d}_device_{linear_idx}.npy")
                 shards[(x, y, z)] = np.load(path)
     
     # Figure out which field axes correspond to which mesh axes

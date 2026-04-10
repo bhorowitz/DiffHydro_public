@@ -241,7 +241,7 @@ class HLLC(RiemannSolver):
             signal_speed: Callable,
             **kwargs
             ) -> None:
-        super().__init__(equation_manager, signal_speed)
+        super().__init__(equation_manager, signal_speed)#super renvoie a la classe parent 
         
         self.s_star = compute_sstar
 

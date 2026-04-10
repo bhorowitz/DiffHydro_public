@@ -82,13 +82,13 @@ class ConvectiveFlux:
 
         # Existing GLM-MHD special case:
         # n_cons == 9 means active MHD (8 vars) + ψ scalar.
-        glm_active = (getattr(eq, "n_cons", conservative_xi_L.shape[0]) == 9)
+        glm_active = (getattr(eq, "n_cons", conservative_xi_L.shape[0]) == 9) #see article 
 
         # Solve Riemann on active-only
         F_act, _, _ = self.solver.solve_riemann_problem_xi(
             prim_L_act, prim_R_act,
             cons_L_act, cons_R_act, ax-1
-        )
+        ) # _ signifie ignore les veleurs retourner, et ax-1 change l indexation de la base on calcule ici les problemes a l interface avec godunov
 
         F = F_act
 
@@ -119,7 +119,7 @@ class ConvectiveFlux:
         else:
             passive_start = eq.n_active
 
-        if conservative_xi_L.shape[0] > passive_start:
+        if conservative_xi_L.shape[0] > passive_start: #calcule des flux passif c est a dire des grandeurs qui n ont pas d influence sur la dynamique et qui sont transportees par le flux de masse
             # mass flux from active solver (row 0 always rho*u_n)
             mass_flux = F_act[eq.mass_ids]  # shape (...)
 

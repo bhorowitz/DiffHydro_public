@@ -120,6 +120,7 @@ class hydro:
                 integrator="RK2",
                 snapshot_every: int | None = None,
                 snapshot_dir: str = "snapshots",
+                snapshot_prefix: str = "fields",
                 track_time: bool = True):
         #parameters that are held constant per run (i.e. probably don't want to take derivatives with respect to...)
    #     self.init_dt = init_dt # tiny starting timestep to smooth out anything too sharp
@@ -148,6 +149,7 @@ class hydro:
         self.track_time: bool = track_time
         self.snapshot_every: int | None = snapshot_every
         self.snapshot_dir: str = snapshot_dir
+        self.snapshot_prefix: str = snapshot_prefix
         
         self.compute_dtype = jnp.float32
         self.state_dtype = jnp.float32
@@ -203,7 +205,7 @@ class hydro:
             linear_idx = int(x_idx) * (mesh_shape['y'] * mesh_shape['z']) + \
                          int(y_idx) * mesh_shape['z'] + int(z_idx)
             os.makedirs(snapshot_dir or ".", exist_ok=True)
-            path = os.path.join(snapshot_dir, f"fields_step_{int(step_i):06d}_device_{linear_idx}.npy")
+            path = os.path.join(snapshot_dir, f"{self.snapshot_prefix}_step_{int(step_i):06d}_device_{linear_idx}.npy")
             onp.save(path, onp.asarray(arr_host))
 
         def _one_step(fields, params, i, t_scalar):
