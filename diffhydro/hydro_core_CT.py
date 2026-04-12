@@ -28,7 +28,8 @@ class hydro:
                  maxjit=True,
                  use_mol=True,
                  use_ct=True,
-                 integrator="RK2"):
+                 integrator="RK2",
+                 dx_o: float | None = None):
         #parameters that are held constant per run (i.e. probably don't want to take derivatives with respect to...)
         self.splitting_schemes = splitting_schemes #strang splitting for x,y,z sweeps
         self.max_dt = max_dt
@@ -40,7 +41,13 @@ class hydro:
         self.fluxes = fluxes or []
         self.forces = forces or []
         self.maxjit = maxjit
-        self.dx_o = 1.0
+        # Mirror the spacing carried by the flux objects when available.
+        self.dx_o = 1.0 if dx_o is None else float(dx_o)
+        if dx_o is None and self.fluxes:
+            dx_candidates = [getattr(flux, "dx_o", None) for flux in self.fluxes]
+            dx_candidates = [dx for dx in dx_candidates if dx is not None]
+            if dx_candidates:
+                self.dx_o = float(dx_candidates[0])
         self.timescale = jnp.zeros(self.n_super_step)
         self.use_mol = use_mol
         self.integrator = INTEGRATOR_DICT[integrator]  # callable
@@ -399,5 +406,6 @@ class hydro:
             "integrator": self._integrator_name,
             "n_super_step": self.n_super_step,
             "max_dt": self.max_dt,
+            "dx_o": self.dx_o,
         }  # static values
         return (children, aux_data)

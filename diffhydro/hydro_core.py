@@ -114,13 +114,14 @@ class hydro:
                 splitting_schemes=[[3,1,2,2,1,3],[1,2,3,3,2,1],[2,3,1,1,3,2]], #cyclic permutations
                 fluxes = None, #convection, conduction
                 forces = [NoForcing()], #gravity, etc.
-                use_mol=True,
-                use_ct=False,
-                pmesh_shape= (1,1,1) ,
-                integrator="RK2",
-                snapshot_every: int | None = None,
-                snapshot_dir: str = "snapshots",
-                track_time: bool = True):
+                 use_mol=True,
+                 use_ct=False,
+                 pmesh_shape= (1,1,1) ,
+                 integrator="RK2",
+                 dx_o: float | None = None,
+                 snapshot_every: int | None = None,
+                 snapshot_dir: str = "snapshots",
+                 track_time: bool = True):
         #parameters that are held constant per run (i.e. probably don't want to take derivatives with respect to...)
    #     self.init_dt = init_dt # tiny starting timestep to smooth out anything too sharp
         self.splitting_schemes = splitting_schemes #strang splitting for x,y,z sweeps
@@ -132,7 +133,14 @@ class hydro:
         self.outputs = []
         self.fluxes = fluxes
         self.forces = forces
-        self.dx_o = 1.0
+        # Keep the hydro update spacing synchronized with the flux objects.
+        # Many scripts set `flux.dx_o` before constructing `hydro(...)`.
+        self.dx_o = 1.0 if dx_o is None else float(dx_o)
+        if dx_o is None and self.fluxes:
+            dx_candidates = [getattr(flux, "dx_o", None) for flux in self.fluxes]
+            dx_candidates = [dx for dx in dx_candidates if dx is not None]
+            if dx_candidates:
+                self.dx_o = float(dx_candidates[0])
         self.timescale = jnp.zeros(self.n_super_step)
         self.use_mol = use_mol
         self.integrator = INTEGRATOR_DICT[integrator]  # callable
@@ -888,5 +896,7 @@ class hydro:
                     "snapshots":self.snapshots,
                    "splitting_schemes":self.splitting_schemes,
                     "fluxes":self.fluxes,"forces":self.forces,
-                "use_mol":self.use_mol,"use_ct":self.use_ct, "pmesh_shape":self.pmesh_shape}  # static values
+                "use_mol":self.use_mol,"use_ct":self.use_ct,
+                "pmesh_shape":self.pmesh_shape,
+                "dx_o": self.dx_o}  # static values
         return (children, aux_data)
