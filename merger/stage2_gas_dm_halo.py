@@ -508,7 +508,14 @@ def radial_profile_particles_box(pos_box, m_par, l_box, nbins=80):
     center = np.array([l_box / 2.0] * 3, dtype=np.float64)
     r = np.sqrt(np.sum((np.asarray(pos_box, dtype=np.float64) - center[None, :]) ** 2, axis=1))
     bins = np.linspace(0.0, 0.5 * np.sqrt(3.0) * l_box, nbins + 1)
-    shell_mass, _ = np.histogram(r, bins=bins, weights=np.full(r.shape, float(m_par)))
+    m_arr = np.asarray(m_par, dtype=np.float64)
+    if m_arr.ndim == 0:
+        weights = np.full(r.shape, float(m_arr), dtype=np.float64)
+    else:
+        if m_arr.shape[0] != r.shape[0]:
+            raise ValueError("Per-particle DM mass array must match the number of particle positions.")
+        weights = m_arr
+    shell_mass, _ = np.histogram(r, bins=bins, weights=weights)
     vol = 4.0 / 3.0 * np.pi * (bins[1:]**3 - bins[:-1]**3)
     r_mid = 0.5 * (bins[:-1] + bins[1:])
     rho = shell_mass / np.maximum(vol, 1.0e-30)

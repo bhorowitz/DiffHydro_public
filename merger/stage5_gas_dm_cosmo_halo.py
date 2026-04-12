@@ -59,7 +59,7 @@ GAMMA = 5.0 / 3.0
 Z_INIT = 0.295
 M200 = 5.0e14
 CONC = 3.5
-PRESSURE_SCALE = 0.01
+PRESSURE_SCALE = 1.0
 H0_KM_S_MPC = 70.0
 OMEGA_M = 0.3
 OMEGA_B = 0.0486
@@ -458,6 +458,11 @@ def validate_finite_state(U, params, where):
         raise FloatingPointError(f"Non-finite hydro state encountered at {where}.")
     if not np.isfinite(a_val):
         raise FloatingPointError(f"Non-finite scale factor encountered at {where}.")
+    dm = params.get("dm", None)
+    if dm is not None:
+        for key in ("x", "p_or_v"):
+            if key in dm and not np.isfinite(np.asarray(dm[key])).all():
+                raise FloatingPointError(f"Non-finite DM {key} encountered at {where}.")
 
 
 def compute_snapshot_metrics(ref, snap, meta):

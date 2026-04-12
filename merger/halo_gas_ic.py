@@ -16,16 +16,18 @@ import numpy as np
 from merger.halo_reference import HaloReference
 
 
-def load_hse_profile_tables(ref: HaloReference):
-    """Export the HSE model once and read the radial profile tables back."""
+def _load_model_profile_tables(model):
+    """Export a cluster_generator model once and read the radial profile tables back."""
     fd, path = tempfile.mkstemp(suffix=".h5", prefix="diffhydro_stage2_")
     os.close(fd)
     try:
-        ref.hse.write_model_to_h5(path, overwrite=True)
+        model.write_model_to_h5(path, overwrite=True)
         with h5py.File(path, "r") as f:
             g = f["fields"]
+            radius = np.asarray(g["radius"], dtype=np.float64)
+            zeros = np.zeros_like(radius)
             out = {
-                "radius": np.asarray(g["radius"], dtype=np.float64),
+                "radius": radius,
                 "gas_density": np.asarray(g["density"], dtype=np.float64),
                 "pressure": np.asarray(g["pressure"], dtype=np.float64),
                 "temperature": np.asarray(g["temperature"], dtype=np.float64),
@@ -36,16 +38,26 @@ def load_hse_profile_tables(ref: HaloReference):
                 "total_mass": np.asarray(g["total_mass"], dtype=np.float64),
                 "dark_matter_density": np.asarray(g["dark_matter_density"], dtype=np.float64),
                 "dark_matter_mass": np.asarray(g["dark_matter_mass"], dtype=np.float64),
-                "stellar_density": np.asarray(g["stellar_density"], dtype=np.float64),
-                "stellar_mass": np.asarray(g["stellar_mass"], dtype=np.float64),
+                "stellar_density": np.asarray(g["stellar_density"], dtype=np.float64) if "stellar_density" in g else zeros.copy(),
+                "stellar_mass": np.asarray(g["stellar_mass"], dtype=np.float64) if "stellar_mass" in g else zeros.copy(),
                 "gas_mass": np.asarray(g["gas_mass"], dtype=np.float64),
                 "gas_fraction": np.asarray(g["gas_fraction"], dtype=np.float64),
-                "electron_number_density": np.asarray(g["electron_number_density"], dtype=np.float64),
+                "electron_number_density": np.asarray(g["electron_number_density"], dtype=np.float64) if "electron_number_density" in g else zeros.copy(),
             }
     finally:
         if os.path.exists(path):
             os.remove(path)
     return out
+
+
+def load_hse_profile_tables(ref: HaloReference):
+    """Export the HSE model once and read the radial profile tables back."""
+    return _load_model_profile_tables(ref.hse)
+
+
+def load_model_profile_tables(model):
+    """Read radial profile tables from an arbitrary cluster_generator model."""
+    return _load_model_profile_tables(model)
 
 
 def radial_to_grid(radius, values, r3d, fill_outer=None):
@@ -95,6 +107,11 @@ def shell_profile_from_grid(field, r3d, r_bins, statistic="mean", weights=None):
 def build_stage2_gas_grids(ref: HaloReference, n_grid: int, l_box: float):
     """Build gas and stellar fields on a Cartesian mesh from the HSE tables."""
     prof = load_hse_profile_tables(ref)
+    return build_gas_grids_from_profiles(prof, n_grid, l_box)
+
+
+def build_gas_grids_from_profiles(prof, n_grid: int, l_box: float):
+    """Build gas and stellar fields on a Cartesian mesh from exported profile tables."""
     X, Y, Z, r3d, center, dx = grid_coordinates(n_grid, l_box)
 
     rho_g = radial_to_grid(prof["radius"], prof["gas_density"], r3d)
@@ -122,3 +139,8 @@ def build_stage2_gas_grids(ref: HaloReference, n_grid: int, l_box: float):
         "g_r": g_r,
     }
 
+
+def build_gas_grids_from_model(model, n_grid: int, l_box: float):
+    """Build gas and stellar fields on a Cartesian mesh from a cluster_generator model."""
+    prof = load_model_profile_tables(model)
+    return build_gas_grids_from_profiles(prof, n_grid, l_box)

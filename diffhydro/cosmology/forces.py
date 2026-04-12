@@ -97,6 +97,7 @@ class JaxPMCoupledGravityForce:
         gas_kick_factor: float | None = None,
         eps: float = 1.0e-20,
         cfl_ff: float = 0.5,
+        timestep_percentile: float = 100.0,
     ):
         self.eq = equation_manager
         self.mesh_shape = tuple(mesh_shape if mesh_shape is not None else equation_manager.mesh_shape)
@@ -108,6 +109,7 @@ class JaxPMCoupledGravityForce:
         self.gas_kick_factor = None if gas_kick_factor is None else float(gas_kick_factor)
         self.eps = float(eps)
         self.cfl_ff = float(cfl_ff)
+        self.timestep_percentile = float(timestep_percentile)
         nx, ny, nz = self.mesh_shape
 
         self.i_rho = self.eq.mass_ids
@@ -122,9 +124,21 @@ class JaxPMCoupledGravityForce:
 
     def timestep(self, U):
         rho = jnp.maximum(jnp.asarray(U[self.i_rho], dtype=jnp.float32), self.eps)
-        rho_max = jnp.max(rho)
-        # Free-fall-style limiter in code units.
-        return self.cfl_ff / jnp.sqrt(rho_max + self.eps)
+        if self.subtract_mean:
+            rho_mean = jnp.maximum(jnp.mean(rho), self.eps)
+            overdensity = jnp.maximum(rho / rho_mean - 1.0, 0.0)
+            if self.timestep_percentile >= 100.0:
+                source_amp = jnp.max(overdensity)
+            else:
+                source_amp = jnp.percentile(overdensity.reshape((-1,)), self.timestep_percentile)
+            source_amp = jnp.maximum(source_amp, 1.0)
+        else:
+            source_amp = jnp.max(rho)
+        # Free-fall-style limiter based on the source amplitude actually seen by
+        # the PM solve. When subtract_mean=True, using the raw supercomoving
+        # density can be overly conservative because the force responds to the
+        # overdensity, not the absolute density floor.
+        return self.cfl_ff / jnp.sqrt(source_amp + self.eps)
 
     def _deposit_dm(self, positions, weight):
         mesh = jnp.zeros(self.mesh_shape, dtype=jnp.float32)
@@ -160,8 +174,10 @@ class JaxPMCoupledGravityForce:
             return w
         return w
 
-    def _make_delta(self, rho_gas, dm_positions=None, dm_weight=None):
+    def _make_delta(self, rho_gas, dm_positions=None, dm_weight=None, dm_profile_grid=None):
         total_rho = rho_gas
+        if dm_profile_grid is not None:
+            total_rho = total_rho + dm_profile_grid
         if dm_positions is not None:
             total_rho = total_rho + self._deposit_dm(dm_positions, dm_weight)
 
@@ -257,8 +273,14 @@ class JaxPMCoupledGravityForce:
         else:
             gas_kick_factor = jnp.asarray(gas_kick_factor, dtype=jnp.float32)
 
+        dm_profile_grid = None
+        if dm_params is not None:
+            pg = dm_params.get("profile_grid", None)
+            if pg is not None:
+                dm_profile_grid = jnp.asarray(pg, dtype=jnp.float32)
+
         # 1) old-force solve and first half-kick
-        delta_old = self._make_delta(rho_gas, dm_positions, dm_weight)
+        delta_old = self._make_delta(rho_gas, dm_positions, dm_weight, dm_profile_grid)
         gas_accel_old = self._gas_mesh_acceleration(delta_old)
         U_half = self._apply_gas_kick(U_gas, rho_gas, gas_accel_old, dtau_half, gas_kick_factor)
 
@@ -270,8 +292,8 @@ class JaxPMCoupledGravityForce:
             mesh_shape = jnp.asarray(self.mesh_shape, dtype=dm_positions.dtype)
             dm_positions_drift = jnp.mod(dm_positions + dtau * drift_factor * dm_mom_half, mesh_shape)
 
-            # 3) new-force solve and second half-kick
-            delta_new = self._make_delta(rho_gas, dm_positions_drift, dm_weight)
+            # 3) new-force solve and second half-kick (reuse same profile_grid for symmetry)
+            delta_new = self._make_delta(rho_gas, dm_positions_drift, dm_weight, dm_profile_grid)
             gas_accel_new = self._gas_mesh_acceleration(delta_new)
             U_new = self._apply_gas_kick(U_half, rho_gas, gas_accel_new, dtau_half, gas_kick_factor)
 
