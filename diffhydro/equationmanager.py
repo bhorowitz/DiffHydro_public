@@ -34,13 +34,13 @@ class EquationManager:
       - using active_slice/passive_slice everywhere else.
     """
     gamma: float = 1.4
-    n_cons: int = 5
+    n_cons: int = 6 #avant c etait 5
     eps: float = 1e-12
     isothermal: bool = False
     isothermal_sound_speed: float = 1.0
 
     # Active variable names/order (single source of truth)
-    active_names: tuple[str, ...] = ("rho", "vx", "vy", "vz", "p")
+    active_names: tuple[str, ...] = ("rho", "vx", "vy", "vz", "p","rho_test")
 
     # Derived index maps (filled in __post_init__)
     active_map: dict[str, int] = field(init=False, repr=False)
@@ -48,12 +48,13 @@ class EquationManager:
     vel_ids: tuple[int, int, int] = field(init=False)
     energy_ids: int = field(init=False)  # p in primitives, Etot in conservatives
     n_active: int = field(init=False)
+    mass_ids_test: int = field(init=False)
 
     def __post_init__(self):
         self.n_active = len(self.active_names)
-        if self.n_active != 5:
+        if self.n_active != self.n_cons:
             raise ValueError(
-                f"Expected 5 active vars (rho,vx,vy,vz,p). Got {self.n_active}."
+                f"Expected {self.n_cons} active vars (rho,vx,vy,vz,p,rho_test). Got {self.n_active}."
             )
         if self.n_cons < self.n_active:
             raise ValueError(
@@ -67,6 +68,7 @@ class EquationManager:
             self.active_map["vy"],
             self.active_map["vz"],
         )
+        self.mass_ids_test = self.active_map["rho_test"]
         self.energy_ids = self.active_map["p"]
         self.velocity_minor_axes = ((2, 3), (3, 1), (1, 2))
         self.equation_type = "SINGLE-PHASE"#equation_information.equation_type
