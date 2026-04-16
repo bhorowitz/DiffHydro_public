@@ -163,6 +163,7 @@ split_solve_step()  [RK2]
 | Fichier | Rôle |
 |---------|------|
 | [`equationmanager.py`](diffhydro/equationmanager.py) | Gère variables actives/passives, calcule flux |
+| [`equationmanager_radiative_transf.py`](diffhydro/equationmanager_radiative_transf.py) | Variante multi-densité (voir `MULTI_DENSITY_ARCHITECTURE.md`) |
 | [`equationmanager_mhd.py`](diffhydro/equationmanager_mhd.py) | Variante MHD |
 | [`hydro_core.py`](diffhydro/hydro_core.py) | Boucles temporelles, steps directionnels |
 | [`fluxes.py`](diffhydro/fluxes.py) | Orchestre reconstruction + Riemann |
