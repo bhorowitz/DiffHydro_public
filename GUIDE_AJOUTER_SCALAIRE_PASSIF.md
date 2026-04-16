@@ -7,7 +7,7 @@ Pour ajouter **1 nouvelle densité** (ex: traceur pollutant, fraction de mélang
 1. **Modifier `n_cons`** dans `EquationManager` (5 → 6)
 2. **Initialiser** le champ dans les conditions initiales
 3. **Appliquer les conditions aux limites** appropriées
-4. ✅ **Les flux se calculent automatiquement**
+4.  **Les flux se calculent automatiquement**
 
 ---
 
@@ -30,7 +30,7 @@ class EquationManager:
 @dataclass
 class EquationManager:
     gamma: float = 1.4
-    n_cons: int = 6              # ↑ +1 pour rho*pollutant
+    n_cons: int = 6              # +1 pour rho*pollutant
     eps: float = 1e-12
 ```
 
@@ -155,20 +155,20 @@ fields = jnp.concatenate([fields_active, tracer1[None,...], tracer2[None,...], t
 
 ## Vérification: Ce qui est AUTOMATIQUE
 
-✅ **Advection** du traceur (flux calculé par `get_fluxes_xi()`)  
-✅ **Solveurs de Riemann** appliqués (HLL, HLLC, etc.)  
-✅ **Conservation de masse** du traceur  
-✅ **Reconstructions PPM/PLT** inclus  
-✅ **Parallélisation JAX** (jit, pmap, pjit)
+ **Advection** du traceur (flux calculé par `get_fluxes_xi()`)  
+ **Solveurs de Riemann** appliqués (HLL, HLLC, etc.)  
+ **Conservation de masse** du traceur  
+ **Reconstructions PPM/PLT** inclus  
+ **Parallélisation JAX** (jit, pmap, pjit)
 
 ---
 
 ## Vérification: Ce qui NÉCESSITE du Travail
 
-❌ **Terme source** (si le traceur a une dynamique propre)  
-❌ **Réactions chimiques** ou transformations  
-❌ **Diffusivité** (si voulue)  
-❌ **Conditions aux limites non-périodiques**  
+ **Terme source** (si le traceur a une dynamique propre)  
+ **Réactions chimiques** ou transformations  
+ **Diffusivité** (si voulue)  
+ **Conditions aux limites non-périodiques**  
 
 **Exemple:** Si le traceur a une **source**, modifier `hydro_core._hydrostep()`:
 
@@ -242,6 +242,166 @@ grep -r "n_cons" diffhydro/ examples/
 
 - Ajouter des variables n'augmente que légèrement le coût (même architecture JAX)
 - Si lenteur apparaît, vérifier `jit` compilation (D'habitude rapide après 1ère run)
+
+---
+
+## Cas 3: Ajouter `rho_test` (Copie Identique de ρ para Tests)
+
+Ce cas montre comment ajouter une **copie exacte de la densité** appelée `rho_test`. 
+Cela permet de tester des modifications sur une variable sans affecter ρ physicalement.
+
+### ÉTAPE 1: Augmenter `n_cons` dans EquationManager
+
+**Fichier:** [`diffhydro/equationmanager.py` L.23-25](diffhydro/equationmanager.py#L23)
+
+**Avant:**
+```python
+@dataclass
+class EquationManager:
+    gamma: float = 1.4
+    n_cons: int = 5              # rho, rho*vx, rho*vy, rho*vz, E_tot
+    eps: float = 1e-12
+```
+
+**Après:**
+```python
+@dataclass
+class EquationManager:
+    gamma: float = 1.4
+    n_cons: int = 6              # +1 pour rho_test (copie de rho)
+    eps: float = 1e-12
+```
+
+**Ce que ça fait:** Alloue de la place pour stocker une 6ème variable conservative. DiffHydro appliquera **automatiquement** les mêmes équations de conservation (flux, Riemann) à `rho_test`.
+
+---
+
+### ÉTAPE 2: Initialiser `rho_test` = `rho` aux Conditions Initiales
+
+**Fichier:** Votre script/notebook de simulation (ex: `examples/my_test.py`)
+
+**Code complet:**
+```python
+import jax.numpy as jnp
+from diffhydro import hydro, EquationManager, HLLC, ConvectiveFlux, MUSCL3
+
+# ───────────────────────────────────────────────
+# 1. CRÉATION du solveur avec n_cons=6
+# ───────────────────────────────────────────────
+eq = EquationManager(n_cons=6, gamma=1.4)  # ← CLEF: n_cons augmenté
+
+# Initialiser le flux
+ss = diffhydro.solver.signal_speeds.DefaultSignalSpeeds(eq)
+solver = HLLC(equation_manager=eq, signal_speed=ss)
+cf = ConvectiveFlux(eq, solver, MUSCL3(limiter="VANLEER"), positivity=False)
+hydro_solver = hydro(n_super_step=1000, fluxes=[cf], use_mol=True, integrator="SSPRK3")
+
+# ───────────────────────────────────────────────
+# 2. INITIALISATION DES CHAMPS
+# ───────────────────────────────────────────────
+nx, ny, nz = 128, 128, 128
+x = jnp.linspace(0, 1, nx)
+y = jnp.linspace(0, 1, ny)
+z = jnp.linspace(0, 1, nz)
+
+# Variables physiques (5 premières)
+rho = jnp.ones((nx, ny, nz)) * 1.0
+vx = jnp.ones((nx, ny, nz)) * 0.1
+vy = jnp.zeros((nx, ny, nz))
+vz = jnp.zeros((nx, ny, nz))
+p = jnp.ones((nx, ny, nz)) * 0.1
+
+# Convertir en variables conservatives
+E_tot = p / (eq.gamma - 1.0) + 0.5 * rho * (vx**2 + vy**2 + vz**2)
+fields_active = jnp.stack([rho, rho*vx, rho*vy, rho*vz, E_tot], axis=0)  # Shape: (5, nx, ny, nz)
+
+# ───────────────────────────────────────────────
+# 3. AJOUTER rho_test (COPIE IDENTIQUE DE rho)
+# ───────────────────────────────────────────────
+# rho_test commence EXACTEMENT igual à rho conservative
+rho_test = rho.copy()  # Début identique
+
+# Empiler avec les 5 variables actives
+fields = jnp.concatenate([fields_active, rho_test[None, ...]], axis=0)
+
+print(f"Shape fields: {fields.shape}")  # (6, 128, 128, 128) ✓
+print(f"fields[0] (rho) et fields[5] (rho_test) identiques: {jnp.allclose(fields[0], fields[5])}")  # True ✓
+```
+
+**Explications ligne par ligne:**
+
+| Ligne | Importance | Raison |
+|-------|-----------|--------|
+| `n_cons: int = 6` | CRITIQUE | Alloue la mémoire et déclare 6 variables conservatives |
+| `rho_test = rho.copy()` | CRITIQUE | Initialise rho_test = rho (copie indépendante) |
+| `jnp.concatenate([..., rho_test[None, ...]], axis=0)` | CRITIQUE | Ajoute rho_test comme 6ème composante des fields |
+| `fields[5]` est maintenant indexable | Important | Permet d'accéder à rho_test après simulation |
+
+---
+
+### ÉTAPE 3: Appeler `evolve` et Récupérer `rho_test`
+
+```python
+# ───────────────────────────────────────────────
+# 4. RÉSOUDRE (evolve calcule AUTOMATIQUEMENT rho_test)
+# ───────────────────────────────────────────────
+params = {}
+output_fields, output_params = hydro_solver.evolve(fields, params)
+# output_fields shape: (6, 128, 128, 128)
+# output_fields[0] = ρ finale
+# output_fields[5] = ρ_test finale (soumise aux MÊMES calculs que ρ)
+
+# ───────────────────────────────────────────────
+# 5. EXTRAIRE ET UTILISER rho_test
+# ───────────────────────────────────────────────
+rho_final = output_fields[0]
+rho_test_final = output_fields[5]
+
+vx_final = output_fields[1] / rho_final
+vy_final = output_fields[2] / rho_final
+vz_final = output_fields[3] / rho_final
+E_thermal = output_fields[4] - 0.5 * rho_final * (vx_final**2 + vy_final**2 + vz_final**2)
+
+print(f"ρ final: min={jnp.min(rho_final):.6f}, max={jnp.max(rho_final):.6f}")
+print(f"ρ_test final: min={jnp.min(rho_test_final):.6f}, max={jnp.max(rho_test_final):.6f}")
+print(f"Différence (rho_test - rho): max={jnp.max(jnp.abs(rho_test_final - rho_final)):.2e}")
+# Typiquement max diff ~1e-14 (erreur de précision numérique)
+```
+
+---
+
+### ÉTAPE 4: Modifier les Calculs de `rho_test` (Plus tard)
+
+Une fois que ça fonctionne, vous pouvez modifier **seulement** rho_test:
+
+**Option A: Via un ForçageMoyen (Forcing):**
+```python
+class TestForce:
+    def __call__(self, sol, ax, params):
+        """Modifie uniquement rho_test (index 5)"""
+        source = jnp.zeros_like(sol[5])  # structure de rho_test
+        # Ajouter une logique personnalisée ICI
+        return source  # retourner terme source
+
+forces = [TestForce()]
+hydro_solver = hydro(..., forces=forces)
+```
+
+**Option B: Post-processing après simulation:**
+```python
+# Modifier rho_test APRÈS evolve basé sur ρ finale
+rho_test_modified = rho_test_final * (1.0 + decay_factor)
+```
+
+---
+
+### Résumé des Fichiers à Modifier pour `rho_test`
+
+| Fichier | Ligne | Avant | Après | Raison |
+|---------|-------|-------|-------|--------|
+| `diffhydro/equationmanager.py` | 25 | `n_cons: int = 5` | `n_cons: int = 6` | Déclare 6ème variable |
+| Votre script d'init | (~40ème) | `fields = jnp.stack([rho, ...], axis=0)` | `fields = jnp.concatenate([..., rho_test[None, ...]], axis=0)` | Inclut rho_test dans fields |
+| Extraction de sortie | (~10ème) | `rho = output[0]` | `rho_test = output[5]` | Accès à rho_test final |
 
 ---
 
