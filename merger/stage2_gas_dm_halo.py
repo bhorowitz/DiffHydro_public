@@ -39,6 +39,7 @@ import sys
 import yaml
 import time
 import argparse
+import shutil
 import imageio.v2 as imageio
 import numpy as np
 import h5py
@@ -59,6 +60,7 @@ import jax
 import jax.numpy as jnp
 import diffhydro as dh
 from diffhydro.equationmanager import EquationManager
+from diffhydro.utils.io.shard_snaps import load_snapshot_cpu
 from merger.physical_pm_force import PhysicalDMGravityForce, G_PHYS, _poisson_accel, _kick_gas
 from merger.stage1_dm_halo import build_ic as build_dm_particle_ic, R200
 
@@ -320,39 +322,64 @@ def run_evolution(U0, rho_dm_3d, n_grid, l_box, n_steps, snapshot_every, max_dt,
             }
         }
 
-    U_curr  = U0.astype(np.float32)
-    U_snaps = [U0.copy()]
-    dm_pos_snaps = [] if dm_particles is None else [np.asarray(params_curr["dm"]["pos"], dtype=np.float32)]
-    t_myr = [0.0]
-    steps_done = 0
-    sims = {}
+    U_curr = U0.astype(np.float32)
+    snapshot_dir = os.path.join(OUT_DIR, "field_snapshots")
+    if os.path.isdir(snapshot_dir):
+        shutil.rmtree(snapshot_dir)
+    os.makedirs(snapshot_dir, exist_ok=True)
+
+    np.save(os.path.join(snapshot_dir, "fields_step_000000_device_0.npy"), np.asarray(U_curr, dtype=np.float32))
+    if dm_particles is not None:
+        np.save(
+            os.path.join(snapshot_dir, "dm_pos_step_000000.npy"),
+            np.asarray(params_curr["dm"]["pos"], dtype=np.float32),
+        )
 
     t_wall_start = time.time()
-    while steps_done < n_steps:
-        n_chunk = min(snapshot_every, n_steps - steps_done)
-        if n_chunk not in sims:
-            sims[n_chunk] = dh.hydro(
-                n_super_step=n_chunk,
-                max_dt=max_dt,
-                fluxes=[flux],
-                forces=[force],
-                use_mol=True,
-                pmesh_shape=(1, 1, 1),
-                dx_o=flux.dx_o,
-            )
-        U_curr, params_curr, dt_hist = sims[n_chunk].evolve_with_callbacks(U_curr, params_curr)
-        steps_done += n_chunk
-        U_snaps.append(np.array(U_curr))
+    sim = dh.hydro(
+        n_super_step=n_steps,
+        max_dt=max_dt,
+        fluxes=[flux],
+        forces=[force],
+        use_mol=True,
+        pmesh_shape=(1, 1, 1),
+        dx_o=flux.dx_o,
+        snapshot_every=int(snapshot_every),
+        snapshot_dir=snapshot_dir,
+    )
+    U_curr, params_curr, dt_hist = sim.evolve_with_callbacks(U_curr, params_curr)
+
+    if n_steps % int(snapshot_every) != 0:
+        np.save(
+            os.path.join(snapshot_dir, f"fields_step_{int(n_steps):06d}_device_0.npy"),
+            np.asarray(U_curr, dtype=np.float32),
+        )
         if dm_particles is not None:
-            dm_pos_snaps.append(np.asarray(params_curr["dm"]["pos"], dtype=np.float32))
-        dt_chunk = float(np.sum(np.asarray(dt_hist, dtype=np.float64)))
-        t_myr.append(t_myr[-1] + dt_chunk)
-        print(f"  step {steps_done}/{n_steps}", flush=True)
+            np.save(
+                os.path.join(snapshot_dir, f"dm_pos_step_{int(n_steps):06d}.npy"),
+                np.asarray(params_curr["dm"]["pos"], dtype=np.float32),
+            )
 
     t_wall = time.time() - t_wall_start
     print(f"  Wall time: {t_wall:.1f} s")
+    step_ids = [0]
+    step_ids.extend(range(int(snapshot_every), n_steps + 1, int(snapshot_every)))
+    if step_ids[-1] != int(n_steps):
+        step_ids.append(int(n_steps))
 
-    return U_snaps, np.asarray(t_myr, dtype=np.float64), t_wall, dm_pos_snaps
+    U_snaps = [
+        load_snapshot_cpu(step_i, snapshot_dir, pmesh_shape=(1, 1, 1))
+        for step_i in step_ids
+    ]
+    dm_pos_snaps = [] if dm_particles is None else [
+        np.load(os.path.join(snapshot_dir, f"dm_pos_step_{step_i:06d}.npy"))
+        for step_i in step_ids
+    ]
+
+    dt_hist = np.asarray(dt_hist, dtype=np.float64)
+    dt_cum = np.concatenate([[0.0], np.cumsum(dt_hist)])
+    t_myr = np.asarray([dt_cum[step_i] for step_i in step_ids], dtype=np.float64)
+    return U_snaps, t_myr, t_wall, dm_pos_snaps
 
 
 # ─── diagnostic plots ────────────────────────────────────────────────────────
@@ -504,6 +531,56 @@ def plot_density_slices(U_snaps, t_Myr, n_grid, l_box):
     print(f"  Saved {out}")
 
 
+def _temperature_from_state(U):
+    rho = np.maximum(np.asarray(U[0], dtype=np.float64), 1.0e-30)
+    mx = np.asarray(U[1], dtype=np.float64)
+    my = np.asarray(U[2], dtype=np.float64)
+    mz = np.asarray(U[3], dtype=np.float64)
+    E = np.asarray(U[4], dtype=np.float64)
+    kinetic = 0.5 * (mx * mx + my * my + mz * mz) / rho
+    p = np.maximum((GAMMA - 1.0) * (E - kinetic), 1.0e-30)
+    return p / rho
+
+
+def make_temperature_animation(U_snaps, t_myr, n_grid, l_box, out_dir):
+    if len(U_snaps) < 2:
+        return
+
+    temp_slices = [_temperature_from_state(U)[:, :, n_grid // 2] for U in U_snaps]
+    log_slices = [np.log10(np.maximum(sl, 1.0e-30)) for sl in temp_slices]
+    vmin = min(float(np.min(sl)) for sl in log_slices)
+    vmax = max(float(np.max(sl)) for sl in log_slices)
+    L = l_box / 2.0
+    extent = [-L, L, -L, L]
+    frames = []
+
+    temp0 = temp_slices[0]
+    for t_now, temp_sl, log_sl in zip(t_myr, temp_slices, log_slices):
+        frac = (temp_sl - temp0) / np.maximum(temp0, 1.0e-30)
+        lim = max(0.05, float(np.nanpercentile(np.abs(frac), 99.0)))
+        fig, axes = plt.subplots(1, 2, figsize=(11, 4.5))
+        im0 = axes[0].imshow(log_sl.T, origin="lower", extent=extent, cmap="inferno", vmin=vmin, vmax=vmax, aspect="equal")
+        axes[0].set_title(rf"$\log_{{10}}(P/\rho)$ at $t={t_now:.0f}$ Myr")
+        axes[0].set_xlabel("x [kpc]")
+        axes[0].set_ylabel("y [kpc]")
+        plt.colorbar(im0, ax=axes[0], fraction=0.046)
+
+        im1 = axes[1].imshow(frac.T, origin="lower", extent=extent, cmap="coolwarm", vmin=-lim, vmax=lim, aspect="equal")
+        axes[1].set_title("Fractional temperature change")
+        axes[1].set_xlabel("x [kpc]")
+        axes[1].set_ylabel("y [kpc]")
+        plt.colorbar(im1, ax=axes[1], fraction=0.046)
+
+        plt.tight_layout()
+        fig.canvas.draw()
+        frames.append(np.asarray(fig.canvas.buffer_rgba())[..., :3].copy())
+        plt.close(fig)
+
+    out = os.path.join(out_dir, "temperature_evolution.gif")
+    imageio.mimsave(out, frames, duration=0.6, loop=0)
+    print(f"  Saved {out}")
+
+
 def radial_profile_particles_box(pos_box, m_par, l_box, nbins=80):
     center = np.array([l_box / 2.0] * 3, dtype=np.float64)
     r = np.sqrt(np.sum((np.asarray(pos_box, dtype=np.float64) - center[None, :]) ** 2, axis=1))
@@ -648,6 +725,7 @@ def main():
     print("[Stage 2] Plotting diagnostics...")
     plot_stability(U_snaps, t_Myr, r_prof, rho_prof, pres_prof, N_GRID, L_BOX)
     plot_density_slices(U_snaps, t_Myr, N_GRID, L_BOX)
+    make_temperature_animation(U_snaps, t_Myr, N_GRID, L_BOX, OUT_DIR)
     if dm_particles is not None:
         plot_dm_profile_evolution(dm_pos_snaps, t_Myr, dm_particles["m_par"], N_GRID, L_BOX)
         make_dm_density_animation(dm_pos_snaps, t_Myr, dm_particles["m_par"], N_GRID, L_BOX, OUT_DIR)

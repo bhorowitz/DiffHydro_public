@@ -217,6 +217,12 @@ class hydro:
             path = os.path.join(snapshot_dir, f"fields_step_{int(step_i):06d}_device_{linear_idx}.npy")
             onp.save(path, onp.asarray(arr_host))
 
+        def _save_dm_pos_np_cb(step_i, pos_host):
+            import os, numpy as onp
+            os.makedirs(snapshot_dir or ".", exist_ok=True)
+            path = os.path.join(snapshot_dir, f"dm_pos_step_{int(step_i):06d}.npy")
+            onp.save(path, onp.asarray(pos_host))
+
         def _one_step(fields, params, i, t_scalar):
             (fields_out, params_out), dt = self.hydrostep_adapt(i, (fields, params), t_scalar)
             return fields_out, params_out, dt
@@ -230,6 +236,7 @@ class hydro:
 
                 if snapshot_every > 0:
                     def _do_snapshot(_):
+                        step_num = i + 1
                         # Create a shard_map just to access axis indices
                         def save_local_shard(local_fields):
                             x_idx = lax.axis_index('x')
@@ -237,7 +244,7 @@ class hydro:
                             z_idx = lax.axis_index('z')
                             # Save with mesh coordinates
                             io_callback(_save_shard_np_cb, None, 
-                                       i, x_idx, y_idx, z_idx, local_fields)
+                                       step_num, x_idx, y_idx, z_idx, local_fields)
                             return ()
 
                         shard_map(
@@ -247,9 +254,15 @@ class hydro:
                             out_specs=P(),  # Returns ()
                             check_rep=False
                         )(fields)
+
+                        dm_params = params.get("dm", None) if isinstance(params, dict) else None
+                        if dm_params is not None:
+                            dm_pos = dm_params.get("pos", dm_params.get("x", None))
+                            if dm_pos is not None:
+                                io_callback(_save_dm_pos_np_cb, None, step_num, dm_pos)
                         return ()
 
-                    lax.cond((i % snapshot_every) == 0, _do_snapshot, lambda _: (), operand=None)
+                    lax.cond(((i + 1) % snapshot_every) == 0, _do_snapshot, lambda _: (), operand=None)
 
                 return (fields, params, t, dt_hist)
 

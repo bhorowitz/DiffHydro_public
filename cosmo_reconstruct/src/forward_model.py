@@ -202,6 +202,16 @@ def gaussian_smooth_fft(field: jnp.ndarray, sigma_cells: float) -> jnp.ndarray:
     return jnp.asarray(smooth, dtype=jnp.float32)
 
 
+def _log_mean_exp(x: jnp.ndarray) -> jnp.ndarray:
+    """Numerically stable log(mean(exp(x))) via the log-sum-exp trick.
+
+    Prevents float32 overflow (exp overflows above ~88) that occurs when the
+    DM density field has extreme fluctuations (e.g. during MCLMC/HMC warmup).
+    """
+    x_max = jnp.max(x)
+    return x_max + jnp.log(jnp.mean(jnp.exp(x - x_max)) + 1.0e-30)
+
+
 def dm_to_gas_density(rho_dm: jnp.ndarray, params: GasModelParams) -> jnp.ndarray:
     log_dm = jnp.log(jnp.clip(rho_dm, 1.0e-6, None))
     log_dm_s = gaussian_smooth_fft(log_dm, params.smooth_sigma_cells)
@@ -210,6 +220,10 @@ def dm_to_gas_density(rho_dm: jnp.ndarray, params: GasModelParams) -> jnp.ndarra
     q = x * x - jnp.mean(x * x)
     log_rho_gas = params.bias_linear * x + params.bias_quadratic * q
 
+    # Clamp before exp to avoid float32 overflow (max safe value ~80).
+    # Values above this would produce unphysically huge densities; the prior
+    # gradient will push the chain back to reasonable amplitudes.
+    log_rho_gas = jnp.clip(log_rho_gas, -80.0, 80.0)
     rho_gas = jnp.exp(log_rho_gas)
     rho_gas = rho_gas / (jnp.mean(rho_gas) + 1.0e-8) * params.gas_mean
     return jnp.asarray(rho_gas, dtype=jnp.float32)
@@ -224,7 +238,9 @@ def gas_density_to_temperature(rho_gas: jnp.ndarray, params: GasModelParams) -> 
     fluct = params.temp_slope * x + params.temp_quadratic * q
     # Keep the mean temperature anchored to temp_init_k * temp_heat_gain
     # irrespective of fluctuation variance.
-    fluct = fluct - jnp.log(jnp.mean(jnp.exp(fluct)) + 1.0e-12)
+    # Use the log-sum-exp trick (via _log_mean_exp) to avoid float32 overflow
+    # when fluct has extreme values during sampler warmup/exploration.
+    fluct = fluct - _log_mean_exp(fluct)
     base = jnp.log(jnp.asarray(params.temp_init_k * params.temp_heat_gain, dtype=jnp.float32) + 1.0e-12)
     log_t = base + fluct
     return jnp.exp(log_t).astype(jnp.float32)

@@ -377,6 +377,7 @@ def main():
     s2.OUT_DIR = out_dir
     s2.plot_density_slices(U_snaps, t_myr, s2.N_GRID, s2.L_BOX)
     make_density_animation(U_snaps, t_myr, s2.N_GRID, s2.L_BOX, out_dir)
+    s2.make_temperature_animation(U_snaps, t_myr, s2.N_GRID, s2.L_BOX, out_dir)
     plot_profiles(U_snaps, t_myr, s2.N_GRID, s2.L_BOX, out_dir)
     plot_velocity_history(U_snaps, t_myr, out_dir)
     if dm_particles is not None:

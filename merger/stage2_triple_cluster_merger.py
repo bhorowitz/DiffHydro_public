@@ -43,7 +43,7 @@ KM_S_TO_KPC_MYR = 1.02269e-3
 
 M200_1 = 5.0e14
 M200_2 = 5.0e14
-M200_3 = 1.0e14
+M200_3 = 1.0e14 #former 1.0E14
 CONC1 = 3.5
 CONC2 = 3.5
 CONC3 = 4.2
@@ -51,7 +51,7 @@ CONC3 = 4.2
 L_BOX_DEFAULT = 15000.0
 N_GRID_DEFAULT = 128
 MAX_DT_DEFAULT = 20.0
-NSTEPS_DEFAULT = 240
+NSTEPS_DEFAULT = 600
 SNAPSHOT_EVERY_DEFAULT = 12
 
 
@@ -69,7 +69,7 @@ def parse_args():
     p.add_argument("--seed", type=int, default=24, help="Base seed for DM particle generation")
     p.add_argument("--gravity-method", type=str, default="pm", choices=["pm", "direct"], help="DM gravity method for live particles")
     p.add_argument("--softening-cells", type=float, default=0.5, help="Softening for direct live-DM particle forces")
-    p.add_argument("--output-subdir", type=str, default="run6_static_like_stage2", help="Output subdirectory")
+    p.add_argument("--output-subdir", type=str, default="run6_tt", help="Output subdirectory")
     p.add_argument("--quick", action="store_true", help="Short smoke test")
     return p.parse_args()
 
@@ -96,6 +96,7 @@ def build_cluster_model(m200, conc, gas_rc_frac, gas_rs_frac, gas_beta, gas_eps,
     }
 
 
+
 def cluster_run6_setup():
     cluster1 = build_cluster_model(M200_1, CONC1, 0.4, 0.8, 1.0, 0.8, 1.5)
     cluster2 = build_cluster_model(M200_2, CONC2, 0.2, 0.67, 1.0, 0.8, 1.5)
@@ -104,12 +105,33 @@ def cluster_run6_setup():
     w = L_BOX_DEFAULT
     center1 = np.array([0.48 * w, 0.55 * w, 0.5 * w], dtype=np.float64)
     center2 = np.array([0.52 * w, 0.45 * w, 0.5 * w], dtype=np.float64)
-    center3 = np.array([0.25 * w, 0.50 * w, 0.5 * w], dtype=np.float64)
+    center3 = np.array([0.25 * w, 0.50 * w, 0.5 * w], dtype=np.float64) #offset from the main merger axis to make it more interesting...
 
     velocity = 1000.0 * KM_S_TO_KPC_MYR
     velocity1 = np.array([0.0, -0.5 * velocity * M200_2 / (M200_1 + M200_2), 0.0], dtype=np.float32)
     velocity2 = np.array([0.0, +0.5 * velocity * M200_1 / (M200_1 + M200_2), 0.0], dtype=np.float32)
     velocity3 = np.array([0.5 * velocity, 0.25 * velocity, 0.0], dtype=np.float32)
+
+    return [
+        {"name": "cluster1", "center": center1, "velocity": velocity1, **cluster1},
+        {"name": "cluster2", "center": center2, "velocity": velocity2, **cluster2},
+        {"name": "cluster3", "center": center3, "velocity": velocity3, **cluster3},
+    ]
+
+def cluster_run6_setup_play(): #ben's tweaked version with slightly different centers and velocities
+    cluster1 = build_cluster_model(M200_1, CONC1, 0.4, 0.8, 1.0, 0.8, 1.5)
+    cluster2 = build_cluster_model(M200_2, CONC2, 0.2, 0.67, 1.0, 0.8, 1.5)
+    cluster3 = build_cluster_model(M200_3, 1.5*CONC3, 0.05, 0.15, 1.0, 0.8, 1.5)
+
+    w = L_BOX_DEFAULT
+    center1 = np.array([0.48 * w, 0.55 * w, 0.5 * w], dtype=np.float64)
+    center2 = np.array([0.52 * w, 0.45 * w, 0.5 * w], dtype=np.float64)
+    center3 = np.array([0.25 * w, 0.40 * w, 0.5 * w], dtype=np.float64) #offset from the main merger axis to make it more interesting...
+
+    velocity = 1000.0 * KM_S_TO_KPC_MYR
+    velocity1 = np.array([0.0, -0.5 * velocity * M200_2 / (M200_1 + M200_2), 0.0], dtype=np.float32)
+    velocity2 = np.array([0.0, +0.5 * velocity * M200_1 / (M200_1 + M200_2), 0.0], dtype=np.float32)
+    velocity3 = np.array([1.0 * velocity, 0.0 * velocity, 0.0], dtype=np.float32)
 
     return [
         {"name": "cluster1", "center": center1, "velocity": velocity1, **cluster1},
@@ -314,6 +336,7 @@ def main():
 
     plot_density_slices(U_snaps, t_myr, int(args.n_grid), float(args.l_box), out_dir)
     density_slice_animation(U_snaps, t_myr, int(args.n_grid), float(args.l_box), out_dir)
+    s2.make_temperature_animation(U_snaps, t_myr, int(args.n_grid), float(args.l_box), out_dir)
     plot_velocity_history(U_snaps, t_myr, out_dir)
     if dm_particles is not None:
         s2.plot_dm_profile_evolution(dm_pos_snaps, t_myr, dm_particles["m_par"], int(args.n_grid), float(args.l_box))

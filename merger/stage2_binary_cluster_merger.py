@@ -322,6 +322,7 @@ def main():
     print("[Binary Merger] Writing diagnostics...")
     plot_merger_slices(U_snaps, t_myr, int(args.n_grid), float(args.l_box), out_dir)
     density_slice_animation(U_snaps, t_myr, int(args.n_grid), float(args.l_box), out_dir)
+    s2.make_temperature_animation(U_snaps, t_myr, int(args.n_grid), float(args.l_box), out_dir)
     plot_velocity_history(U_snaps, t_myr, out_dir)
     if dm_particles is not None:
         s2.plot_dm_profile_evolution(dm_pos_snaps, t_myr, dm_particles["m_par"], int(args.n_grid), float(args.l_box))

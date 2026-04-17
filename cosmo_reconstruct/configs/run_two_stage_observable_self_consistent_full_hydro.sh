@@ -48,7 +48,7 @@ STAGE2_LBFGS_MAX_LINESEARCH_STEPS=${STAGE2_LBFGS_MAX_LINESEARCH_STEPS:-20}
 STAGE2_INIT_FROM=${STAGE2_INIT_FROM:-iter0}      # final | iter0
 STAGE2_CHECKPOINT_EVERY=${STAGE2_CHECKPOINT_EVERY:-8}
 
-OUT_ROOT=${OUT_ROOT:-cosmo_reconstruct/outputs/n64_ss_${OBSERVABLE}}
+OUT_ROOT=${OUT_ROOT:-cosmo_reconstruct/outputs/t_n64_ss_${OBSERVABLE}}
 TARGET_DIR="${OUT_ROOT}/target"
 TARGET_FORWARD_OUT="${TARGET_DIR}/full_hydro_target_forward"
 STAGE1_OUT="${OUT_ROOT}/stage1_simple"
@@ -250,7 +250,7 @@ CUDA_VISIBLE_DEVICES=${GPU} python cosmo_reconstruct/run_optimize_cv0_density.py
   --box-size-mpc-h ${BOX_SIZE_MPC_H} \
   --z-init ${Z_INIT} \
   --z-target ${Z_TARGET} \
-  --kdk-steps 64 \
+  --kdk-steps 128 \
   --checkpoint-every 4 \
   --h ${H} --omega-m ${OMEGA_M} --omega-b ${OMEGA_B} \
   --ic-power-suppression ${RECON_IC_POWER_SUPPRESSION} \
