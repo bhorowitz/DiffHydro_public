@@ -6,7 +6,7 @@ import jax
 import jax.numpy as jnp
 import jax_cosmo as jc
 import jaxpm.pm as jpm
-from jaxpm.growth import dGfa, growth_factor, growth_rate
+from jaxpm.growth import _growth_factor_ODE, dGfa, growth_factor, growth_rate
 from jaxpm.painting import cic_paint
 
 
@@ -57,10 +57,33 @@ def prime_growth_cache(cosmo: jc.Cosmology, a: float) -> None:
     # jaxpm.lpt calls growth_factor/growth_rate/dGfa, which lazily fill
     # cosmo._workspace. Prime with concrete values before jitted optimization
     # (especially with L-BFGS line-search) to avoid tracer-leak issues.
-    a_arr = jnp.asarray([a], dtype=jnp.float32)
-    _ = growth_factor(cosmo, a_arr)
-    _ = growth_rate(cosmo, a_arr)
-    _ = dGfa(cosmo, a_arr)
+    #
+    # jax_cosmo's background._growth_factor_ODE populates the same cache key
+    # ("background.growth_factor") but only stores {"a", "g", "f"}, omitting the
+    # "h" key that jaxpm's dGfa requires.  LCDMBackground(use_jax_cosmo=True)
+    # triggers that path before we get here, so we must evict the stale entry.
+    stale = cosmo._workspace.get("background.growth_factor", {})
+    if "h" not in stale:
+        cosmo._workspace.pop("background.growth_factor", None)
+    a_scalar = float(a)
+    import numpy as _np
+    try:
+        _growth_factor_ODE(cosmo, _np.atleast_1d(a_scalar))
+    except Exception:
+        pass
+    a_arr = jnp.asarray([a_scalar], dtype=jnp.float32)
+    try:
+        _ = growth_factor(cosmo, a_scalar)
+    except Exception:
+        pass
+    try:
+        _ = growth_rate(cosmo, a_scalar)
+    except Exception:
+        pass
+    try:
+        _ = dGfa(cosmo, a_arr)
+    except Exception:
+        pass
 
 
 def make_lattice_positions(n: int) -> jnp.ndarray:

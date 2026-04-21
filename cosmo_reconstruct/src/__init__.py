@@ -18,6 +18,7 @@ from .full_hydro_model import (
     make_hydro_density_nlogposterior,
     prime_system_growth_cache,
 )
+from .subgrid_playground import FeedbackPlayground, FeedbackStepResult, plot_field_grid, take_field_view
 
 __all__ = [
     "ForwardModelConfig",
@@ -36,4 +37,8 @@ __all__ = [
     "forward_fields_full_hydro",
     "make_hydro_density_nlogposterior",
     "prime_system_growth_cache",
+    "FeedbackPlayground",
+    "FeedbackStepResult",
+    "take_field_view",
+    "plot_field_grid",
 ]
