@@ -162,7 +162,7 @@ def compute_momentum_feedback_fields(
 
 
 def smooth_sigmoid(x: jnp.ndarray, center: float, width: float) -> jnp.ndarray:
-    width_safe = max(float(width), 1.0e-6)
+    width_safe = max(float(width), 1.0e-10)
     return jax.nn.sigmoid((x - float(center)) / width_safe)
 
 
@@ -217,6 +217,7 @@ def initialize_star_particle_fields(
 @dataclass(frozen=True)
 class StarFormationDiagnostics:
     overdensity: jnp.ndarray
+    nH_cgs: jnp.ndarray
     temperature_k: jnp.ndarray
     s_rho: jnp.ndarray
     s_temp: jnp.ndarray
@@ -234,6 +235,7 @@ class StarFormationDiagnostics:
     feedback_snf_energy: jnp.ndarray
     feedback_stellar_wind_energy: jnp.ndarray
     feedback_total_energy: jnp.ndarray
+    feedback_clip_scale: jnp.ndarray
 
 
 def evaluate_star_formation_diagnostics(
@@ -276,6 +278,8 @@ def evaluate_star_formation_diagnostics(
     mode_norm = str(density_threshold_mode).lower()
     if mode_norm == "physical_nh":
         density_field = nH_cgs
+    elif mode_norm == "physical_nh_comoving":
+        density_field = nH_cgs * (a**3)
     elif mode_norm == "overdensity":
         density_field = overdensity
     else:
@@ -303,6 +307,7 @@ def evaluate_star_formation_diagnostics(
     return (
         StarFormationDiagnostics(
             overdensity=overdensity,
+            nH_cgs=nH_cgs,
             temperature_k=temp_k,
             s_rho=s_rho,
             s_temp=s_temp,
@@ -320,6 +325,7 @@ def evaluate_star_formation_diagnostics(
             feedback_snf_energy=jnp.zeros_like(delta_star_grid),
             feedback_stellar_wind_energy=jnp.zeros_like(delta_star_grid),
             feedback_total_energy=jnp.zeros_like(delta_star_grid),
+            feedback_clip_scale=jnp.ones_like(delta_star_grid),
         ),
         rng_key,
     )
@@ -361,6 +367,7 @@ class StellarFeedbackTracerForce:
         feedback_momentum_scale: float = 0.0,
         snf_energy: float = 0.0,
         stellar_wind_energy: float = 0.0,
+        feedback_energy_clip_fraction: float | None = None,
         store_diagnostics: bool = False,
     ):
         self.eq = eq
@@ -395,6 +402,7 @@ class StellarFeedbackTracerForce:
         self.feedback_momentum_scale = float(feedback_momentum_scale)
         self.snf_energy = float(max(snf_energy, 0.0))
         self.stellar_wind_energy = float(max(stellar_wind_energy, 0.0))
+        self.feedback_energy_clip_fraction = None if feedback_energy_clip_fraction is None else float(feedback_energy_clip_fraction)
         self.store_diagnostics = bool(store_diagnostics)
         self.mH_cgs = 1.6735575e-24
 
@@ -444,6 +452,7 @@ class StellarFeedbackTracerForce:
         )
         sf_diag = StarFormationDiagnostics(
             overdensity=sf_diag.overdensity,
+            nH_cgs=sf_diag.nH_cgs,
             temperature_k=sf_diag.temperature_k,
             s_rho=sf_diag.s_rho,
             s_temp=sf_diag.s_temp,
@@ -461,6 +470,7 @@ class StellarFeedbackTracerForce:
             feedback_snf_energy=sf_diag.feedback_snf_energy,
             feedback_stellar_wind_energy=sf_diag.feedback_stellar_wind_energy,
             feedback_total_energy=sf_diag.feedback_total_energy,
+            feedback_clip_scale=sf_diag.feedback_clip_scale,
         )
 
         delta_star_particles = grid_to_particle_mass_increment(sf_diag.delta_star_grid, dm_positions)
@@ -506,16 +516,17 @@ class StellarFeedbackTracerForce:
         source_kernel = make_feedback_kernel(width_cells=thermal_kernel_width, kind=self.feedback_kernel_kind) if use_kernel else None
         metal_kernel = make_feedback_kernel(width_cells=metal_kernel_width, kind=self.feedback_kernel_kind) if use_kernel else None
         momentum_kernel = make_feedback_kernel(width_cells=momentum_kernel_width, kind=self.feedback_kernel_kind) if use_kernel else None
+        gated_delta_star_grid = sf_diag.delta_star_grid
         if use_kernel:
-            feedback_source_grid = convolve_scalar_periodic(sf_diag.delta_star_grid, source_kernel)
-            metal_deposition_grid = convolve_scalar_periodic(sf_diag.delta_star_grid, metal_kernel)
+            feedback_source_grid = convolve_scalar_periodic(gated_delta_star_grid, source_kernel)
+            metal_deposition_grid = convolve_scalar_periodic(gated_delta_star_grid, metal_kernel)
             wind_source_grid = convolve_scalar_periodic(stellar_density_grid, source_kernel)
-            momentum_source_grid = convolve_scalar_periodic(sf_diag.delta_star_grid, momentum_kernel)
+            momentum_source_grid = convolve_scalar_periodic(gated_delta_star_grid, momentum_kernel)
         else:
-            feedback_source_grid = sf_diag.delta_star_grid
-            metal_deposition_grid = sf_diag.delta_star_grid
+            feedback_source_grid = gated_delta_star_grid
+            metal_deposition_grid = gated_delta_star_grid
             wind_source_grid = stellar_density_grid
-            momentum_source_grid = sf_diag.delta_star_grid
+            momentum_source_grid = gated_delta_star_grid
         dtau_arr = jnp.asarray(dtau, dtype=jnp.float32)
         feedback_snf_energy = jnp.asarray(self.snf_energy, dtype=jnp.float32) * jnp.maximum(feedback_source_grid, 0.0)
         feedback_stellar_wind_energy = (
@@ -523,6 +534,21 @@ class StellarFeedbackTracerForce:
             * jnp.maximum(wind_source_grid, 0.0)
             * dtau_arr
         )
+        feedback_clip_scale = jnp.ones_like(feedback_snf_energy)
+        if self.feedback_energy_clip_fraction is not None:
+            i_energy = int(self.eq.energy_ids)
+            energy_ref = jnp.maximum(jnp.asarray(U_new[i_energy], dtype=jnp.float32), getattr(self.eq, "eps", 1.0e-20))
+            clip_limit = jnp.maximum(
+                jnp.asarray(self.feedback_energy_clip_fraction, dtype=jnp.float32) * energy_ref,
+                getattr(self.eq, "eps", 1.0e-20),
+            )
+            thermal_raw = feedback_snf_energy + feedback_stellar_wind_energy
+            feedback_clip_scale = jnp.minimum(
+                jnp.ones_like(thermal_raw),
+                clip_limit / jnp.maximum(thermal_raw, getattr(self.eq, "eps", 1.0e-20)),
+            )
+            feedback_snf_energy = feedback_snf_energy * feedback_clip_scale
+            feedback_stellar_wind_energy = feedback_stellar_wind_energy * feedback_clip_scale
         thermal_deposition_grid = feedback_snf_energy + feedback_stellar_wind_energy
         feedback_momentum_x = jnp.zeros_like(thermal_deposition_grid)
         feedback_momentum_y = jnp.zeros_like(thermal_deposition_grid)
@@ -566,6 +592,7 @@ class StellarFeedbackTracerForce:
         if self.store_diagnostics:
             params_out["sf_diagnostics"] = {
                 "overdensity": sf_diag.overdensity,
+                "nH_cgs": sf_diag.nH_cgs,
                 "temperature_k": sf_diag.temperature_k,
                 "s_rho": sf_diag.s_rho,
                 "s_temp": sf_diag.s_temp,
@@ -583,5 +610,6 @@ class StellarFeedbackTracerForce:
                 "feedback_snf_energy": feedback_snf_energy,
                 "feedback_stellar_wind_energy": feedback_stellar_wind_energy,
                 "feedback_total_energy": feedback_total_energy,
+                "feedback_clip_scale": feedback_clip_scale,
             }
         return U_new, params_out

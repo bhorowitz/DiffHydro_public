@@ -44,6 +44,15 @@ def _numpy_snapshot(snapshot: dict[str, Any]) -> dict[str, np.ndarray]:
     return {k: np.asarray(v) for k, v in snapshot.items()}
 
 
+def _resolve_bundle_key(d: np.lib.npyio.NpzFile, preferred: str, fallbacks: tuple[str, ...]) -> str:
+    if preferred in d:
+        return preferred
+    for key in fallbacks:
+        if key in d:
+            return key
+    raise KeyError(f"None of the bundle keys were found: {(preferred, *fallbacks)}")
+
+
 def _expand_conservative_channels(
     U: jnp.ndarray,
     system: FullHydroSystem,
@@ -112,6 +121,7 @@ def _build_force_from_cfg(
         feedback_momentum_scale=float(cfg.feedback_momentum_scale),
         snf_energy=float(cfg.snf_energy),
         stellar_wind_energy=float(cfg.stellar_wind_energy),
+        feedback_energy_clip_fraction=cfg.feedback_energy_clip_fraction,
         store_diagnostics=bool(store_diagnostics),
     )
 
@@ -298,22 +308,24 @@ class FeedbackPlayground:
         cosmo = build_lpt_cosmology(cfg_use)
         system = build_full_hydro_system(cfg_use, cosmo)
         d = np.load(Path(bundle_path).resolve())
+        state_u_key = _resolve_bundle_key(d, state_u_key, ("U_gas_state",))
+        state_dm_x_key = _resolve_bundle_key(d, state_dm_x_key, ("dm_x_state",))
+        state_dm_p_key = _resolve_bundle_key(d, state_dm_p_key, ("dm_p_or_v_state",))
+        state_dm_mass_key = _resolve_bundle_key(d, state_dm_mass_key, ("dm_mass_state",))
+        state_a_key = _resolve_bundle_key(d, state_a_key, ("a",))
+        if state_init_mesh_key not in d and "init_mesh_state" in d:
+            state_init_mesh_key = "init_mesh_state"
+
         U_raw = np.asarray(d[state_u_key], dtype=np.float32)
         U_gas = _expand_conservative_channels(jnp.asarray(U_raw), system, cfg_use)
 
         dm_x = jnp.asarray(np.asarray(d[state_dm_x_key], dtype=np.float32))
         dm_p = jnp.asarray(np.asarray(d[state_dm_p_key], dtype=np.float32))
-        if state_dm_mass_key in d:
-            dm_mass = jnp.asarray(np.asarray(d[state_dm_mass_key], dtype=np.float32))
-        else:
-            dm_mass = jnp.ones((dm_x.shape[0],), dtype=jnp.float32) * jnp.asarray(1.0 - float(cfg_use.gas_mean_fraction), dtype=jnp.float32)
+        dm_mass = jnp.asarray(np.asarray(d[state_dm_mass_key], dtype=np.float32))
         if dm_mass.ndim == 0:
             dm_mass = jnp.ones((dm_x.shape[0],), dtype=jnp.float32) * dm_mass
 
-        if state_a_key in d:
-            a_init = float(np.asarray(d[state_a_key]).reshape(-1)[0])
-        else:
-            a_init = float(1.0 / (1.0 + float(cfg_use.z_init)))
+        a_init = float(np.asarray(d[state_a_key]).reshape(-1)[0])
 
         omega_m = float(system.cosmo_lpt.Omega_b + system.cosmo_lpt.Omega_c)
         dm_params = {
@@ -330,20 +342,38 @@ class FeedbackPlayground:
             )
         else:
             dm_params["gas_kick_factor"] = jnp.asarray(float(cfg_use.gas_kick_factor), dtype=jnp.float32)
-        dm_params.update(
-            initialize_star_particle_fields(
-                dm_x,
-                amplitude=float(cfg_use.synthetic_star_mass_amplitude),
-                kind=str(cfg_use.synthetic_star_mass_kind),
-                seed=int(cfg_use.sf_seed),
-                n_age_bins=int(cfg_use.star_age_bins),
+        if "dm_star_mass_state" in d:
+            dm_params["star_mass"] = jnp.asarray(np.asarray(d["dm_star_mass_state"], dtype=np.float32))
+            if "dm_star_age_bins_state" in d:
+                dm_params["star_age_bins"] = jnp.asarray(np.asarray(d["dm_star_age_bins_state"], dtype=np.float32))
+        else:
+            dm_params.update(
+                initialize_star_particle_fields(
+                    dm_x,
+                    amplitude=float(cfg_use.synthetic_star_mass_amplitude),
+                    kind=str(cfg_use.synthetic_star_mass_kind),
+                    seed=int(cfg_use.sf_seed),
+                    n_age_bins=int(cfg_use.star_age_bins),
+                )
             )
-        )
         params = {"a": jnp.asarray(a_init, dtype=jnp.float32), "dm": dm_params}
         if bool(cfg_use.enable_star_formation):
-            params["rng_sf"] = jr.PRNGKey(int(cfg_use.sf_seed))
+            if "rng_sf_state" in d:
+                params["rng_sf"] = jnp.asarray(np.asarray(d["rng_sf_state"], dtype=np.uint32))
+            else:
+                params["rng_sf"] = jr.PRNGKey(int(cfg_use.sf_seed))
         init_mesh = np.asarray(d[state_init_mesh_key], dtype=np.float32) if state_init_mesh_key in d else None
         return cls(cfg=cfg_use, system=system, U_gas=U_gas, params=params, init_mesh=init_mesh, label=str(Path(bundle_path)))
+
+    @classmethod
+    def from_snapshot(
+        cls,
+        snapshot_path: str | Path,
+        *,
+        cfg: FullHydroConfig | None = None,
+        **cfg_overrides,
+    ) -> "FeedbackPlayground":
+        return cls.from_init_bundle(snapshot_path, cfg=cfg, **cfg_overrides)
 
     @classmethod
     def from_state(

@@ -157,6 +157,7 @@ class FullHydroConfig:
     feedback_momentum_scale: float = 0.0
     snf_energy: float = 0.0
     stellar_wind_energy: float = 0.0
+    feedback_energy_clip_fraction: float | None = None
     store_subgrid_diagnostics: bool = False
     enable_vacuum_momentum_cap: bool = False
     vacuum_momentum_rho_guard: float = 1.0e-7
@@ -945,6 +946,7 @@ def build_full_hydro_system(cfg: FullHydroConfig, cosmo_lpt: jc.Cosmology) -> Fu
                 feedback_momentum_scale=float(cfg.feedback_momentum_scale),
                 snf_energy=float(cfg.snf_energy),
                 stellar_wind_energy=float(cfg.stellar_wind_energy),
+                feedback_energy_clip_fraction=cfg.feedback_energy_clip_fraction,
                 store_diagnostics=bool(cfg.store_subgrid_diagnostics),
             )
         )

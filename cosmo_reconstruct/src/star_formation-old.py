@@ -282,6 +282,8 @@ def evaluate_star_formation_diagnostics(
     mode_norm = str(density_threshold_mode).lower()
     if mode_norm == "physical_nh":
         density_field = nH_cgs
+    elif mode_norm == "physical_nh_comoving":
+        density_field = nH_cgs * (a**3)
     elif mode_norm == "overdensity":
         density_field = overdensity
     else:

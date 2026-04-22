@@ -23,6 +23,7 @@ class EquationManager:
           #  equation_information: EquationInformation
             n_cons: int = 5,
             dual_energy: bool | None = None,
+            has_metallicity: bool = False,
             ) -> None:
 
        # self.equation_information = equation_information
@@ -40,19 +41,62 @@ class EquationManager:
         self.mesh_shape = [100,100,100]
         self.R = 1.0
         self.cp = self.gamma / (self.gamma - 1.0) * self.R
+        requested_n_cons = int(n_cons)
         if dual_energy is None:
-            dual_energy = (int(n_cons) >= 6)
+            dual_energy = (requested_n_cons >= 6)
         self.dual_energy = bool(dual_energy)
-        self.n_cons = 6 if self.dual_energy else int(n_cons)
+        self.has_metallicity_flag = bool(has_metallicity)
+        min_n_cons = 5 + int(self.dual_energy) + int(self.has_metallicity_flag)
+        self.n_cons = max(requested_n_cons, min_n_cons)
         if self.n_cons < 5:
             raise ValueError("EquationManager requires at least 5 conservative channels.")
         # Switch criterion for dual-energy pressure recovery:
         # use rho*e channel when thermal energy from total energy is tiny.
         self.dual_energy_eta = 1.0e-4
 
-        # Optional passive dual-energy channel(s): index 5 is the primary rho*e channel.
-        self.dual_energy_ids = 5 if self.n_cons > 5 else None
+        next_passive_id = 5
+        self.dual_energy_ids = None
+        if self.dual_energy:
+            self.dual_energy_ids = next_passive_id
+            next_passive_id += 1
+
+        self.metal_density_ids = None
+        if self.has_metallicity_flag:
+            self.metal_density_ids = next_passive_id
+            next_passive_id += 1
+
         self.passive_ids = tuple(range(5, self.n_cons))
+        self.true_passive_ids = tuple(
+            idx for idx in self.passive_ids if idx != self.dual_energy_ids
+        )
+        self.semantic_ids = {
+            "rho": self.mass_ids,
+            "mx": self.vel_ids[0],
+            "my": self.vel_ids[1],
+            "mz": self.vel_ids[2],
+            "E": self.energy_ids,
+            "rhoe": self.dual_energy_ids,
+            "rhoZ": self.metal_density_ids,
+        }
+        ids_in_use = [idx for idx in self.semantic_ids.values() if idx is not None]
+        if len(ids_in_use) != len(set(ids_in_use)):
+            raise ValueError("EquationManager semantic ids overlap; check passive field layout.")
+
+    def has_dual_energy(self) -> bool:
+        return bool(self.dual_energy_ids is not None)
+
+    def has_metallicity(self) -> bool:
+        return bool(self.metal_density_ids is not None)
+
+    def get_metal_density(self, conservatives: Array) -> Array:
+        if not self.has_metallicity():
+            return jnp.zeros_like(conservatives[self.mass_ids])
+        return jnp.maximum(conservatives[self.metal_density_ids], 0.0)
+
+    def get_metal_fraction(self, conservatives: Array) -> Array:
+        rho = jnp.maximum(conservatives[self.mass_ids], self.eps)
+        rhoZ = self.get_metal_density(conservatives)
+        return rhoZ / rho
         
     def get_conservatives_from_primitives(self, primitives: Array) -> Array:
         """Converts primitive variables to conservative ones.
@@ -81,10 +125,12 @@ class EquationManager:
                 rhoe_default = rho * e
                 extra_cons = []
                 for i_passive in self.passive_ids:
+                    floor = self.eps if i_passive == self.dual_energy_ids else 0.0
+                    default_value = rhoe_default if i_passive == self.dual_energy_ids else jnp.zeros_like(rho)
                     if primitives.shape[0] > i_passive:
-                        extra_cons.append(jnp.maximum(primitives[i_passive], self.eps))
+                        extra_cons.append(jnp.maximum(primitives[i_passive], floor))
                     else:
-                        extra_cons.append(rhoe_default)
+                        extra_cons.append(jnp.maximum(default_value, floor))
                 conservatives = jnp.concatenate(
                     [conservatives, jnp.stack(extra_cons, axis=0)], axis=0
                 )
@@ -132,10 +178,12 @@ class EquationManager:
             if self.n_cons > 5:
                 extra_prims = []
                 for i_passive in self.passive_ids:
+                    floor = self.eps if i_passive == self.dual_energy_ids else 0.0
+                    default_value = rho_safe * e if i_passive == self.dual_energy_ids else jnp.zeros_like(rho_safe)
                     if conservatives.shape[0] > i_passive:
-                        extra_prims.append(jnp.maximum(conservatives[i_passive], self.eps))
+                        extra_prims.append(jnp.maximum(conservatives[i_passive], floor))
                     else:
-                        extra_prims.append(rho_safe * e)
+                        extra_prims.append(jnp.maximum(default_value, floor))
                 primitives = jnp.concatenate(
                     [primitives, jnp.stack(extra_prims, axis=0)], axis=0
                 )

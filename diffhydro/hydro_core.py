@@ -162,6 +162,14 @@ class hydro:
         
         self.compute_dtype = jnp.float32
         self.state_dtype = jnp.float32
+        self.enable_vacuum_momentum_cap = False
+        self.vacuum_momentum_rho_guard = 1.0e-7
+        self.vacuum_momentum_kinetic_to_thermal_max = 1.0
+        self.vacuum_momentum_internal_floor = 1.0e-8
+        self.enable_hydro_state_repair = False
+        self.hydro_repair_rho_floor = 1.0e-7
+        self.hydro_repair_pressure_floor = 1.0e-8
+        self.hydro_repair_max_kinetic_to_thermal_ratio = 1.0e6
         
         # Make snapshot dir on host 0 (safe if it already exists)
         if self.snapshot_every is not None and jax.process_index() == 0:
@@ -195,6 +203,12 @@ class hydro:
     
                 
     def evolve_with_callbacks(self, input_fields, params):
+        """Evolve the system while allowing callbacks for snapshots and time tracking.
+        INPUTS: - input_fields: initial state array (will be sharded according to mesh)
+                - params: additional parameters (not sharded, passed as-is to hydrostep)
+                RETURNS: - final_fields: final state array after evolution
+                 - final_params: final parameters after evolution (if modified by forcing)
+                 - dt_hist: array of timesteps taken at each super step"""
         sh_arr = NamedSharding(self.mesh, self.FIELD_XYZ)
         fields0 = jax.device_put(input_fields, sh_arr)
         t0 = jnp.array(0.0, dtype=fields0.dtype)
@@ -351,6 +365,125 @@ class hydro:
                 sol = out
         return sol, params
 
+    def apply_vacuum_momentum_cap(self, sol):
+        if (not bool(getattr(self, "enable_vacuum_momentum_cap", False))) or sol.shape[0] < 5:
+            return sol
+
+        rho_guard = jnp.asarray(getattr(self, "vacuum_momentum_rho_guard", 1.0e-7), dtype=sol.dtype)
+        kin_to_thermal_max = jnp.asarray(
+            getattr(self, "vacuum_momentum_kinetic_to_thermal_max", 1.0),
+            dtype=sol.dtype,
+        )
+        eint_floor = jnp.asarray(getattr(self, "vacuum_momentum_internal_floor", 1.0e-8), dtype=sol.dtype)
+
+        rho = sol[0]
+        mx = sol[1]
+        my = sol[2]
+        mz = sol[3]
+        E = sol[4]
+        rhoe = sol[5] if sol.shape[0] > 5 else None
+
+        rho_ref = jnp.maximum(jnp.abs(rho), rho_guard)
+        m2 = mx * mx + my * my + mz * mz
+        kin = 0.5 * m2 / jnp.maximum(rho_ref, eint_floor)
+
+        if sol.shape[0] > 5:
+            thermal_ref = jnp.maximum(sol[5], eint_floor)
+        else:
+            thermal_ref = jnp.maximum(E - kin, eint_floor)
+
+        target_kin = kin_to_thermal_max * thermal_ref
+        scale = jnp.sqrt(
+            jnp.minimum(
+                jnp.ones_like(kin),
+                target_kin / jnp.maximum(kin, eint_floor),
+            )
+        )
+        cap_mask = (
+            (rho <= rho_guard)
+            & jnp.isfinite(rho)
+            & jnp.isfinite(mx)
+            & jnp.isfinite(my)
+            & jnp.isfinite(mz)
+            & jnp.isfinite(E)
+        )
+        scale = jnp.where(cap_mask, scale, jnp.ones_like(scale))
+
+        mx_new = mx * scale
+        my_new = my * scale
+        mz_new = mz * scale
+        m2_new = mx_new * mx_new + my_new * my_new + mz_new * mz_new
+        E_new = thermal_ref + 0.5 * m2_new / jnp.maximum(rho_ref, eint_floor)
+
+        sol = sol.at[1].set(mx_new)
+        sol = sol.at[2].set(my_new)
+        sol = sol.at[3].set(mz_new)
+        sol = sol.at[4].set(jnp.where(cap_mask, E_new, E))
+        return sol
+
+    def apply_invalid_cell_repair(self, sol):
+        if (not bool(getattr(self, "enable_hydro_state_repair", False))) or sol.shape[0] < 5:
+            return sol, jnp.asarray(0, dtype=jnp.int32)
+
+        eq = getattr(self.fluxes[0], "eq_manage", None) if self.fluxes else None
+        gamma = float(getattr(eq, "gamma", 5.0 / 3.0))
+        i_dual = getattr(eq, "dual_energy_ids", None)
+        true_passive_ids = tuple(getattr(eq, "true_passive_ids", ()))
+
+        rho_floor = jnp.asarray(getattr(self, "hydro_repair_rho_floor", 1.0e-7), dtype=sol.dtype)
+        p_floor = jnp.asarray(getattr(self, "hydro_repair_pressure_floor", 1.0e-8), dtype=sol.dtype)
+        eint_floor = jnp.maximum(p_floor / jnp.asarray(gamma - 1.0, dtype=sol.dtype), p_floor)
+        kin_to_thermal_max = jnp.asarray(
+            getattr(self, "hydro_repair_max_kinetic_to_thermal_ratio", 1.0e6),
+            dtype=sol.dtype,
+        )
+
+        rho = sol[0]
+        mx = sol[1]
+        my = sol[2]
+        mz = sol[3]
+        E = sol[4]
+
+        rho_ref = jnp.maximum(jnp.abs(rho), rho_floor)
+        kin = 0.5 * (mx * mx + my * my + mz * mz) / jnp.maximum(rho_ref, eint_floor)
+        eint = E - kin
+        thermal_ratio_ref = jnp.abs(eint)
+        kin_to_thermal = kin / jnp.maximum(thermal_ratio_ref, eint_floor)
+
+        invalid_mask = (
+            ~jnp.all(jnp.isfinite(sol), axis=0)
+            | (rho <= 0.0)
+            | ~jnp.isfinite(eint)
+            | (eint <= eint_floor)
+            | ~jnp.isfinite(kin_to_thermal)
+            | (kin_to_thermal > kin_to_thermal_max)
+        )
+
+        repair_count = jnp.sum(invalid_mask, dtype=jnp.int32)
+        if sol.shape[0] <= 5:
+            repaired = sol.at[0].set(jnp.where(invalid_mask, rho_floor, rho))
+            repaired = repaired.at[1].set(jnp.where(invalid_mask, 0.0, mx))
+            repaired = repaired.at[2].set(jnp.where(invalid_mask, 0.0, my))
+            repaired = repaired.at[3].set(jnp.where(invalid_mask, 0.0, mz))
+            repaired = repaired.at[4].set(jnp.where(invalid_mask, eint_floor, E))
+            return repaired, repair_count
+
+        repaired = sol.at[0].set(jnp.where(invalid_mask, rho_floor, rho))
+        repaired = repaired.at[1].set(jnp.where(invalid_mask, 0.0, mx))
+        repaired = repaired.at[2].set(jnp.where(invalid_mask, 0.0, my))
+        repaired = repaired.at[3].set(jnp.where(invalid_mask, 0.0, mz))
+        repaired = repaired.at[4].set(jnp.where(invalid_mask, eint_floor, E))
+        if i_dual is not None and int(i_dual) < int(sol.shape[0]):
+            repaired = repaired.at[int(i_dual)].set(
+                jnp.where(invalid_mask, eint_floor, sol[int(i_dual)])
+            )
+        for i_passive in true_passive_ids:
+            if int(i_passive) < int(sol.shape[0]):
+                repaired = repaired.at[int(i_passive)].set(
+                    jnp.where(invalid_mask, 0.0, jnp.maximum(sol[int(i_passive)], 0.0))
+                )
+        return repaired, repair_count
+
     def split_solve_step(self, sol, dt, ax, params):
         """RK2 method, need to put in integrator choice at some point..."""
 
@@ -424,6 +557,12 @@ class hydro:
 
         else:
             fields = self.sweep_stack(state, dt, i)
+
+        # Guard against huge momentum living in near-vacuum cells before reverse source terms.
+        fields = self.apply_vacuum_momentum_cap(fields)
+        fields, repair_count = self.apply_invalid_cell_repair(fields)
+        params = dict(params)
+        params["_hydro_repair_count"] = repair_count
 
         fields, params = self.forcing(i, fields, params, dt/2, reverse=True)
         return (fields, params)

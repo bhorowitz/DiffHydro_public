@@ -98,9 +98,9 @@ def _parse_args() -> argparse.Namespace:
     p.add_argument("--store-subgrid-diagnostics", choices=["true", "false"], default=None)
     p.add_argument(
         "--sf-density-threshold-mode",
-        choices=["overdensity", "physical_nH"],
+        choices=["overdensity", "physical_nH", "physical_nH_comoving"],
         default=None,
-        help="Interpret sf_density_threshold as overdensity or physical hydrogen number density in cm^-3.",
+        help="Interpret sf_density_threshold as overdensity, proper hydrogen number density in cm^-3, or comoving hydrogen number density in cm^-3 scaled by a^3.",
     )
     p.add_argument("--sf-density-threshold", type=float, default=None)
     p.add_argument("--sf-density-width", type=float, default=None)
@@ -147,6 +147,12 @@ def _parse_args() -> argparse.Namespace:
         type=float,
         default=0.0,
         help="Sustained low-level feedback energy rate per existing stellar mass in code energy-density units per dtau.",
+    )
+    p.add_argument(
+        "--feedback-energy-clip-fraction",
+        type=float,
+        default=None,
+        help="If set, clip thermal feedback injected into each cell to at most this fraction of the pre-injection cell total energy.",
     )
     p.add_argument(
         "--enable-vacuum-momentum-cap",
@@ -353,6 +359,9 @@ def _save_stage_snapshot(
         sf_feedback_kinetic_energy=np.asarray(snapshot.get("sf_feedback_kinetic_energy", zero_mesh), dtype=np.float32),
         sf_feedback_total_energy=np.asarray(snapshot.get("sf_feedback_total_energy", zero_mesh), dtype=np.float32),
     )
+    for key, value in snapshot.items():
+        if key.startswith("sf_") and key not in payload:
+            payload[key] = np.asarray(value, dtype=np.float32)
     if U_state is not None and params_state is not None:
         dm_state = params_state.get("dm", {})
         payload["U_gas_state"] = np.asarray(U_state, dtype=np.float32)
@@ -398,6 +407,7 @@ def _build_config(args, stage: str):
         star_step_start=int(args.star_step_start),
         snf_energy=float(args.snf_energy),
         stellar_wind_energy=float(args.stellar_wind_energy),
+        feedback_energy_clip_fraction=args.feedback_energy_clip_fraction,
         feedback_deposition_mode=str(args.feedback_deposition_mode),
         unified_feedback_kernel=not bool(args.disable_unified_feedback_kernel),
         feedback_kernel_kind=str(args.feedback_kernel_kind),
@@ -543,6 +553,8 @@ def _build_config(args, stage: str):
         cfg = FullHydroConfig(**{**cfg.__dict__, "sf_max_fraction_per_step": float(args.sf_max_fraction_per_step)})
     if args.metal_yield is not None:
         cfg = FullHydroConfig(**{**cfg.__dict__, "metal_yield": float(args.metal_yield)})
+    if args.feedback_energy_clip_fraction is not None:
+        cfg = FullHydroConfig(**{**cfg.__dict__, "feedback_energy_clip_fraction": float(args.feedback_energy_clip_fraction)})
     if args.enable_vacuum_momentum_cap is not None:
         cfg = FullHydroConfig(**{**cfg.__dict__, "enable_vacuum_momentum_cap": _opt_bool(args.enable_vacuum_momentum_cap)})
     if args.vacuum_momentum_rho_guard is not None:
