@@ -164,8 +164,9 @@ class FullHydroConfig:
     vacuum_momentum_kinetic_to_thermal_max: float = 1.0
     vacuum_momentum_internal_floor: float = 1.0e-8
     enable_hydro_state_repair: bool = False
-    hydro_repair_rho_floor: float = 1.0e-7
-    hydro_repair_pressure_floor: float = 1.0e-8
+    hydro_repair_rho_floor: float = 1.0e-12
+    hydro_repair_pressure_floor: float = 1.0e-12
+    hydro_repair_max_kinetic_to_thermal_ratio: float = 1.0e6
     fail_on_nonfinite: bool = True
 
 
@@ -240,6 +241,7 @@ def _build_hydrosim(
     enable_hydro_state_repair: bool = False,
     hydro_repair_rho_floor: float = 1.0e-7,
     hydro_repair_pressure_floor: float = 1.0e-8,
+    hydro_repair_max_kinetic_to_thermal_ratio: float = 1.0e6,
 ):
     ss = dh.signal_speed_Einfeldt
     sname = solver_name.lower()
@@ -282,6 +284,7 @@ def _build_hydrosim(
     sim.enable_hydro_state_repair = bool(enable_hydro_state_repair)
     sim.hydro_repair_rho_floor = float(hydro_repair_rho_floor)
     sim.hydro_repair_pressure_floor = float(hydro_repair_pressure_floor)
+    sim.hydro_repair_max_kinetic_to_thermal_ratio = float(hydro_repair_max_kinetic_to_thermal_ratio)
     for flux in sim.fluxes:
         if hasattr(flux, "dx_o"):
             flux.dx_o = float(dx_o)
@@ -963,6 +966,7 @@ def build_full_hydro_system(cfg: FullHydroConfig, cosmo_lpt: jc.Cosmology) -> Fu
         enable_hydro_state_repair=cfg.enable_hydro_state_repair,
         hydro_repair_rho_floor=cfg.hydro_repair_rho_floor,
         hydro_repair_pressure_floor=cfg.hydro_repair_pressure_floor,
+        hydro_repair_max_kinetic_to_thermal_ratio=cfg.hydro_repair_max_kinetic_to_thermal_ratio,
     )
     return FullHydroSystem(
         cosmo_lpt=cosmo_lpt,

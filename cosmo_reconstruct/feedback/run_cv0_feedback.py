@@ -51,20 +51,8 @@ def _default_stage_args(stage_mod) -> argparse.Namespace:
 
 
 def _merge_config(base: argparse.Namespace, config: dict) -> argparse.Namespace:
-    legacy_driver_keys = {
-        "enable_vacuum_momentum_cap",
-        "vacuum_momentum_rho_guard",
-        "vacuum_momentum_kinetic_to_thermal_max",
-        "vacuum_momentum_internal_floor",
-        "enable_hydro_state_repair",
-        "hydro_repair_rho_floor",
-        "hydro_repair_pressure_floor",
-        "hydro_repair_max_kinetic_to_thermal_ratio",
-    }
     merged = vars(base).copy()
     for key, value in config.items():
-        if key in legacy_driver_keys:
-            continue
         if key not in merged:
             raise KeyError(f"Unknown config key: {key}")
         merged[key] = value
