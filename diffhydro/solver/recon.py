@@ -254,27 +254,82 @@ class MUSCL3:
     
         """
         eps_ad = 1e-6
+        tiny = 1e-12
         if j == 0: #left
                 delta_central = jnp.roll(buffer,self.f_sten(2,j), axis=axis) - jnp.roll(buffer,self.f_sten(1,j), axis=axis)
                 delta_upwind =  jnp.roll(buffer,self.f_sten(1,j), axis=axis) - jnp.roll(buffer,self.f_sten(0,j), axis=axis)
+                den_a = delta_upwind + eps_ad
+                den_a = jnp.where(jnp.abs(den_a) < tiny, jnp.where(den_a >= 0.0, tiny, -tiny), den_a)
+                den_b = delta_upwind + eps_ad
+                den_b = jnp.where(jnp.abs(den_b) < tiny, jnp.where(den_b >= 0.0, tiny, -tiny), den_b)
                 r = jnp.where(
                     delta_upwind >= eps_ad,
-                    delta_central / (delta_upwind + eps_ad), 
-                    (delta_central + eps_ad) / (delta_upwind + eps_ad))
+                    delta_central / den_a,
+                    (delta_central + eps_ad) / den_b)
+                r = jnp.nan_to_num(r, nan=0.0, posinf=0.0, neginf=0.0)
                 limiter = self.limiter(r)
                 cell_state_xi_j = jnp.roll(buffer,0,axis=axis) + 0.5 * limiter * (jnp.roll(buffer,-1,axis=axis) - jnp.roll(buffer,0,axis=axis)) 
         if j == 1: #right
                 delta_central = -1* jnp.roll(buffer,self.f_sten(2,j), axis=axis) + jnp.roll(buffer,self.f_sten(1,j), axis=axis)
                 delta_upwind =  -1* jnp.roll(buffer,self.f_sten(1,j), axis=axis) + jnp.roll(buffer,self.f_sten(0,j), axis=axis)
-    
+                den_a = delta_upwind + eps_ad
+                den_a = jnp.where(jnp.abs(den_a) < tiny, jnp.where(den_a >= 0.0, tiny, -tiny), den_a)
+                den_b = delta_upwind + eps_ad**2
+                den_b = jnp.where(jnp.abs(den_b) < tiny, jnp.where(den_b >= 0.0, tiny, -tiny), den_b)
                 r = jnp.where(
                     delta_upwind >= eps_ad**2, 
-                    delta_central / (delta_upwind + eps_ad), 
-                    (delta_central + eps_ad) / (delta_upwind + eps_ad**2))
+                    delta_central / den_a,
+                    (delta_central + eps_ad) / den_b)
+                r = jnp.nan_to_num(r, nan=0.0, posinf=0.0, neginf=0.0)
                 limiter = self.limiter(r)
                 cell_state_xi_j = jnp.roll(buffer,-1,axis=axis) - 0.5 * limiter * (jnp.roll(buffer,-2,axis=axis) - jnp.roll(buffer,-1,axis=axis))
         return cell_state_xi_j
 
+# # old version of Ben
+# class MUSCL3:
+#     def __init__(self,limiter: str):
+#         self.limiter = LIMITER_DICT[limiter]
+        
+#     def f_sten(self,idd,j):
+#         #clunky, can probably refactor out
+#         return idd-j-1
+        
+#     def reconstruct_xi(self,
+#                 buffer: Array,
+#                 axis: int,
+#                 j: int = None,
+#             ) -> Array:
+        
+#         """MUSCL-type reconstruction with different limiters.
+    
+#         psi_{i+1/2}^L = psi_i     + 0.5 * phi(r_L) * (psi_{i} - psi_{i-1})
+#         psi_{i+1/2}^R = psi_{i+1} - 0.5 * phi(r_R) * (psi_{i+2} - psi_{i+1})
+    
+#         r_L = (phi_{i+1} - phi_{i}) / (phi_{i} - phi_{i-1})
+#         r_R = (phi_{i+1} - phi_{i}) / (phi_{i+2} - phi_{i+1})
+    
+#         """
+#         eps_ad = 1e-6
+#         if j == 0: #left
+#                 delta_central = jnp.roll(buffer,self.f_sten(2,j), axis=axis) - jnp.roll(buffer,self.f_sten(1,j), axis=axis)
+#                 delta_upwind =  jnp.roll(buffer,self.f_sten(1,j), axis=axis) - jnp.roll(buffer,self.f_sten(0,j), axis=axis)
+#                 r = jnp.where(
+#                     delta_upwind >= eps_ad,
+#                     delta_central / (delta_upwind + eps_ad), 
+#                     (delta_central + eps_ad) / (delta_upwind + eps_ad))
+#                 limiter = self.limiter(r)
+#                 cell_state_xi_j = jnp.roll(buffer,0,axis=axis) + 0.5 * limiter * (jnp.roll(buffer,-1,axis=axis) - jnp.roll(buffer,0,axis=axis)) 
+#         if j == 1: #right
+#                 delta_central = -1* jnp.roll(buffer,self.f_sten(2,j), axis=axis) + jnp.roll(buffer,self.f_sten(1,j), axis=axis)
+#                 delta_upwind =  -1* jnp.roll(buffer,self.f_sten(1,j), axis=axis) + jnp.roll(buffer,self.f_sten(0,j), axis=axis)
+    
+#                 r = jnp.where(
+#                     delta_upwind >= eps_ad**2, 
+#                     delta_central / (delta_upwind + eps_ad), 
+#                     (delta_central + eps_ad) / (delta_upwind + eps_ad**2))
+#                 limiter = self.limiter(r)
+#                 cell_state_xi_j = jnp.roll(buffer,-1,axis=axis) - 0.5 * limiter * (jnp.roll(buffer,-2,axis=axis) - jnp.roll(buffer,-1,axis=axis))
+#         return cell_state_xi_j
 
 class PLM:
     """

@@ -120,9 +120,12 @@ class EquationManager:
 
     def get_sound_speed(self, p, rho):
         rho_safe = jnp.maximum(rho, self.eps)
+        print("caca")
         if self.isothermal:
+            print("return get_sound_speed (isothermal):", jnp.full_like(rho_safe, self.isothermal_sound_speed))
             return jnp.full_like(rho_safe, self.isothermal_sound_speed)
         p_safe = jnp.maximum(p, self.eps)
+        print("return get_sound_speed:", jnp.sqrt(self.gamma * p_safe / rho_safe))
         return jnp.sqrt(self.gamma * p_safe / rho_safe)
 
     # ---------------------------
@@ -278,7 +281,23 @@ class EquationManager:
         if self.isothermal:
             rho_safe = jnp.maximum(rho, self.eps)
             return jnp.full_like(rho_safe, self.isothermal_sound_speed)
-        return jnp.sqrt( self.gamma * jnp.maximum( p, self.eps) / jnp.maximum( rho, self.eps ) )
+        
+        p_safe = jnp.maximum(p, self.eps)
+        rho_safe = jnp.maximum(rho, self.eps)
+        result = jnp.sqrt(self.gamma * p_safe / rho_safe)
+        
+        # # Use jax.debug.print for debugging inside jit-compiled functions
+        # jax.debug.print("=== get_speed_of_sound ===")
+        # jax.debug.print("shape p: {}, p min: {}, p max: {}", p.shape, jnp.min(p), jnp.max(p))
+        # jax.debug.print("shape rho: {}, rho min: {}, rho max: {}", rho.shape, jnp.min(rho), jnp.max(rho))
+        # jax.debug.print("p_safe min: {}, p_safe max: {}", jnp.min(p_safe), jnp.max(p_safe))
+        # jax.debug.print("rho_safe min: {}, rho_safe max: {}", jnp.min(rho_safe), jnp.max(rho_safe))
+        # jax.debug.print("gamma: {}", self.gamma)
+        # jax.debug.print("result (speed of sound) min: {}, max: {}", jnp.min(result), jnp.max(result))
+        # jax.debug.print("result shape: {}", result.shape)
+        # jax.debug.print("===========================")
+        
+        return result
 
     def get_pressure(self, e, rho):
         if self.isothermal:

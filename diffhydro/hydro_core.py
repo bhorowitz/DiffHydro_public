@@ -370,7 +370,7 @@ class hydro:
         # split forcing outside of core hydro loop
         fields, params = state
         fields, params = self.forcing(i, fields, params, dt/2)
-
+        #partie mise a jours de champs 
         if self.use_mol and self.use_ct:
             #jax.debug.print("use ct")
             fields = self.mol_solve_step_ct(fields, dt, params)  # <<< unsplit (MOL + CT-on-state)
