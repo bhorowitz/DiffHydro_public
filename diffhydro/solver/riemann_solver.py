@@ -188,7 +188,7 @@ class LaxFriedrichs_safe(RiemannSolver):
 
         return fluxes_xi, None, None
     
-class LaxFriedrichs(RiemannSolver):
+class LaxFriedrichs(RiemannSolver):#calculateur de derivees
 
     def __init__(
             self,
