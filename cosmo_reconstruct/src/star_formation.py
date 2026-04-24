@@ -161,6 +161,46 @@ def compute_momentum_feedback_fields(
     return dmx, dmy, dmz
 
 
+def cap_momentum_feedback_fields(
+    rho_cons: jnp.ndarray,
+    mom_old: jnp.ndarray,
+    dm_feedback: jnp.ndarray,
+    thermal_support: jnp.ndarray,
+    *,
+    rho_guard: float,
+    kinetic_to_thermal_max: float,
+    internal_floor: float,
+) -> tuple[jnp.ndarray, jnp.ndarray]:
+    rho_cons = jnp.asarray(rho_cons, dtype=jnp.float32)
+    mom_old = jnp.asarray(mom_old, dtype=jnp.float32)
+    dm_feedback = jnp.asarray(dm_feedback, dtype=jnp.float32)
+    thermal_support = jnp.asarray(thermal_support, dtype=jnp.float32)
+
+    rho_guard_arr = jnp.asarray(float(rho_guard), dtype=jnp.float32)
+    ratio_max_arr = jnp.asarray(float(kinetic_to_thermal_max), dtype=jnp.float32)
+    floor_arr = jnp.asarray(float(internal_floor), dtype=jnp.float32)
+
+    rho_ref = jnp.maximum(rho_cons, floor_arr)
+    kin_old = 0.5 * jnp.sum(mom_old * mom_old, axis=0) / rho_ref
+    mom_trial = mom_old + dm_feedback
+    kin_trial = 0.5 * jnp.sum(mom_trial * mom_trial, axis=0) / rho_ref
+    thermal_ref = jnp.maximum(thermal_support, floor_arr)
+    target_kin = ratio_max_arr * thermal_ref
+
+    cap_mask = (
+        (rho_cons <= rho_guard_arr)
+        & jnp.all(jnp.isfinite(mom_old), axis=0)
+        & jnp.all(jnp.isfinite(dm_feedback), axis=0)
+        & jnp.isfinite(rho_cons)
+        & jnp.isfinite(thermal_support)
+        & (kin_trial > target_kin)
+    )
+    scale = jnp.sqrt(target_kin / jnp.maximum(kin_trial, floor_arr))
+    scale = jnp.clip(scale, 0.0, 1.0)
+    scale = jnp.where(cap_mask, scale, 1.0)
+    return dm_feedback * scale[None, ...], scale
+
+
 def smooth_sigmoid(x: jnp.ndarray, center: float, width: float) -> jnp.ndarray:
     width_safe = max(float(width), 1.0e-10)
     return jax.nn.sigmoid((x - float(center)) / width_safe)
@@ -368,6 +408,10 @@ class StellarFeedbackTracerForce:
         snf_energy: float = 0.0,
         stellar_wind_energy: float = 0.0,
         feedback_energy_clip_fraction: float | None = None,
+        enable_feedback_momentum_cap: bool = True,
+        feedback_momentum_rho_guard: float = 1.0e-6,
+        feedback_momentum_kinetic_to_thermal_max: float = 1.0e3,
+        feedback_momentum_internal_floor: float = 1.0e-12,
         store_diagnostics: bool = False,
     ):
         self.eq = eq
@@ -403,6 +447,10 @@ class StellarFeedbackTracerForce:
         self.snf_energy = float(max(snf_energy, 0.0))
         self.stellar_wind_energy = float(max(stellar_wind_energy, 0.0))
         self.feedback_energy_clip_fraction = None if feedback_energy_clip_fraction is None else float(feedback_energy_clip_fraction)
+        self.enable_feedback_momentum_cap = bool(enable_feedback_momentum_cap)
+        self.feedback_momentum_rho_guard = float(feedback_momentum_rho_guard)
+        self.feedback_momentum_kinetic_to_thermal_max = float(feedback_momentum_kinetic_to_thermal_max)
+        self.feedback_momentum_internal_floor = float(feedback_momentum_internal_floor)
         self.store_diagnostics = bool(store_diagnostics)
         self.mH_cgs = 1.6735575e-24
 
@@ -554,6 +602,7 @@ class StellarFeedbackTracerForce:
         feedback_momentum_y = jnp.zeros_like(thermal_deposition_grid)
         feedback_momentum_z = jnp.zeros_like(thermal_deposition_grid)
         feedback_kinetic_energy = jnp.zeros_like(thermal_deposition_grid)
+        feedback_momentum_cap_scale = jnp.ones_like(thermal_deposition_grid)
         if self.enable_momentum_feedback and abs(self.feedback_momentum_scale) > 0.0:
             feedback_momentum_x, feedback_momentum_y, feedback_momentum_z = compute_momentum_feedback_fields(
                 momentum_source_grid,
@@ -568,7 +617,30 @@ class StellarFeedbackTracerForce:
                 ],
                 axis=0,
             )
-            mom_new = mom_old + jnp.stack([feedback_momentum_x, feedback_momentum_y, feedback_momentum_z], axis=0)
+            dm_feedback = jnp.stack([feedback_momentum_x, feedback_momentum_y, feedback_momentum_z], axis=0)
+            if self.enable_feedback_momentum_cap:
+                if hasattr(self.eq, "dual_energy_ids") and self.eq.dual_energy_ids is not None:
+                    thermal_support = jnp.asarray(U_new[int(self.eq.dual_energy_ids)], dtype=jnp.float32) + thermal_deposition_grid
+                else:
+                    kin_old = jnp.sum(mom_old * mom_old, axis=0) / jnp.maximum(2.0 * rho_cons, 1.0e-30)
+                    thermal_support = (
+                        jnp.asarray(U_new[int(self.eq.energy_ids)], dtype=jnp.float32)
+                        - kin_old
+                        + thermal_deposition_grid
+                    )
+                dm_feedback, feedback_momentum_cap_scale = cap_momentum_feedback_fields(
+                    rho_cons,
+                    mom_old,
+                    dm_feedback,
+                    thermal_support,
+                    rho_guard=self.feedback_momentum_rho_guard,
+                    kinetic_to_thermal_max=self.feedback_momentum_kinetic_to_thermal_max,
+                    internal_floor=self.feedback_momentum_internal_floor,
+                )
+            feedback_momentum_x = dm_feedback[0]
+            feedback_momentum_y = dm_feedback[1]
+            feedback_momentum_z = dm_feedback[2]
+            mom_new = mom_old + dm_feedback
             kin_old = jnp.sum(mom_old * mom_old, axis=0) / jnp.maximum(2.0 * rho_cons, 1.0e-30)
             kin_new = jnp.sum(mom_new * mom_new, axis=0) / jnp.maximum(2.0 * rho_cons, 1.0e-30)
             feedback_kinetic_energy = jnp.maximum(kin_new - kin_old, 0.0)
@@ -611,5 +683,6 @@ class StellarFeedbackTracerForce:
                 "feedback_stellar_wind_energy": feedback_stellar_wind_energy,
                 "feedback_total_energy": feedback_total_energy,
                 "feedback_clip_scale": feedback_clip_scale,
+                "feedback_momentum_cap_scale": feedback_momentum_cap_scale,
             }
         return U_new, params_out

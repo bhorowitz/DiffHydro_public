@@ -316,6 +316,63 @@ def _history_append(history: dict[str, list[float]], snapshot: dict, dtau: float
         history["feedback_kinetic_energy"].append(float(np.sum(np.asarray(snapshot["sf_feedback_kinetic_energy"], dtype=np.float64))))
 
 
+def _history_append_runtime_state(history: dict[str, list[float]], U_state, params_state: dict, system, cfg, dtau: float) -> None:
+    from diffhydro.cosmology import conversions as cosmo_conv
+    import jax.numpy as jnp
+    from src.metallicity import extract_metal_fields
+    from src.star_formation import apply_particle_sigma_threshold
+
+    a_now = params_state["a"]
+    w_state = system.eq.get_primitives_from_conservatives(U_state)
+
+    rho_gas_phys = cosmo_conv.density_code_to_phys(w_state[0], a_now)
+    p_gas_phys = cosmo_conv.pressure_code_to_phys(w_state[4], a_now)
+    temp_code = p_gas_phys / jnp.maximum(rho_gas_phys * jnp.asarray(float(system.eq.R), dtype=jnp.float32), 1.0e-30)
+    temp_k = temp_code * jnp.asarray(float(system.code_to_kelvin_temp), dtype=jnp.float32)
+
+    history["a"].append(float(np.asarray(a_now)))
+    history["z"].append(float((1.0 / max(float(np.asarray(a_now)), 1.0e-12)) - 1.0))
+    history["dtau"].append(float(dtau))
+    history["gas_mass"].append(float(np.asarray(jnp.sum(rho_gas_phys, dtype=jnp.float32))))
+    history["mean_temperature_k"].append(float(np.asarray(jnp.mean(temp_k, dtype=jnp.float32))))
+
+    dm_mass = params_state["dm"].get("mass", None)
+    if dm_mass is None:
+        history["dm_mass"].append(0.0)
+    else:
+        history["dm_mass"].append(float(np.asarray(jnp.sum(jnp.asarray(dm_mass, dtype=jnp.float32), dtype=jnp.float32))))
+
+    rhoZ, metal_fraction = extract_metal_fields(U_state, system.eq)
+    if rhoZ is not None:
+        history["metal_mass"].append(float(np.asarray(jnp.sum(rhoZ, dtype=jnp.float32))))
+        history["mean_metallicity"].append(float(np.asarray(jnp.mean(metal_fraction, dtype=jnp.float32))))
+
+    star_mass = params_state["dm"].get("star_mass", None)
+    if star_mass is not None:
+        star_mass_arr = jnp.asarray(star_mass, dtype=jnp.float32)
+        history["stellar_mass_particles"].append(float(np.asarray(jnp.sum(star_mass_arr, dtype=jnp.float32))))
+        star_mass_filtered = apply_particle_sigma_threshold(
+            star_mass,
+            cfg.stellar_paint_sigma_threshold,
+            cfg.stellar_paint_min_mass,
+        )
+        history["stellar_mass_mesh"].append(float(np.asarray(jnp.sum(jnp.asarray(star_mass_filtered, dtype=jnp.float32), dtype=jnp.float32))))
+
+    sf_diag = params_state.get("sf_diagnostics", None)
+    if sf_diag is not None:
+        if "pi0" in sf_diag and "delta_star_grid" in sf_diag:
+            history["sf_mass_increment"].append(float(np.asarray(jnp.sum(jnp.asarray(sf_diag["delta_star_grid"], dtype=jnp.float32), dtype=jnp.float32))))
+            history["sf_pi0_mean"].append(float(np.asarray(jnp.mean(jnp.asarray(sf_diag["pi0"], dtype=jnp.float32)))))
+        if "feedback_total_energy" in sf_diag:
+            history["feedback_total_energy"].append(float(np.asarray(jnp.sum(jnp.asarray(sf_diag["feedback_total_energy"], dtype=jnp.float32), dtype=jnp.float32))))
+        if "feedback_snf_energy" in sf_diag:
+            history["feedback_snf_energy"].append(float(np.asarray(jnp.sum(jnp.asarray(sf_diag["feedback_snf_energy"], dtype=jnp.float32), dtype=jnp.float32))))
+        if "feedback_stellar_wind_energy" in sf_diag:
+            history["feedback_stellar_wind_energy"].append(float(np.asarray(jnp.sum(jnp.asarray(sf_diag["feedback_stellar_wind_energy"], dtype=jnp.float32), dtype=jnp.float32))))
+        if "feedback_kinetic_energy" in sf_diag:
+            history["feedback_kinetic_energy"].append(float(np.asarray(jnp.sum(jnp.asarray(sf_diag["feedback_kinetic_energy"], dtype=jnp.float32), dtype=jnp.float32))))
+
+
 def _bundle_value(snapshot: dict, key: str):
     return np.asarray(snapshot[key])
 
@@ -336,6 +393,7 @@ def _save_stage_snapshot(
     params_state: dict | None = None,
     init_mesh=None,
 ) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
     zero_mesh = np.zeros(np.asarray(snapshot["gas_density"]).shape, dtype=np.float32)
     payload = dict(
         step=np.asarray(step_idx, dtype=np.int32),
@@ -1156,12 +1214,15 @@ def _run_hydro_stage(args, stage: str, stage_dir: Path) -> None:
         dtau_f = float(np.asarray(dtau))
         step_i = i + 1
         maybe_raise_on_nonfinite(step_idx=step_i, dtau_value=dtau_f)
-        snap = {k: np.asarray(v) for k, v in extract_subgrid_state(U, params, system, cfg).items()}
-        _history_append(history, snap, dtau_f)
-        if save_snapshots and int(args.save_every_steps) > 0 and (step_i % int(args.save_every_steps)) == 0:
+        snapshot_due = save_snapshots and int(args.save_every_steps) > 0 and (step_i % int(args.save_every_steps)) == 0
+        if snapshot_due:
+            snap = {k: np.asarray(v) for k, v in extract_subgrid_state(U, params, system, cfg).items()}
+            _history_append(history, snap, dtau_f)
             maybe_save_snapshot(snap, snap_idx=snapshot_idx, step_idx=step_i, dtau_value=dtau_f)
             saved_steps.add(step_i)
             snapshot_idx += 1
+        else:
+            _history_append_runtime_state(history, U, params, system, cfg, dtau_f)
 
     snapshotf = {k: np.asarray(v) for k, v in extract_subgrid_state(U, params, system, cfg).items()}
     if save_snapshots and bool(args.save_final_snapshot) and int(cfg.hydro_steps) not in saved_steps:
