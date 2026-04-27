@@ -245,12 +245,7 @@ class LaxFriedrichs_Radiative_transfer(RiemannSolver):
         fluxes_L = self.equation_manager.get_fluxes_xi(primitives_L, conservatives_L, axis)
         fluxes_R = self.equation_manager.get_fluxes_xi(primitives_R, conservatives_R, axis)
 
-        speed_of_light_L = self.equation_manager.light_speed
-        speed_of_light_R = self.equation_manager.light_speed
-
-        celerity = jnp.maximum(
-            jnp.max(jnp.abs(primitives_L[self.velocity_ids[axis]]) + speed_of_light_L), 
-            jnp.max(jnp.abs(primitives_R[self.velocity_ids[axis]]) + speed_of_light_R))
+        celerity = self.equation_manager.light_speed
 
         fluxes_xi = 0.5 * (fluxes_L + fluxes_R) - 0.5 * celerity * (conservatives_R - conservatives_L)
             

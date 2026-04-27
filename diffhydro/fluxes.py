@@ -455,38 +455,52 @@ class ConvectiveFlux_Radiative_transfer:
 
         return F
 
-    def timestep(self, sol):
+    # def timestep(self, sol):
+    #     """
+    #     Multi-D CFL timestep for unsplit FV:
+    #       dt = CFL / max_x,y,z ( a_x/dx + a_y/dy + a_z/dz )
+    #     with a_d = |v_d| + signal_speed(prims, axis=d)
+    #     """
+    #     eq = self.eq_manage
+    #     prim = eq.get_primitives_from_conservatives(sol)
+
+    #     # velocities from active block (no hard-coded 1,2,3)
+    #     u = prim[eq.vel_ids[0]]
+    #     v = prim[eq.vel_ids[1]] if len(eq.vel_ids) > 1 else 0.0
+    #     w = prim[eq.vel_ids[2]] if len(eq.vel_ids) > 2 else 0.0
+
+    #     a_x = jnp.abs(u) + eq.get_signal_speed(prim, axis=0)
+    #     a_y = jnp.abs(v) + eq.get_signal_speed(prim, axis=1) if sol.ndim >= 3 else 0.0
+    #     a_z = jnp.abs(w) + eq.get_signal_speed(prim, axis=2) if sol.ndim >= 4 else 0.0
+
+    #     dx = float(self.dx_o)
+    #     dy = float(self.dx_o)
+    #     dz = float(self.dx_o)
+
+    #     inv_dt_local = a_x / dx
+    #     if sol.ndim >= 3:
+    #         inv_dt_local = inv_dt_local + a_y / dy
+    #     if sol.ndim >= 4:
+    #         inv_dt_local = inv_dt_local + a_z / dz
+
+    #     inv_dt_max = jnp.max(inv_dt_local)
+
+    #     dt = eq.cfl / (inv_dt_max + eq.eps)
+    #     return dt
+   
+    def timestep(self, sol): #new by the chat not bad
         """
-        Multi-D CFL timestep for unsplit FV:
-          dt = CFL / max_x,y,z ( a_x/dx + a_y/dy + a_z/dz )
-        with a_d = |v_d| + signal_speed(prims, axis=d)
+        CFL RT: dt = cfl / sum_d(c/dx_d)
         """
         eq = self.eq_manage
-        prim = eq.get_primitives_from_conservatives(sol)
-
-        # velocities from active block (no hard-coded 1,2,3)
-        u = prim[eq.vel_ids[0]]
-        v = prim[eq.vel_ids[1]] if len(eq.vel_ids) > 1 else 0.0
-        w = prim[eq.vel_ids[2]] if len(eq.vel_ids) > 2 else 0.0
-
-        a_x = jnp.abs(u) + eq.get_signal_speed(prim, axis=0)
-        a_y = jnp.abs(v) + eq.get_signal_speed(prim, axis=1) if sol.ndim >= 3 else 0.0
-        a_z = jnp.abs(w) + eq.get_signal_speed(prim, axis=2) if sol.ndim >= 4 else 0.0
-
+        dim = sol.ndim - 1
         dx = float(self.dx_o)
-        dy = float(self.dx_o)
-        dz = float(self.dx_o)
+        c = float(eq.light_speed)
+    
+        inv_dt = dim * c / dx
+        return eq.cfl / (inv_dt + eq.eps)
+    
 
-        inv_dt_local = a_x / dx
-        if sol.ndim >= 3:
-            inv_dt_local = inv_dt_local + a_y / dy
-        if sol.ndim >= 4:
-            inv_dt_local = inv_dt_local + a_z / dz
-
-        inv_dt_max = jnp.max(inv_dt_local)
-
-        dt = eq.cfl / (inv_dt_max + eq.eps)
-        return dt
 
     def compute_positivity_preserving_interpolation(self,
                                                     primitives: Array,

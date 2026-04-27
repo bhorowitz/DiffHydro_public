@@ -5,7 +5,7 @@ from functools import partial
 # Typage standard Python.
 from typing import List
 # Alias NumPy JAX (utilise parfois sous np, parfois jnp).
-import jax.numpy as np
+# import numpy as np
 # Valeurs par defaut du package (conditions aux limites / forcing).
 from diffhydro import NoBoundary, NoForcing
 # Namespace principal JAX.

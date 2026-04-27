@@ -28,7 +28,12 @@ class EquationManager:
     eps: float = 1e-20
     isothermal: bool = False
     light_speed: float = 1#3e8 #en m.s-1
-
+    fraction_escape: float = 0.1
+    volume_cell: float = 0.1
+    star_mass: float = 1.0
+    star_age: float = 1.0
+    star_metallicity: float = 1.0
+    mesh_shape: tuple[int, int, int] = (100, 100, 100)
     # Active variable names/order (single source of truth)
     active_names: tuple[str, ...] = ("E_gamma", "F_gamma_x", "F_gamma_y", "F_gamma_z")#,"p" 
     # passive_names: tuple[str, ...] = ("E_gamma",) #new
@@ -59,7 +64,7 @@ class EquationManager:
         self.thermal_conductivity_model = "SUTHERLAND"
         self.sutherland_parameters = [0.1, 1.0, 1.0]
         self.cfl = 0.4
-        self.mesh_shape = [100,100,100]
+        # self.mesh_shape = list(self.mesh_shape)
         self.R = 1.0
         self.cp = self.gamma / (self.gamma - 1.0) * self.R
         self.light_speed = float(self.light_speed)
@@ -73,21 +78,21 @@ class EquationManager:
         """
         prim_a = primitives[self.active_slice]
 
-        E_gamma = prim_a[self.mass_ids]
-        u, v, w = (prim_a[i] for i in self.vel_ids)
-        # p = prim_a[self.energy_ids]
-        if self.isothermal:
-            p = self.get_isothermal_pressure(E_gamma)
+        # E_gamma = prim_a[self.mass_ids]
+        # u, v, w = (prim_a[i] for i in self.vel_ids)
+        # # p = prim_a[self.energy_ids]
+        # if self.isothermal:
+        #     p = self.get_isothermal_pressure(E_gamma)
             
         # e = self.get_specific_energy(E_gamma)
         # kin = 0.5 * (u*u + v*v + w*w)
         # Etot = E_gamma * (kin + e) #a modifier
-        cons_a = jnp.stack([E_gamma, E_gamma*u, E_gamma*v, E_gamma*w], axis=0) #Etot
-
+        # cons_a = jnp.stack([E_gamma, E_gamma*u, E_gamma*v, E_gamma*w], axis=0) #Etot
+        cons_a = prim_a
         if primitives.shape[0] > self.n_active:
             prim_p = primitives[self.passive_slice]                 # (n_passive,...)
-            cons_p = E_gamma[jnp.newaxis, ...] * prim_p             # E_gamma*s_k
-            return jnp.concatenate([cons_a, cons_p], axis=0)
+            # cons_p = E_gamma[jnp.newaxis, ...] * prim_p             # E_gamma*s_k
+            return jnp.concatenate([cons_a,prim_p], axis=0) #, cons_p
 
         return cons_a
 
@@ -96,31 +101,45 @@ class EquationManager:
         conservatives: (>= n_active, ...)
         returns primitives: (>= n_active, ...)
         """
-        cons_a = conservatives[self.active_slice]
+        # cons_a = conservatives[self.active_slice]
 
-        E_gamma = cons_a[self.mass_ids]
-        E_gamma_safe = jnp.maximum(E_gamma, self.eps)
-        inv_E_gamma = 1.0 / E_gamma_safe
+        # E_gamma = cons_a[self.mass_ids]
+        # E_gamma_safe = jnp.maximum(E_gamma, self.eps)
+        # inv_E_gamma = 1.0 / E_gamma_safe
 
-        u = cons_a[1] * inv_E_gamma
-        v = cons_a[2] * inv_E_gamma
-        w = cons_a[3] * inv_E_gamma
+        # u = cons_a[1] * inv_E_gamma
+        # v = cons_a[2] * inv_E_gamma
+        # w = cons_a[3] * inv_E_gamma
 
-        # E = cons_a[4] * inv_E_gamma
-        # kin = 0.5 * (u*u + v*v + w*w)
-        # e = jnp.maximum(E - kin, self.eps) #a modifier
+        # # E = cons_a[4] * inv_E_gamma
+        # # kin = 0.5 * (u*u + v*v + w*w)
+        # # e = jnp.maximum(E - kin, self.eps) #a modifier
 
-        # if self.isothermal:
-        #     p = self.get_isothermal_pressure(E_gamma_safe)
-        # else:
-        #     p = self.get_pressure(e, E_gamma_safe)
+        # # if self.isothermal:
+        # #     p = self.get_isothermal_pressure(E_gamma_safe)
+        # # else:
+        # #     p = self.get_pressure(e, E_gamma_safe)
             
-        prim_a = jnp.stack([E_gamma_safe, u, v, w], axis=0) #new ,p
+        # prim_a = jnp.stack([E_gamma_safe, u, v, w], axis=0) #new ,p
+
+        # if conservatives.shape[0] > self.n_active:
+        #     cons_p = conservatives[self.passive_slice]              # (n_passive,...)
+        #     prim_p = cons_p * inv_E_gamma[jnp.newaxis, ...]             # s_k
+        #     return jnp.concatenate([prim_a, prim_p], axis=0)
+        """
+        For the RT moment system, active primitives and conservatives are identical.
+        """
+        cons_a = conservatives[self.active_slice]
+        E_gamma = jnp.maximum(cons_a[self.mass_ids], self.eps)
+        F_gamma_x = cons_a[1]
+        F_gamma_y = cons_a[2]
+        F_gamma_z = cons_a[3]
+
+        prim_a = jnp.stack([E_gamma, F_gamma_x, F_gamma_y, F_gamma_z], axis=0)
 
         if conservatives.shape[0] > self.n_active:
-            cons_p = conservatives[self.passive_slice]              # (n_passive,...)
-            prim_p = cons_p * inv_E_gamma[jnp.newaxis, ...]             # s_k
-            return jnp.concatenate([prim_a, prim_p], axis=0)
+            cons_p = conservatives[self.passive_slice]
+            return jnp.concatenate([prim_a, cons_p], axis=0)
 
         return prim_a
 
@@ -154,6 +173,36 @@ class EquationManager:
         E_gamma_safe = jnp.maximum(E_gamma, self.eps)
         return jnp.full_like(E_gamma_safe, self.light_speed)
 
+    def _eddington_factor(self, reduced_flux: Array) -> Array:
+        f = jnp.clip(reduced_flux, 0.0, 1.0 - 1e-6)
+        return (3.0 + 4.0 * f * f) / (5.0 + 2.0 * jnp.sqrt(4.0 - 3.0 * f * f))
+
+
+    def _radiation_pressure_tensor(self, E_gamma: Array, F_vec: Array) -> Array:
+        """
+        Returns P_ij with M1 closure:
+        P = D * E
+        D = (1-chi)/2 I + (3chi-1)/2 n⊗n
+        """
+        c = self.light_speed
+        F_norm = jnp.sqrt(jnp.sum(F_vec * F_vec, axis=0))
+        reduced_flux = F_norm / (c * jnp.maximum(E_gamma, self.eps))
+        chi = self._eddington_factor(reduced_flux)
+
+        n = F_vec / jnp.maximum(F_norm, self.eps)
+
+        ndim = E_gamma.ndim
+        eye = jnp.eye(3).reshape(3, 3, *([1] * ndim))
+        outer = n[:, None, ...] * n[None, :, ...]
+
+        D = (
+            ((1.0 - chi) / 2.0)[None, None, ...] * eye
+            + ((3.0 * chi - 1.0) / 2.0)[None, None, ...] * outer
+        )
+
+        return D * E_gamma[None, None, ...]
+
+
     # ---------------------------
     # def get_specific_energy(self, E_gamma: Array):
     #     E_gamma_safe = jnp.maximum(E_gamma, self.eps)
@@ -179,7 +228,8 @@ class EquationManager:
 
         vel = (u, v, w)
         ui = vel[axis]
-        E_gamma_ui = E_gamma * ui
+        E_gamma_ui = E_gamma
+        E_gamma_ui += self.fraction_escape / self.volume_cell * jnp.sum(self.star_mass * self.star_metallicity * self.star_age * jnp.exp(-self.star_age)) #* E_gamma * ui
 
         # momentum flux components
         fx_E_gammau = E_gamma_ui * u
