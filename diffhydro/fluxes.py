@@ -498,37 +498,26 @@ class ConvectiveFlux_Radiative_transfer:
         c = float(eq.light_speed)
     
         inv_dt = dim * c / dx
-        return eq.cfl / (inv_dt + eq.eps)
+        print(eq.cfl / (inv_dt + eq.eps))
     
-
-
+        return eq.cfl / (inv_dt + eq.eps) 
+    
     def compute_positivity_preserving_interpolation(self,
-                                                    primitives: Array,
-                                                    primitives_xi_j: Array,
-                                                    j: int,
-                                                    axis: int):
+                                                primitives: Array,
+                                                primitives_xi_j: Array,
+                                                j: int,
+                                                axis: int):
 
         cell_state_xi_safe_j = self.positivity_stencil.reconstruct_xi(
-            primitives, axis, j)
+        primitives, axis, j
+        )
 
-        rho_j = primitives_xi_j[self.eq_manage.mass_ids]
-
-        mask = jnp.where(rho_j < self.eq_manage.eps, 0, 1)
+        E_j = primitives_xi_j[self.eq_manage.mass_ids]
+        mask = jnp.where(E_j < self.eq_manage.eps, 0, 1)
         counter = jnp.sum(1 - mask)
 
         primitives_xi_j = primitives_xi_j * mask + cell_state_xi_safe_j * (1 - mask)
-
-        # check pressure on active p slot
-        # p_j = primitives_xi_j[self.eq_manage.energy_ids]
-        # mask = jnp.where(p_j < self.eq_manage.eps, 0, 1)
-
-        # counter += jnp.sum(1 - mask)
-        # primitives_xi_j = primitives_xi_j * mask + cell_state_xi_safe_j * (1 - mask)
-        counter += jnp.sum(1 )
-        primitives_xi_j = primitives_xi_j  + cell_state_xi_safe_j 
-
         conservative_xi_j = self.eq_manage.get_conservatives_from_primitives(primitives_xi_j)
 
         return conservative_xi_j, primitives_xi_j, counter
-
 

@@ -4,6 +4,7 @@ from jax import Array
 from dataclasses import dataclass, field
 import jax.numpy as jnp
 import jax
+from matplotlib import axis
 
 
 @dataclass
@@ -78,8 +79,8 @@ class EquationManager:
         """
         prim_a = primitives[self.active_slice]
 
-        # E_gamma = prim_a[self.mass_ids]
-        # u, v, w = (prim_a[i] for i in self.vel_ids)
+        E_gamma = prim_a[self.mass_ids]
+        u, v, w = (prim_a[i] for i in self.vel_ids)
         # # p = prim_a[self.energy_ids]
         # if self.isothermal:
         #     p = self.get_isothermal_pressure(E_gamma)
@@ -87,12 +88,12 @@ class EquationManager:
         # e = self.get_specific_energy(E_gamma)
         # kin = 0.5 * (u*u + v*v + w*w)
         # Etot = E_gamma * (kin + e) #a modifier
-        # cons_a = jnp.stack([E_gamma, E_gamma*u, E_gamma*v, E_gamma*w], axis=0) #Etot
-        cons_a = prim_a
+        cons_a = jnp.stack([E_gamma, E_gamma*u, E_gamma*v, E_gamma*w], axis=0) #Etot
+        # cons_a = prim_a
         if primitives.shape[0] > self.n_active:
             prim_p = primitives[self.passive_slice]                 # (n_passive,...)
-            # cons_p = E_gamma[jnp.newaxis, ...] * prim_p             # E_gamma*s_k
-            return jnp.concatenate([cons_a,prim_p], axis=0) #, cons_p
+            cons_p = E_gamma[jnp.newaxis, ...] * prim_p             # E_gamma*s_k
+            return jnp.concatenate([cons_a,cons_p], axis=0) #, cons_p
 
         return cons_a
 
@@ -101,7 +102,7 @@ class EquationManager:
         conservatives: (>= n_active, ...)
         returns primitives: (>= n_active, ...)
         """
-        # cons_a = conservatives[self.active_slice]
+        cons_a = conservatives[self.active_slice]
 
         # E_gamma = cons_a[self.mass_ids]
         # E_gamma_safe = jnp.maximum(E_gamma, self.eps)
@@ -111,14 +112,14 @@ class EquationManager:
         # v = cons_a[2] * inv_E_gamma
         # w = cons_a[3] * inv_E_gamma
 
-        # # E = cons_a[4] * inv_E_gamma
-        # # kin = 0.5 * (u*u + v*v + w*w)
-        # # e = jnp.maximum(E - kin, self.eps) #a modifier
+        # E = cons_a[4] * inv_E_gamma
+        # kin = 0.5 * (u*u + v*v + w*w)
+        # e = jnp.maximum(E - kin, self.eps) #a modifier
 
-        # # if self.isothermal:
-        # #     p = self.get_isothermal_pressure(E_gamma_safe)
-        # # else:
-        # #     p = self.get_pressure(e, E_gamma_safe)
+        # if self.isothermal:
+        #     p = self.get_isothermal_pressure(E_gamma_safe)
+        # else:
+        #     p = self.get_pressure(e, E_gamma_safe)
             
         # prim_a = jnp.stack([E_gamma_safe, u, v, w], axis=0) #new ,p
 
@@ -130,16 +131,17 @@ class EquationManager:
         For the RT moment system, active primitives and conservatives are identical.
         """
         cons_a = conservatives[self.active_slice]
-        E_gamma = jnp.maximum(cons_a[self.mass_ids], self.eps)
-        F_gamma_x = cons_a[1]
-        F_gamma_y = cons_a[2]
-        F_gamma_z = cons_a[3]
+        E_gamma = jnp.maximum(cons_a[self.mass_ids], self.eps) #ajouter garde fous division par 0 
+        F_gamma_x = cons_a[1]/E_gamma
+        F_gamma_y = cons_a[2]/E_gamma
+        F_gamma_z = cons_a[3]/E_gamma 
 
         prim_a = jnp.stack([E_gamma, F_gamma_x, F_gamma_y, F_gamma_z], axis=0)
 
         if conservatives.shape[0] > self.n_active:
             cons_p = conservatives[self.passive_slice]
-            return jnp.concatenate([prim_a, cons_p], axis=0)
+            prim_p = cons_p * inv_E_gamma[jnp.newaxis, ...] 
+            return jnp.concatenate([prim_a, prim_p], axis=0)
 
         return prim_a
 
@@ -212,44 +214,41 @@ class EquationManager:
     #         # p_safe = self.get_isothermal_pressure(E_gamma_safe)
     #     return energy_thermique + #p_safe / ((self.gamma - 1.0) * E_gamma_safe + self.eps)
 
-    def get_fluxes_xi(self, primitives, conservatives, axis: int):# peut etre ici qu on calcule le "p" pour la partie de transfert radiatif
+    def get_fluxes_xi(self, primitives, conservatives, axis: int): ##ATTENTION AU UNITE POUR ETRE CONSISTANT AVEC GET PRIMITIVE AND CONSERVATIVE 
         """
-        Physical flux in direction axis=0,1,2.
-        Returns flux array same leading dim as conservatives/primitives.
+        RT moments (M1 closure), direction axis in {0,1,2}.
+        State:
+        U = [E_gamma, F_gamma_x, F_gamma_y, F_gamma_z]
+        Flux in direction i:
+        F_i(U) = [F_i, c^2 P_{i,x}, c^2 P_{i,y}, c^2 P_{i,z}]
         """
+        del primitives
 
-        prim_a = primitives[self.active_slice]
+        # Cohérence d'unités: on part des variables conservatives.
+        # Hypothèse conservative active: [E_gamma, E_gamma*F_x, E_gamma*F_y, E_gamma*F_z].
         cons_a = conservatives[self.active_slice]
+        E_gamma = jnp.maximum(cons_a[self.mass_ids], self.eps)
+        E_gamma_safe = jnp.maximum(E_gamma, self.eps)
 
-        E_gamma = prim_a[self.mass_ids]
-        u, v, w = (prim_a[i] for i in self.vel_ids)
-        # p = prim_a[self.energy_ids]
-        # Etot = cons_a[-1]  # last active conservative slot
+        mom_x, mom_y, mom_z = (cons_a[i] for i in self.vel_ids)
+        F_gamma_x = mom_x #/ E_gamma_safe
+        F_gamma_y = mom_y #/ E_gamma_safe
+        F_gamma_z = mom_z #/ E_gamma_safe
 
-        vel = (u, v, w)
-        ui = vel[axis]
-        E_gamma_ui = E_gamma
-        E_gamma_ui += self.fraction_escape / self.volume_cell * jnp.sum(self.star_mass * self.star_metallicity * self.star_age * jnp.exp(-self.star_age)) #* E_gamma * ui
+        F_vec = jnp.stack([F_gamma_x, F_gamma_y, F_gamma_z], axis=0)
+        P = self._radiation_pressure_tensor(E_gamma, F_vec)  
 
-        # momentum flux components
-        fx_E_gammau = E_gamma_ui * u
-        fx_E_gammav = E_gamma_ui * v
-        fx_E_gammaw = E_gamma_ui * w
+        E_flux = F_vec[axis]
+        c2 = self.light_speed * self.light_speed
 
-        if axis == 0:
-            fx_E_gammau = fx_E_gammau #+ p a modifier pour le p de transfert radiatif
-        elif axis == 1:
-            fx_E_gammav = fx_E_gammav # + p a modifier pour le p de transfert radiatif
-        else:
-            fx_E_gammaw = fx_E_gammaw  #+ p a modifier pour le p de transfert radiatif
+        flux_a = jnp.stack(
+            [E_flux, c2 * P[axis, 0], c2 * P[axis, 1], c2 * P[axis, 2]],
+            axis=0,
+        )
 
-        # No energy equation in this 4-variable RT manager: keep active flux size = 4.
-        flux_a = jnp.stack([E_gamma_ui, fx_E_gammau, fx_E_gammav, fx_E_gammaw], axis=0)
-
-        # if conservatives.shape[0] > self.n_active:
-        #     cons_p = conservatives[self.passive_slice]              # (n_passive,...)
-        #     flux_p = cons_p * ui                                    # (E_gamma*s_k)*ui
-        #     return jnp.concatenate([flux_a, flux_p], axis=0)
+        if conservatives.shape[0] > self.n_active:
+            # Passive block transporté de manière upwind dans ConvectiveFlux
+            return jnp.concatenate([flux_a, conservatives[self.passive_slice]], axis=0)
 
         return flux_a
 

@@ -1,380 +1,544 @@
 \documentclass[a4paper, 11pt]{article}
-%\documentclass{report}
+% \documentclass{report}
 \usepackage[english]{babel}
 \usepackage{graphicx}
 \usepackage[utf8]{inputenc}
 \usepackage[T1]{fontenc}
-%\usepackage{latexsym}
-%\usepackage{multirow}
-%\usepackage{color}5
-\usepackage{amsmath,amssymb}  % Better maths support & more symbols
+% \usepackage{latexsym}
+% \usepackage{multirow}
+% \usepackage{color}
+\usepackage{amsmath,amssymb}  % Better math support & more symbols
 \usepackage{textcomp} % provide lots of new symbols
 \usepackage{lscape}
 \usepackage[left=2.5cm, right=2.5cm, top=2.25cm, bottom=2.25cm]{geometry}
-\usepackage{setspace} 	% package pour l'interligne
-\onehalfspacing	% interligne de 1.5
+\usepackage{setspace}   % package for line spacing
+\onehalfspacing         % 1.5 line spacing
 \usepackage{multicol}
 \usepackage{hyperref}
 \usepackage{pdfpages}
+
 \begin{document}
-\title{Informations and modifications of the code DiffHydro}
-\author{A.Bernard}
-\date{ Avril 2026 -  Aout 2026}
+\title{Information and Modifications of the DiffHydro Code\\[0.5em]
+\large\textit{Carnet de bord -- Logbook}}
+\author{A. Bernard}
+\date{April 2026 -- August 2026}
 \maketitle
 \thispagestyle{empty}
+
 \begin{figure}[!t]
-	\includegraphics[scale=0.5]{uf.png}\hfill
-	\includegraphics[scale=0.3]{graduate_programme.jpg}
+    \includegraphics[scale=0.5]{uf.png}\hfill
+    \includegraphics[scale=0.3]{graduate_programme.jpg}
 \end{figure}
 
 \begin{figure}[!h]
-	\centering
-	\includegraphics[scale=0.7]{logo.jpg}
+    \centering
+    \includegraphics[scale=0.7]{logo.jpg}
 \end{figure}
 
 \vfill
 
-\noindent Sous la direction de  :\hfill
-Master 2 recherche physique\\
+\noindent Supervised by:\hfill
+Master 2 Research in Physics\\
 Enrico Garaldi\hfill
-Année 2025/2026
+Academic Year 2025/2026
+
 \newpage
 \pagestyle{headings}
 \tableofcontents
 \newpage
-\section{Introduction}
-DiffHydro est un code d'hydrodynamique différentielle écrit en Python et JAX, conçu pour exécuter des simulations de dynamique des fluides compressibles sur GPU, tout en gardant la possibilité de différencier numériquement toute la chaîne de calcul. Le dépôt contient un solveur hydrodynamique modulaire, plusieurs modèles physiques additionnels (gravité, conduction, turbulence, refroidissement, MHD), ainsi qu'un ensemble de notebooks et de tests permettant de valider différents cas d'usage astrophysiques.
 
-Le but de ce document est double :
-\begin{itemize}
-    \item décrire l'architecture générale du dépôt et le rôle des fichiers principaux ;
-    \item documenter précisément les modifications introduites pour une variante orientée transfert radiatif, en particulier dans les fichiers \texttt{equationmanager\_radiative\_transf\_no\_chat.py}, \texttt{riemann\_solver.py}, \texttt{fluxes.py} et \texttt{hydro\_core.py}.
-\end{itemize}
-
-Le dépôt est organisé autour du package \texttt{diffhydro/}, qui contient le coeur numérique, et de plusieurs répertoires auxiliaires :
-\begin{itemize}
-    \item \texttt{examples/} : notebooks de démonstration et d'expérimentation ;
-    \item \texttt{tests/} : tests unitaires et cas de validation ;
-    \item \texttt{data/} : données de comparaison, notamment avec Athena ;
-    \item \texttt{animations/} : visuels et résultats de simulation ;
-    \item documentation technique à la racine : \texttt{README.md}, \texttt{MULTI\_DENSITY\_ARCHITECTURE.md}, \texttt{PSI\_IMPLEMENTATION\_GUIDE.md}, etc.
-\end{itemize}
-
-\section{Vue d'ensemble du projet}
-
-\subsection{Objectif scientifique et numérique}
-Le projet vise à résoudre les équations de l'hydrodynamique compressible, avec extensions possibles vers la MHD, la gravité auto-cohérente, la conduction thermique et le transfert radiatif. Une contrainte forte du code est de rester compatible avec JAX afin de permettre :
-\begin{itemize}
-    \item la compilation JIT des opérations ;
-    \item l'exécution distribuée sur plusieurs devices ;
-    \item le calcul automatique des gradients pour des problèmes inverses ou des tâches d'optimisation.
-\end{itemize}
-
-\subsection{Chaîne de calcul globale}
-De façon simplifiée, une simulation suit la chaîne suivante :
-\begin{enumerate}
-    \item un \texttt{EquationManager} définit les variables actives, les conversions primitives/conservatives, les flux physiques et les vitesses de propagation ;
-    \item un objet de flux convectif reconstruit les états aux interfaces de maille puis appelle un solveur de Riemann ;
-    \item la classe \texttt{hydro} dans \texttt{hydro\_core.py} assemble ces flux et les forces externes pour faire évoluer le système dans le temps ;
-    \item selon la configuration, l'évolution peut se faire en directionnel split, en méthode des lignes (MOL), avec ou sans Constrained Transport pour la MHD ;
-    \item les sorties peuvent être obtenues directement, par planning de \texttt{dt}, jusqu'à un temps cible, ou via callbacks avec snapshots sur disque.
-\end{enumerate}
-
-\subsection{Dépendances et environnement}
-Le fichier \texttt{pyproject.toml} montre que le package de base dépend a minima de \texttt{numpy}, tandis que JAX est fourni comme dépendance optionnelle. Les dépendances de développement incluent \texttt{pytest}, \texttt{ruff}, \texttt{mypy} et \texttt{pre-commit}. Le code est donc pensé pour un usage scientifique flexible, où l'utilisateur choisit sa version CPU ou GPU de JAX.
-
-\section{Architecture du dépôt}
-
-\subsection{Répertoire \texttt{diffhydro/}}
-Les sous-modules les plus importants sont les suivants :
-\begin{itemize}
-    \item \texttt{equationmanager.py} : gestionnaire standard des équations d'Euler compressibles ;
-    \item \texttt{equationmanager\_mhd.py} : variante MHD ;
-    \item \texttt{equationmanager\_radiative\_transf.py} et \texttt{equationmanager\_radiative\_transf\_no\_chat.py} : variantes dédiées au travail en cours sur le transfert radiatif ;
-    \item \texttt{fluxes.py} : calcul des flux convectifs et conductifs ;
-    \item \texttt{hydro\_core.py} : boucle d'évolution temporelle principale ;
-    \item \texttt{solver/} : reconstruction, intégrateurs temporels, solveurs de Riemann, vitesses caractéristiques ;
-    \item \texttt{physics/} : modules physiques additionnels ;
-    \item \texttt{boundary/} : conditions aux limites ;
-    \item \texttt{utils/parallel/} : outils liés à la parallélisation et aux halos.
-\end{itemize}
-
-\subsection{Tests disponibles}
-Le répertoire \texttt{tests/} contient plusieurs cas de validation : conduction, gravité FFT vs multigrid, EOS isotherme, Sedov, timescale, turbulence, et tests d'interface d'unités. Cela indique que le code a déjà une base de validation couvrant plusieurs morceaux du solveur, même si la partie transfert radiatif semble encore en construction.
-
-\subsection{Exemples et notebooks}
-Le répertoire \texttt{examples/} contient des notebooks pour Athena, conduction, gravité, MHD, supernova et turbulence. Ils servent à la fois d'exemples scientifiques et de support de vérification qualitative. Le dépôt contient aussi des comparaisons avec Athena dans \texttt{data/athena\_comparison/}.
-
-\section{Modifications introduites pour le transfert radiatif}
-
-\subsection{Principe général}
-La stratégie adoptée dans ce dépôt consiste à dupliquer certaines briques du solveur classique pour créer une variante compatible avec une nouvelle définition des variables. Cela évite de casser le solveur Euler standard et permet d'expérimenter rapidement une nouvelle physique dans des fichiers séparés.
-
-\subsection{Changements principaux identifiés}
-Les modifications visibles dans le code actuel sont les suivantes :
-\begin{itemize}
-    \item création d'un gestionnaire d'équations spécifique \texttt{equationmanager\_radiative\_transf\_no\_chat.py} ;
-    \item remplacement des variables hydrodynamiques classiques \texttt{rho, vx, vy, vz, p} par des variables radiatives \texttt{E\_gamma, F\_gamma\_x, F\_gamma\_y, F\_gamma\_z} ;
-    \item suppression de la variable de pression explicite dans cette variante \texttt{no\_chat} ;
-    \item remplacement de la vitesse du son par une vitesse de propagation fixée égale à la vitesse de la lumière ;
-    \item ajout d'un solveur de Riemann \texttt{LaxFriedrichs\_Radiative\_transfer} ;
-    \item duplication de \texttt{ConvectiveFlux} sous la forme \texttt{ConvectiveFlux\_Radiative\_transfer} avec une logique de positivité adaptée à l'absence de pression ;
-    \item conservation du reste de l'infrastructure \texttt{hydro} afin de réutiliser la boucle d'évolution, la gestion des halos, les pas de temps et la parallélisation.
-\end{itemize}
-
-\subsection{Conséquence structurelle importante}
-Dans la variante \texttt{equationmanager\_radiative\_transf\_no\_chat.py}, le nombre de variables actives est de 4. Cela a des implications directes :
-\begin{itemize}
-    \item le solveur de Riemann ne doit pas supposer l'existence d'une composante énergie ou pression ;
-    \item le calcul de flux doit conserver une cohérence stricte de forme entre états primitifs, conservatifs et flux ;
-    \item les chemins numériques qui supposent \texttt{energy\_ids} ne peuvent pas être réutilisés sans adaptation.
-\end{itemize}
-
-Cette contrainte est cruciale, car un décalage entre un bloc actif à 4 composantes et des flux calculés sur 5 composantes produirait des erreurs de broadcasting ou de typage dans JAX.
-
-\section{Information détaillée sur les modules}
-
-\subsection{\texttt{equationmanager.py}}
-Le fichier \texttt{equationmanager.py} définit le gestionnaire standard des équations d'Euler compressibles. Il repose sur une classe \texttt{EquationManager} écrite comme une \texttt{dataclass}. Son rôle est de centraliser toute la définition des variables physiques et des opérations thermodynamiques de base.
-
-Les caractéristiques principales sont les suivantes :
-\begin{itemize}
-    \item les variables primitives actives sont \texttt{[rho, vx, vy, vz, p]} ;
-    \item les variables conservatives actives sont \texttt{[rho, rho vx, rho vy, rho vz, E\_tot]} ;
-    \item des variables passives supplémentaires peuvent être ajoutées après les variables actives ;
-    \item le code utilise \texttt{active\_slice} et \texttt{passive\_slice} pour éviter de coder en dur les indices partout.
-\end{itemize}
-
-Les méthodes les plus importantes sont :
-\begin{itemize}
-    \item \texttt{get\_conservatives\_from\_primitives} : construit les variables conservatives à partir des primitives ;
-    \item \texttt{get\_primitives\_from\_conservatives} : fait l'opération inverse ;
-    \item \texttt{get\_specific\_energy}, \texttt{get\_pressure}, \texttt{get\_sound\_speed} : fournissent les fermetures thermodynamiques ;
-    \item \texttt{get\_fluxes\_xi} : calcule le flux physique dans une direction spatiale donnée ;
-    \item \texttt{get\_wavespeeds\_xi} : fournit les vitesses caractéristiques pour la CFL ou les solveurs de Riemann.
-\end{itemize}
-
-Ce fichier constitue la référence du comportement attendu dans le cas hydrodynamique classique. Toutes les variantes radiatives ou MHD doivent donc être comprises comme des spécialisations de cette interface.
-
-\subsection{\texttt{equationmanager\_radiative\_transf\_no\_chat.py}}
-Ce fichier correspond à une version expérimentale simplifiée pour le transfert radiatif. Il conserve la même structure générale qu'un \texttt{EquationManager}, mais change profondément le sens des variables.
-
-\subsubsection*{Variables actives}
-Les variables primitives et conservatives actives sont réduites à quatre composantes :
-\begin{itemize}
-    \item \texttt{E\_gamma} ;
-    \item \texttt{F\_gamma\_x} ;
-    \item \texttt{F\_gamma\_y} ;
-    \item \texttt{F\_gamma\_z}.
-\end{itemize}
-
-Il n'y a plus de pression explicite ni d'énergie totale séparée dans cette version. Le champ \texttt{n\_cons} est fixé à 4, et \texttt{active\_names} contient exactement ces quatre variables.
-
-\subsubsection*{Conversions primitives/conservatives}
-La méthode \texttt{get\_conservatives\_from\_primitives} construit un état conservatif de la forme
-\[
-    \left[E_\gamma,\; E_\gamma F_{\gamma,x},\; E_\gamma F_{\gamma,y},\; E_\gamma F_{\gamma,z}\right].
-\]
-La méthode inverse reconstruit ensuite les flux normalisés par division par \texttt{E\_gamma}. Le code protège cette division par un plancher \texttt{eps}.
-
-\subsubsection*{Vitesse caractéristique}
-La fonction \texttt{get\_speed\_of\_sound} est remplacée par une constante égale à \texttt{light\_speed}. Dans la pratique, cela signifie que la diffusion numérique du solveur de Riemann repose sur une vitesse de propagation radiative imposée, et non sur la thermodynamique du gaz.
-
-\subsubsection*{Flux physiques}
-La méthode \texttt{get\_fluxes\_xi} ne construit qu'un flux actif à 4 composantes. Les termes analogues à la pression sont laissés de côté ou explicitement commentés comme points à reprendre plus tard. Cela confirme que cette version est encore une base de travail, plus qu'un modèle de transfert radiatif fermé physiquement.
-
-\subsubsection*{État d'avancement et limites}
-Le code contient beaucoup de lignes commentées et de marqueurs indiquant qu'une partie de la fermeture physique reste à définir. En particulier :
-\begin{itemize}
-    \item pas de variable \texttt{p} active ;
-    \item pas de calcul complet d'énergie interne ou d'énergie totale ;
-    \item solveur adapté essentiellement à un flux de type transport avec célérité imposée.
-\end{itemize}
-
-Cette version semble donc utile comme infrastructure minimale, mais pas encore comme implémentation finale d'un transfert radiatif complet.
-
-\subsection{\texttt{riemann\_solver.py}}
-Le fichier \texttt{riemann\_solver.py} contient les solveurs de Riemann utilisés pour calculer les flux numériques aux interfaces. Il repose sur une classe abstraite \texttt{RiemannSolver} qui stocke :
-\begin{itemize}
-    \item une référence vers le \texttt{equation\_manager} ;
-    \item une fonction de vitesse de signal ;
-    \item les indices de masse, vitesse, et éventuellement énergie.
-\end{itemize}
-
-\subsubsection*{Solveurs présents}
-Les solveurs visibles dans la partie lue du fichier sont notamment :
-\begin{itemize}
-    \item \texttt{LaxFriedrichs\_MHD} ;
-    \item \texttt{LaxFriedrichs\_safe} ;
-    \item \texttt{LaxFriedrichs} ;
-    \item \texttt{LaxFriedrichs\_Radiative\_transfer} ;
-    \item \texttt{HLLC}.
-\end{itemize}
-
-\subsubsection*{Ajout spécifique pour le transfert radiatif}
-Le solveur \texttt{LaxFriedrichs\_Radiative\_transfer} reprend la formule de Rusanov/Lax-Friedrichs,
-\[
-    F^* = \frac{1}{2}(F_L + F_R) - \frac{1}{2}\alpha (U_R - U_L),
-\]
-mais remplace la vitesse du son par \texttt{light\_speed}. La quantité \texttt{celerity} est construite comme le maximum entre les vitesses normales locales plus la vitesse de la lumière. Cette adaptation est cohérente avec la structure du gestionnaire radiatif simplifié, qui ne fournit pas d'index énergie utilisable pour le calcul classique du son.
-
-\subsubsection*{Robustesse de l'interface}
-La classe de base utilise \texttt{getattr(self.equation\_manager, "energy\_ids", None)}. Cette ligne est importante : elle permet de supporter des gestionnaires d'équations qui ne définissent pas de variable énergie. C'est précisément ce qui rend possible l'existence d'une variante radiative à 4 composantes dans le même cadre logiciel.
-
-\subsection{\texttt{fluxes.py}}
-Le fichier \texttt{fluxes.py} assemble la reconstruction, la positivité et le solveur de Riemann pour construire les flux numériques utilisés par \texttt{hydro\_core.py}.
-
-\subsubsection*{Classe \texttt{ConvectiveFlux}}
-La classe standard \texttt{ConvectiveFlux} effectue les opérations suivantes :
-\begin{enumerate}
-    \item conversion de l'état conservatif cellulaire en variables primitives ;
-    \item reconstruction des états gauche et droite aux interfaces ;
-    \item reconversion de ces états reconstruits en conservatives ;
-    \item application éventuelle d'une correction de positivité ;
-    \item extraction du bloc actif \texttt{active\_slice} ;
-    \item appel au solveur de Riemann ;
-    \item traitement optionnel des scalaires passifs et du cas MHD GLM.
-\end{enumerate}
-
-La méthode \texttt{timestep} calcule un pas de temps CFL multidimensionnel en additionnant les vitesses caractéristiques directionnelles.
-
-\subsubsection*{Positivity preserving}
-Dans la version standard, la correction de positivité vérifie au minimum :
-\begin{itemize}
-    \item la positivité de la densité ;
-    \item la positivité de la pression, via la composante \texttt{energy\_ids} utilisée comme slot de pression primitive active.
-\end{itemize}
-
-\subsubsection*{Classe \texttt{ConvectiveFlux\_Radiative\_transfer}}
-La variante radiative du flux convectif reprend la structure générale, mais adapte le traitement de la positivité à l'absence de pression explicite. Dans le code actuellement visible :
-\begin{itemize}
-    \item la vérification de positivité sur la densité radiative \texttt{E\_gamma} est conservée ;
-    \item la vérification liée à \texttt{p} est retirée ou neutralisée ;
-    \item le solveur de Riemann est appelé sur le bloc actif de taille 4 ;
-    \item la cohérence de forme entre primitives, conservatives et flux est maintenue jusqu'au retour final.
-\end{itemize}
-
-Cette séparation est pertinente car elle isole la logique spécifique à la nouvelle physique sans perturber le flux convectif Euler classique.
-
-\subsection{\texttt{hydro\_core.py}}
-Le fichier \texttt{hydro\_core.py} contient la classe \texttt{hydro}, qui est le coeur opérationnel du solveur temporel. C'est le point de jonction entre les flux, les forces, les conditions aux limites et les méthodes d'intégration.
-
-\subsubsection*{Rôle général}
-La classe \texttt{hydro} :
-\begin{itemize}
-    \item stocke la configuration globale de la simulation ;
-    \item construit la mesh logique de devices JAX pour la parallélisation ;
-    \item choisit la méthode d'intégration temporelle ;
-    \item gère les halos et les conditions aux limites ;
-    \item exécute la boucle d'évolution via différentes méthodes \texttt{evolve}. 
-\end{itemize}
-
-\subsubsection*{Parallélisation}
-Le fichier utilise intensivement les primitives JAX suivantes :
-\begin{itemize}
-    \item \texttt{Mesh} et \texttt{NamedSharding} pour la distribution des tableaux ;
-    \item \texttt{pjit} pour compiler des boucles distribuées ;
-    \item \texttt{shard\_map} pour certaines opérations locales sur shards ;
-    \item \texttt{ppermute} pour les échanges de halos entre devices voisins.
-\end{itemize}
-
-Une fonction \texttt{roll\_with\_halo} permet de remplacer localement un \texttt{jnp.roll} classique lorsque le domaine est découpé entre plusieurs devices. Elle sert à assurer une divergence de flux correcte même en mode distribué.
-
-\subsubsection*{Calcul du pas de temps}
-La méthode \texttt{timestep} interroge tous les objets de flux et de force afin de récupérer leurs contraintes de stabilité. Le pas retenu est le minimum global, ensuite borné par \texttt{max\_dt} dans \texttt{hydrostep\_adapt}.
-
-\subsubsection*{Méthodes d'évolution principales}
-Le fichier fournit plusieurs interfaces d'évolution :
-\begin{itemize}
-    \item \texttt{evolve} : version de base avec un nombre fixe de super-steps ;
-    \item \texttt{evolve\_with\_callbacks} : version instrumentée, capable d'écrire des snapshots par shard ;
-    \item \texttt{evolve\_with\_dt\_schedule} : évolution avec un tableau de pas de temps imposés ;
-    \item \texttt{evolve\_till\_time} : évolution jusqu'à un temps cible avec \texttt{while\_loop} ;
-    \item \texttt{evolve\_memory\_efficient} : version économisant la mémoire via checkpointing par blocs.
-\end{itemize}
-
-Le \texttt{README.md} recommande \texttt{evolve\_memory\_efficient()} pour de nombreux usages avancés, \texttt{evolve\_with\_callbacks()} pour le debug et les snapshots, et \texttt{evolve\_till\_time()} seulement lorsque le nombre de pas doit rester dynamique.
-
-\subsubsection*{Flux, forcing et RHS}
-La méthode \texttt{flux} somme les contributions de tous les objets de flux enregistrés. La méthode \texttt{forcing} applique les termes sources. La méthode \texttt{rhs\_unsplit} construit le membre de droite non scindé en parcourant les directions spatiales, en imposant les halos, puis en calculant une divergence conservative.
-
-\subsubsection*{Support MHD et CT}
-Le fichier contient également la logique de \emph{Constrained Transport} en 2D et 3D pour le cas magnétique. Les méthodes \texttt{mol\_solve\_step\_ct}, \texttt{\_apply\_ct\_on\_state} et \texttt{\_apply\_ct\_on\_state\_3D} calculent des forces électromotrices aux coins, en déduisent \(\nabla \times \mathbf{E}\), puis mettent à jour les composantes magnétiques. Cette partie montre que \texttt{hydro\_core.py} sert non seulement à l'hydrodynamique pure, mais aussi à des variantes MHD relativement avancées.
-
-\subsubsection*{Intérêt pour la variante radiative}
-Même si \texttt{hydro\_core.py} n'a pas été entièrement réécrit pour le transfert radiatif, il fournit toute l'infrastructure réutilisable : boucle temporelle, organisation des flux, parallélisation, callbacks, snapshots, et structure générale d'évolution. Cela explique pourquoi les modifications ont été concentrées dans les \texttt{EquationManager} et dans les flux plutôt que dans le coeur du solveur.
-
-\section{Résumé des différences entre Euler standard et variante radiative \texttt{no\_chat}}
+%-----------------------------------------------------------------------
+\section*{Historique des versions (Carnet de bord)}
+\addcontentsline{toc}{section}{Historique des versions (Carnet de bord)}
+%-----------------------------------------------------------------------
 
 \begin{center}
-\begin{tabular}{|l|l|l|}
+\begin{tabular}{|l|l|p{9cm}|}
 \hline
-Élément & Version Euler standard & Variante radiative \texttt{no\_chat} \\
+\textbf{Version} & \textbf{Date} & \textbf{Modifications principales} \\
 \hline
-Variables actives & \texttt{rho, vx, vy, vz, p} & \texttt{E\_gamma, F\_gamma\_x, F\_gamma\_y, F\_gamma\_z} \\
+v1.0 & Avril 2026 &
+Création du document. Architecture générale du dépôt. Description des fichiers \texttt{equationmanager.py}, \texttt{riemann\_solver.py}, \texttt{fluxes.py}, \texttt{hydro\_core.py}. Description du variant \texttt{no\_chat} à 4 variables. Tableau comparatif Euler standard vs radiatif. \\
 \hline
-Nombre actif & 5 & 4 \\
+v1.1 & Avril 2026 &
+\textbf{Fermeture M1 complète dans \texttt{get\_fluxes\_xi}} : implémentation de \texttt{\_eddington\_factor} et \texttt{\_radiation\_pressure\_tensor}. Le flux est désormais $\mathcal{F}(U) = [F_i,\; c^2 P_{i,x},\; c^2 P_{i,y},\; c^2 P_{i,z}]$ avec tenseur de pression M1 analytique. \\
 \hline
-Pression explicite & Oui & Non \\
+v1.2 & Avril 2026 &
+\textbf{Injection par disque d'étoiles dans le notebook} \texttt{blast-athena.ipynb} : remplacement de l'anneau d'étoiles par un disque rempli ($dx^2+dy^2 \leq r^2$, $\sim 317$ étoiles) dans le plan $z=50$. Correction de l'axe de visualisation (\texttt{sol\_test[0, :, :, center\_z]} au lieu de \texttt{sol\_test[0][center\_z]}). \\
 \hline
-Énergie totale explicite & Oui & Non dans la version lue \\
-\hline
-Vitesse caractéristique & Vitesse du son & Vitesse de la lumière imposée \\
-\hline
-Solveur dédié & Solveurs usuels Euler & \texttt{LaxFriedrichs\_Radiative\_transfer} \\
-\hline
-Positivité & Densité + pression & Densité radiative seulement \\
-\hline
-État d'avancement & Cohérent et générique & Expérimental / incomplet physiquement \\
+v1.3 & Avril 2026 &
+\textbf{Correction du format de \texttt{params}} : les tuples Python dans le dictionnaire \texttt{params} provoquent une erreur \texttt{TypeError} dans \texttt{lax.while\_loop} (la structure pytree doit être constante). Tous les champs doivent être des \texttt{jnp.array} explicites dès l'initialisation. \\
 \hline
 \end{tabular}
 \end{center}
 
-\section{Points d'attention et limites actuelles}
+\newpage
 
-Plusieurs points ressortent de la lecture du dépôt :
+%-----------------------------------------------------------------------
+\section{Introduction}
+%-----------------------------------------------------------------------
+
+DiffHydro is a differentiable hydrodynamics code written in Python and JAX, designed to run compressible fluid dynamics simulations on GPU while retaining the ability to numerically differentiate the entire computation pipeline. The repository contains a modular hydrodynamic solver, several additional physical models (gravity, conduction, turbulence, cooling, MHD), as well as a set of notebooks and tests for validating different astrophysical use cases.
+
+This document has two objectives:
 \begin{itemize}
-    \item la variante \texttt{equationmanager\_radiative\_transf\_no\_chat.py} contient encore de nombreux commentaires de travail et des sections incomplètes ;
-    \item la fermeture physique du transfert radiatif n'est pas finalisée dans cette version ;
-    \item certains solveurs de Riemann supposent l'existence d'une énergie/pression, ce qui limite leur réutilisation directe avec la variante radiative à 4 variables ;
-    \item le calcul de positivité a dû être adapté précisément parce que la variable \texttt{p} n'existe plus ;
-    \item la cohérence des shapes JAX est un enjeu central : un gestionnaire à 4 variables actives doit produire des flux et des états strictement compatibles à 4 composantes actives.
+    \item to describe the general architecture of the repository and the role of the main files;
+    \item to precisely document the modifications introduced for a radiative-transfer-oriented variant, in particular in the files \texttt{equationmanager\_radiative\_transf\_no\_chat.py}, \texttt{riemann\_solver.py}, \texttt{fluxes.py}, and \texttt{hydro\_core.py}.
 \end{itemize}
 
-En revanche, l'architecture du dépôt est suffisamment modulaire pour permettre cette expérimentation sans toucher à la majeure partie du solveur temporel distribué.
-
-\section{Utilisation pratique du dépôt}
-
-À partir des fichiers de configuration et du \texttt{README.md}, on peut résumer l'utilisation de base comme suit :
+The repository is organised around the \texttt{diffhydro/} package, which contains the numerical core, and several auxiliary directories:
 \begin{itemize}
-    \item installation du package en mode éditable ;
-    \item exécution des tests avec \texttt{pytest -q} ;
-    \item utilisation d'un seul GPU si nécessaire via \texttt{CUDA\_VISIBLE\_DEVICES=0} ;
-    \item exploration des notebooks d'exemple pour les cas turbulents, gravitationnels, MHD et blast waves.
+    \item \texttt{examples/}: demonstration and experimentation notebooks;
+    \item \texttt{tests/}: unit tests and validation cases;
+    \item \texttt{data/}: comparison data, notably with Athena;
+    \item \texttt{animations/}: visualisations and simulation results;
+    \item technical documentation at the root: \texttt{README.md}, \texttt{MULTI\_DENSITY\_ARCHITECTURE.md}, \texttt{PSI\_IMPLEMENTATION\_GUIDE.md}, etc.
 \end{itemize}
 
-Le projet est donc pensé à la fois comme un code de recherche et comme une base extensible pour de nouveaux modules physiques.
+%-----------------------------------------------------------------------
+\section{Project Overview}
+%-----------------------------------------------------------------------
+
+\subsection{Scientific and Numerical Objectives}
+The project aims to solve the equations of compressible hydrodynamics, with possible extensions towards MHD, self-consistent gravity, thermal conduction, and radiative transfer. A key constraint of the code is to remain compatible with JAX in order to allow:
+\begin{itemize}
+    \item JIT compilation of operations;
+    \item distributed execution across multiple devices;
+    \item automatic gradient computation for inverse problems or optimisation tasks.
+\end{itemize}
+
+\subsection{Global Computation Pipeline}
+In simplified terms, a simulation follows the pipeline below:
+\begin{enumerate}
+    \item an \texttt{EquationManager} defines the active variables, primitive/conservative conversions, physical fluxes, and propagation speeds;
+    \item a convective flux object reconstructs states at cell interfaces and calls a Riemann solver;
+    \item the \texttt{hydro} class in \texttt{hydro\_core.py} assembles these fluxes and external forces to advance the system in time;
+    \item depending on the configuration, the evolution can use directional splitting, the method of lines (MOL), with or without Constrained Transport for MHD;
+    \item outputs can be obtained directly, by scheduling \texttt{dt}, up to a target time, or via callbacks with snapshots written to disk.
+\end{enumerate}
+
+\subsection{Dependencies and Environment}
+The \texttt{pyproject.toml} file shows that the base package depends at minimum on \texttt{numpy}, while JAX is provided as an optional dependency. Development dependencies include \texttt{pytest}, \texttt{ruff}, \texttt{mypy}, and \texttt{pre-commit}. The code is therefore designed for flexible scientific use, where the user selects their CPU or GPU version of JAX.
+
+%-----------------------------------------------------------------------
+\section{Repository Architecture}
+%-----------------------------------------------------------------------
+
+\subsection{The \texttt{diffhydro/} Directory}
+The most important sub-modules are:
+\begin{itemize}
+    \item \texttt{equationmanager.py}: standard manager for the compressible Euler equations;
+    \item \texttt{equationmanager\_mhd.py}: MHD variant;
+    \item \texttt{equationmanager\_radiative\_transf.py} and \texttt{equationmanager\_radiative\_transf\_no\_chat.py}: variants dedicated to the ongoing work on radiative transfer;
+    \item \texttt{fluxes.py}: computation of convective and conductive fluxes;
+    \item \texttt{hydro\_core.py}: main temporal evolution loop;
+    \item \texttt{solver/}: reconstruction, time integrators, Riemann solvers, characteristic speeds;
+    \item \texttt{physics/}: additional physics modules;
+    \item \texttt{boundary/}: boundary conditions;
+    \item \texttt{utils/parallel/}: tools related to parallelisation and halos.
+\end{itemize}
+
+\subsection{Available Tests}
+The \texttt{tests/} directory contains several validation cases: conduction, gravity FFT vs multigrid, isothermal EOS, Sedov, timescale, turbulence, and unit interface tests. This indicates that the code already has a validation base covering several parts of the solver, even though the radiative transfer part appears to still be under construction.
+
+\subsection{\texttt{blast-athena.ipynb} -- Modifications (v1.2--v1.3)}
+\label{sec:notebook}
+
+Le notebook \texttt{examples/athena/blast-athena.ipynb} sert à la fois de cas de validation (comparaison avec Athena++) et de banc de test pour l'injection radiative stellaire. Les modifications suivantes y ont été apportées :
+
+\subsubsection*{Géométrie : disque rempli d'étoiles (v1.2)}
+L'anneau initial a été remplacé par un disque rempli dans le plan $z=50$.  
+Toutes les cellules $(i_x, i_y)$ vérifiant $\Delta x^2 + \Delta y^2 \leq r^2$ (avec $r=10$ cellules) sont peuplées d'une étoile, soit $\sim 317$ étoiles.
+\begin{verbatim}
+offsets = [(dx, dy)
+           for dx in range(-r, r+1)
+           for dy in range(-r, r+1)
+           if dx**2 + dy**2 <= r**2]
+star_positions = jnp.stack([x, y, z], axis=1)  # shape (N, 3)
+\end{verbatim}
+
+\subsubsection*{Correction de l'axe de visualisation (v1.2)}
+L'indexation \texttt{sol\_test[0][center\_z]} effectuait une coupe à $x=50$ (première dimension), montrant un profil linéaire au lieu du disque. La correction est :
+\begin{verbatim}
+# Avant (incorrect) :
+im = ax.imshow(sol_test[0][center_z])   # coupe x=50
+# Après (correct) :
+im = ax.imshow(sol_test[0, :, :, center_z])  # coupe z=50
+\end{verbatim}
+
+\subsubsection*{Suivi temporel et snapshots (v1.2)}
+La cellule de visualisation \texttt{\#VSC-60b47bc5} a été nettoyée pour ne conserver que :
+\begin{itemize}
+    \item un graphe d'évolution temporelle du champ $E_\gamma$ (valeur centrale, moyenne globale, maximum global) ;
+    \item une grille de snapshots du plan $z=50$ avec une colorbar fixe calibrée sur le dernier snapshot.
+\end{itemize}
+\subsection{Examples and Notebooks}
+The \texttt{examples/} directory contains notebooks for Athena, conduction, gravity, MHD, supernova, and turbulence. They serve both as scientific examples and as qualitative verification support. The repository also contains comparisons with Athena in \texttt{data/athena\_comparison/}.
+
+%-----------------------------------------------------------------------
+\section{Modifications Introduced for Radiative Transfer}
+%-----------------------------------------------------------------------
+
+\subsection{General Approach}
+The strategy adopted in this repository consists of duplicating certain building blocks of the classical solver to create a variant compatible with a new variable definition. This avoids breaking the standard Euler solver and allows rapid experimentation with new physics in separate files.
+
+\subsection{Main Changes Identified}
+The modifications visible in the current code are as follows:
+\begin{itemize}
+    \item creation of a specific equation manager \texttt{equationmanager\_radiative\_transf\_no\_chat.py};
+    \item replacement of the classical hydrodynamic variables \texttt{rho, vx, vy, vz, p} by radiative variables \texttt{E\_gamma, F\_gamma\_x, F\_gamma\_y, F\_gamma\_z};
+    \item removal of the explicit pressure variable in this \texttt{no\_chat} variant;
+    \item replacement of the sound speed by a fixed propagation speed equal to the speed of light;
+    \item addition of a \texttt{LaxFriedrichs\_Radiative\_transfer} Riemann solver;
+    \item duplication of \texttt{ConvectiveFlux} as \texttt{ConvectiveFlux\_Radiative\_transfer} with a positivity logic adapted to the absence of pressure;
+    \item preservation of the rest of the \texttt{hydro} infrastructure in order to reuse the evolution loop, halo management, time-stepping, and parallelisation.
+\end{itemize}
+
+\subsection{Important Structural Consequence}
+In the \texttt{equationmanager\_radiative\_transf\_no\_chat.py} variant, the number of active variables is 4. This has direct implications:
+\begin{itemize}
+    \item the Riemann solver must not assume the existence of an energy or pressure component;
+    \item the flux computation must maintain strict shape consistency between primitive states, conservative states, and fluxes;
+    \item numerical paths that assume \texttt{energy\_ids} cannot be reused without adaptation.
+\end{itemize}
+
+This constraint is crucial, because a mismatch between an active block of 4 components and fluxes computed on 5 components would produce broadcasting or typing errors in JAX.
+
+%-----------------------------------------------------------------------
+\section{Detailed Information on the Modules}
+%-----------------------------------------------------------------------
+
+\subsection{\texttt{equationmanager.py}}
+The file \texttt{equationmanager.py} defines the standard manager for the compressible Euler equations. It is based on an \texttt{EquationManager} class written as a \texttt{dataclass}. Its role is to centralise the entire definition of physical variables and basic thermodynamic operations.
+
+The main features are:
+\begin{itemize}
+    \item the active primitive variables are \texttt{[rho, vx, vy, vz, p]};
+    \item the active conservative variables are \texttt{[rho, rho\,vx, rho\,vy, rho\,vz, E\_tot]};
+    \item additional passive variables can be appended after the active variables;
+    \item the code uses \texttt{active\_slice} and \texttt{passive\_slice} to avoid hard-coding indices everywhere.
+\end{itemize}
+
+The most important methods are:
+\begin{itemize}
+    \item \texttt{get\_conservatives\_from\_primitives}: builds the conservative variables from the primitives;
+    \item \texttt{get\_primitives\_from\_conservatives}: performs the inverse operation;
+    \item \texttt{get\_specific\_energy}, \texttt{get\_pressure}, \texttt{get\_sound\_speed}: provide the thermodynamic closures;
+    \item \texttt{get\_fluxes\_xi}: computes the physical flux in a given spatial direction;
+    \item \texttt{get\_wavespeeds\_xi}: provides the characteristic speeds for CFL or Riemann solvers.
+\end{itemize}
+
+This file constitutes the reference for the expected behaviour in the classical hydrodynamic case. All radiative or MHD variants must therefore be understood as specialisations of this interface.
+
+\subsection{\texttt{equationmanager\_radiative\_transf\_no\_chat.py}}
+This file corresponds to a simplified experimental version for radiative transfer. It retains the same general structure as an \texttt{EquationManager}, but fundamentally changes the meaning of the variables.
+
+\subsubsection*{Active Variables}
+The active primitive and conservative variables are reduced to four components:
+\begin{itemize}
+    \item \texttt{E\_gamma};
+    \item \texttt{F\_gamma\_x};
+    \item \texttt{F\_gamma\_y};
+    \item \texttt{F\_gamma\_z}.
+\end{itemize}
+
+There is no longer an explicit pressure or separate total energy in this version. The field \texttt{n\_cons} is fixed at 4, and \texttt{active\_names} contains exactly these four variables.
+
+\subsubsection*{Primitive/Conservative Conversions}
+The method \texttt{get\_conservatives\_from\_primitives} builds a conservative state of the form
+\[
+    \left[E_\gamma,\; F_{\gamma,x},\;F_{\gamma,y},\; F_{\gamma,z}\right].
+\]
+The inverse method then reconstructs the normalised fluxes by dividing by \texttt{E\_gamma}. The code protects this division with a floor \texttt{eps}.
+
+\subsubsection*{Characteristic Speed}
+The function \texttt{get\_speed\_of\_sound} is replaced by a constant equal to \texttt{light\_speed}. In practice, this means that the numerical diffusion of the Riemann solver relies on an imposed radiative propagation speed, rather than on the gas thermodynamics.
+
+\subsubsection*{Physical Fluxes}
+The method \texttt{get\_fluxes\_xi} builds only an active flux with 4 components. Terms analogous to pressure are omitted or explicitly commented as points to be revisited later. new flux calculus according to the resolution equation 
+
+\begin{equation}
+    \mathcal{F}(U) = [\mathbf{F}, c^2 \mathbb{P}].
+    \label{eq:placeholder_label}
+\end{equation} 
+
+In addition, new function have been implemented \_eddington\_factor and \_radiation\_pressure\_tensor who calculate the radiative tenson use in \texttt{get\_fluxes\_xi} 
+
+\subsubsection*{Current Status and Limitations}
+The code contains many commented lines and markers indicating that part of the physical closure remains to be defined. In particular:
+\begin{itemize}
+    \item no active variable \texttt{p};
+    \item no complete computation of internal energy or total energy;
+    \item solver adapted essentially to a transport-type flux with an imposed celerity.
+\end{itemize}
+
+This version therefore appears useful as a minimal infrastructure, but not yet as a complete implementation of radiative transfer.
+\subsection{\texttt{radiative\_transfer.py}}
+La classe \texttt{StellarRadiationForce} a été ajoutée avec 4 méthodes principales :
+    \begin{itemize}
+        \item \texttt{get\_stellar\_emission} : calcule un taux d'émission simplifié $e^{-\tau/10} \times Z$ en fonction de l'âge $\tau$ et de la métallicité $Z$ de l'étoile.
+        \item \texttt{timestep} : retourne $10^{30}$ (pas de contrainte CFL imposée par ce terme source pour le moment).
+        \item \texttt{force} : méthode principale. Elle lit \texttt{star\_masses}, \texttt{star\_ages}, \texttt{star\_metallicities}, \texttt{star\_positions} depuis \texttt{params}, calcule la source par étoile, et l'ajoute au champ $E_\gamma$ (indice 0) par scatter-add sur les positions de grille.
+        \item \texttt{get\_N\_gamma} : source par étoile via $\Delta\Pi = \Pi(\tau^{n+1}, Z) - \Pi(\tau^n, Z)$ multipliée par la masse.
+    \end{itemize}
+
+La formule implémentée est :
+\begin{equation}
+    N_i^{n+1} = N_i^{n}
+    + \frac{f_{\mathrm{esc}}}{V}
+    \sum_{\star}^{\text{cell stars}} m_{\star}
+    \bigl[ \Pi_i(\tau_{\star}^{n+1}, Z_{\star}) - \Pi_i(\tau_{\star}^{n}, Z_{\star}) \bigr].
+    \label{eq:stellar_injection}
+\end{equation}
+
+\subsubsection*{Mode Strömgren (v1.1)}
+Un mode \texttt{injection\_mode="stromgren"} a été ajouté, contrôlé par le paramètre \texttt{stromgren\_rate}. Dans ce mode, \texttt{get\_N\_gamma\_stromgren\_sphere} retourne un taux uniforme \texttt{stromgren\_rate} pour chaque étoile, indépendamment de l'âge ou de la métallicité. Ce mode simplifié est utilisé pour les tests de stabilité numérique : la valeur $10^{-7}$ est stable, $10^{-2}$ est la limite supérieure observée.
+
+\subsubsection*{Format du dictionnaire \texttt{params} (v1.3)}
+Un problème critique a été identifié : si les valeurs de \texttt{params} sont des tuples Python, \texttt{lax.while\_loop} lève une \texttt{TypeError} car la structure pytree du carry doit rester identique entre l'entrée et la sortie. Puisque \texttt{force} met à jour \texttt{star\_ages} avec un \texttt{jnp.array}, la structure change si l'original était un tuple. La correction consiste à initialiser tous les champs en \texttt{jnp.array} :
+\begin{verbatim}
+params = {
+    "star_masses":        jnp.array([10., 10., 10.]),
+    "star_ages":          jnp.array([0.1,  0.1,  0.1]),
+    "star_metallicities": jnp.array([0.02, 0.02, 0.02]),
+    "star_positions":     jnp.array([[50,50,50],[50,75,75],[50,25,25]],
+                                    dtype=jnp.int32),
+}
+\end{verbatim}
+La méthode \texttt{get\_fluxes\_xi} construit un flux actif à 4 composantes selon la fermeture M1 :
+\begin{equation}
+    \mathcal{F}_i(U) = \bigl[F_i,\; c^2 P_{i,x},\; c^2 P_{i,y},\; c^2 P_{i,z}\bigr],
+    \label{eq:rt_flux}
+\end{equation}
+où $P_{ij}$ est le tenseur de pression radiatif M1 analytique (v1.1).
+
+Deux nouvelles méthodes ont été implémentées pour le calcul de ce tenseur :
+\begin{itemize}
+    \item \texttt{\_eddington\_factor} : calcule le facteur d'Eddington $\chi(f)$ de la fermeture M1,
+    \[
+        \chi(f) = \frac{3 + 4f^2}{5 + 2\sqrt{4 - 3f^2}},
+    \]
+    où $f = |\mathbf{F}| / (c\, E_\gamma)$ est le flux réduit.
+    \item \texttt{\_radiation\_pressure\_tensor} : calcule $P_{ij} = D_{ij} E_\gamma$ avec
+    \[
+        D_{ij} = \frac{1-\chi}{2}\delta_{ij} + \frac{3\chi-1}{2} n_i n_j,\quad
+        \mathbf{n} = \frac{\mathbf{F}}{|\mathbf{F}|}.
+    \]
+\end{itemize}
+New class StellarRadiationForce with 4 function the first one is 
+- get\_stellar\_emission who compute $e^{-age/10}$ $\times$ metallicity.
+- timestep born the time step 
+- force who take params (caracteristics of the stars not sure it work) and compute 
+\begin{equation}
+    N_i^{n+1} = N_i^{n}
+    + \frac{f_{\mathrm{esc}}}{V}
+    \sum_{\star}^{\text{cell stars}} m_{\star}
+    \bigl[ \Pi_i(\tau_{\star}^{n+1}, Z_{\star}) - \Pi_i(\tau_{\star}^{n}, Z_{\star}) \bigr]
+    \label{eq:placeholder_label}
+\end{equation}
+\subsection{\texttt{riemann\_solver.py}}
+The file \texttt{riemann\_solver.py} contains the Riemann solvers used to compute the numerical fluxes at interfaces. It relies on an abstract class \texttt{RiemannSolver} which stores:
+\begin{itemize}
+    \item a reference to the \texttt{equation\_manager};
+    \item a signal speed function;
+    \item the indices of mass, velocity, and optionally energy.
+\end{itemize}
+
+\subsubsection*{Available Solvers}
+The solvers visible in the read portion of the file include:
+\begin{itemize}
+    \item \texttt{LaxFriedrichs\_MHD};
+    \item \texttt{LaxFriedrichs\_safe};
+    \item \texttt{LaxFriedrichs};
+    \item \texttt{LaxFriedrichs\_Radiative\_transfer};
+    \item \texttt{HLLC}.
+\end{itemize}
+
+\subsubsection*{Specific Addition for Radiative Transfer}
+The solver \texttt{LaxFriedrichs\_Radiative\_transfer} applies the Rusanov/Lax-Friedrichs formula,
+\[
+    F^* = \frac{1}{2}(F_L + F_R) - \frac{1}{2}\alpha (U_R - U_L),
+\]
+but replaces the sound speed with \texttt{light\_speed}. The quantity \texttt{celerity} is built as the maximum of the local normal velocities plus the speed of light. This adaptation is consistent with the structure of the simplified radiative manager, which does not provide a usable energy index for the classical sound speed computation.
+
+\subsubsection*{Interface Robustness}
+The base class uses \texttt{getattr(self.equation\_manager, "energy\_ids", None)}. This line is important: it allows supporting equation managers that do not define an energy variable. This is precisely what makes it possible to have a 4-component radiative variant within the same software framework.
+
+\subsection{\texttt{fluxes.py}}
+The file \texttt{fluxes.py} assembles the reconstruction, positivity correction, and Riemann solver to build the numerical fluxes used by \texttt{hydro\_core.py}.
+
+\subsubsection*{The \texttt{ConvectiveFlux} Class}
+The standard \texttt{ConvectiveFlux} class performs the following operations:
+\begin{enumerate}
+    \item conversion of the cell-centred conservative state into primitive variables;
+    \item reconstruction of left and right states at interfaces;
+    \item reconversion of these reconstructed states into conservatives;
+    \item optional application of a positivity correction;
+    \item extraction of the active block \texttt{active\_slice};
+    \item call to the Riemann solver;
+    \item optional handling of passive scalars and the MHD GLM case.
+\end{enumerate}
+
+The \texttt{timestep} method computes a multidimensional CFL time-step.
+
+\subsubsection*{Positivity Preserving}
+In the standard version, the positivity correction verifies at minimum:
+\begin{itemize}
+    \item positivity of the density;
+    \item positivity of the pressure, via the \texttt{energy\_ids} component used as the active primitive pressure slot.
+\end{itemize}
+
+\subsubsection*{The \texttt{ConvectiveFlux\_Radiative\_transfer} Class}
+The radiative variant of the convective flux follows the general structure, but adapts the positivity treatment to the absence of an explicit pressure. In the currently visible code:
+\begin{itemize}
+    \item the positivity check on the radiative energy density \texttt{E\_gamma} is preserved;
+    \item the check related to \texttt{p} is removed or neutralised;
+    \item the Riemann solver is called on the active block of size 4;
+    \item shape consistency between primitives, conservatives, and fluxes is maintained through to the final return.
+\end{itemize}
+
+This separation is appropriate because it isolates the logic specific to the new physics without disrupting the classical Euler convective flux.
+
+\subsection{\texttt{hydro\_core.py}}
+The file \texttt{hydro\_core.py} contains the \texttt{hydro} class, which is the operational core of the temporal solver. It is the junction point between fluxes, forces, boundary conditions, and integration methods.
+
+\subsubsection*{General Role}
+The \texttt{hydro} class:
+\begin{itemize}
+    \item stores the global simulation configuration;
+    \item builds the logical JAX device mesh for parallelisation;
+    \item selects the temporal integration method;
+    \item manages halos and boundary conditions;
+    \item runs the evolution loop via different \texttt{evolve} methods.
+\end{itemize}
+
+\subsubsection*{Parallelisation}
+The file makes intensive use of the following JAX primitives:
+\begin{itemize}
+    \item \texttt{Mesh} and \texttt{NamedSharding} for array distribution;
+    \item \texttt{pjit} for compiling distributed loops;
+    \item \texttt{shard\_map} for certain local shard operations;
+    \item \texttt{ppermute} for halo exchanges between neighbouring devices.
+\end{itemize}
+
+A function \texttt{roll\_with\_halo} allows locally replacing a classical \texttt{jnp.roll} when the domain is split across multiple devices. It ensures a correct flux divergence even in distributed mode.
+
+\subsubsection*{Time-Step Computation}
+The \texttt{timestep} method queries all flux and force objects to retrieve their stability constraints. The retained time-step is the global minimum, then bounded by \texttt{max\_dt} in \texttt{hydrostep\_adapt}.
+
+\subsubsection*{Main Evolution Methods}
+The file provides several evolution interfaces:
+\begin{itemize}
+    \item \texttt{evolve}: base version with a fixed number of super-steps;
+    \item \texttt{evolve\_with\_callbacks}: instrumented version, capable of writing per-shard snapshots;
+    \item \texttt{evolve\_with\_dt\_schedule}: evolution with an imposed array of time-steps;
+    \item \texttt{evolve\_till\_time}: evolution up to a target time using a \texttt{while\_loop};
+    \item \texttt{evolve\_memory\_efficient}: memory-saving version via block checkpointing.
+\end{itemize}
+
+The \texttt{README.md} recommends \texttt{evolve\_memory\_efficient()} for many advanced uses, \texttt{evolve\_with\_callbacks()} for debugging and snapshots, and \texttt{evolve\_till\_time()} only when the number of steps must remain dynamic.
+
+\subsubsection*{Fluxes, Forcing, and RHS}
+The \texttt{flux} method sums the contributions from all registered flux objects. The \texttt{forcing} method applies source terms. The \texttt{rhs\_unsplit} method builds the unsplit right-hand side by iterating over spatial directions, imposing halos, and computing a conservative divergence.
+
+\subsubsection*{MHD and CT Support}
+The file also contains the \emph{Constrained Transport} logic in 2D and 3D for the magnetic case. The methods \texttt{mol\_solve\_step\_ct}, \texttt{\_apply\_ct\_on\_state}, and \texttt{\_apply\_ct\_on\_state\_3D} compute electromotive forces at corners, derive \(\nabla \times \mathbf{E}\), and update the magnetic components. This part shows that \texttt{hydro\_core.py} serves not only for pure hydrodynamics, but also for relatively advanced MHD variants.
+
+\subsubsection*{Relevance for the Radiative Variant}
+Even though \texttt{hydro\_core.py} has not been fully rewritten for radiative transfer, it provides all the reusable infrastructure: time loop, flux organisation, parallelisation, callbacks, snapshots, and the general evolution structure. This explains why modifications were concentrated in the \texttt{EquationManager} and fluxes rather than in the core solver.
+
+%-----------------------------------------------------------------------
+\section{Summary of Differences Between Standard Euler and the \texttt{no\_chat} Radiative Variant}
+\textit{État à la version v1.3 (avril 2026).}
+%-----------------------------------------------------------------------
+
+\begin{center}
+\begin{tabular}{|l|l|l|}
+\hline
+\textbf{Element} & \textbf{Standard Euler Version} & \textbf{Radiative \texttt{no\_chat} Variant} \\
+\hline
+Active variables & \texttt{rho, vx, vy, vz, p} & \texttt{E\_gamma, F\_gamma\_x, F\_gamma\_y, F\_gamma\_z} \\
+\hline
+Active count & 5 & 4 \\
+\hline
+Explicit pressure & Yes & No \\
+\hline
+Explicit total energy & Yes & No (in the current version) \\
+\hline
+Characteristic speed & Sound speed & Imposed speed of light \\
+\hline
+Dedicated solver & Standard Euler solvers & \texttt{LaxFriedrichs\_Radiative\_transfer} \\
+\hline
+Positivity & Density + pressure & Radiative energy density only \\
+\hline
+Flux closure & Euler equations & M1 analytique ($\chi$, $P_{ij}$) \\
+\hline
+Stellar injection & N/A & Scatter-add par position de grille \\
+\hline
+\texttt{params} format & Dict Python libre & \texttt{jnp.array} obligatoire (contrainte pytree) \\
+\hline
+Development status & Consistent and generic & Infrastructure fonctionnelle, fermeture physique partielle \\
+\hline
+\end{tabular}
+\end{center}
+
+%-----------------------------------------------------------------------
+\section{Points of Attention and Current Limitations}
+%-----------------------------------------------------------------------
+
+\textit{Mis à jour à la version v1.3.}
+
+Several points emerge from reading the repository:
+\begin{itemize}
+    \item \textbf{(v1.0)} le variant \texttt{equationmanager\_radiative\_transf\_no\_chat.py} contient encore de nombreuses sections commentées ; la fermeture physique complète (couplage gaz--rayonnement) n'est pas implémentée ;
+    \item \textbf{(v1.0)} certains solveurs de Riemann supposent l'existence d'une variable énergie/pression, ce qui limite leur réutilisation directe avec le variant à 4 variables ;
+    \item \textbf{(v1.0)} la positivité a dû être spécifiquement adaptée car la variable \texttt{p} n'existe plus ;
+    \item \textbf{(v1.0)} la cohérence des formes JAX est critique : un manager à 4 variables actives doit produire des flux et des états strictement compatibles avec 4 composantes ;
+    \item \textbf{(v1.3)} \texttt{lax.while\_loop} impose que la structure pytree de \texttt{params} soit constante : tous les champs doivent être des \texttt{jnp.array} dès l'initialisation (pas de tuples Python) ;
+    \item \textbf{(v1.2)} une erreur d'indexation subtile \texttt{sol[0][k]} vs \texttt{sol[0, :, :, k]} peut inverser l'axe de coupe dans les visualisations 3D ;
+    \item le bug connu dans \texttt{get\_conservatives\_from\_primitives} (\texttt{cons\_a = prim\_a}) n'a pas encore été corrigé dans la version actuelle.
+\end{itemize}
+
+On the other hand, the repository architecture is modular enough to allow this experimentation without modifying the bulk of the distributed temporal solver.
+
+%-----------------------------------------------------------------------
+\section{Practical Use of the Repository}
+%-----------------------------------------------------------------------
+
+Based on the configuration files and the \texttt{README.md}, the basic usage can be summarised as follows:
+\begin{itemize}
+    \item install the package in editable mode;
+    \item run tests with \texttt{pytest -q};
+    \item use a single GPU if needed via \texttt{CUDA\_VISIBLE\_DEVICES=0};
+    \item explore the example notebooks for turbulent, gravitational, MHD, and blast wave cases.
+\end{itemize}
+
+The project is therefore designed both as a research code and as an extensible base for new physics modules.
 
 \newpage
 \bibliographystyle{plain}
-%references sont dans le fichier rapport.bib
+% references are in the file rapport.bib
 \bibliography{bibliografia}
+
 \newpage
 \thispagestyle{empty}
 \pagestyle{headings}
-\section*{R\'esum\'e}
+
+\section*{Résumé}
 
 Ce document présente l'architecture du code DiffHydro et les modifications introduites pour développer une variante orientée transfert radiatif. Le dépôt est construit autour d'un solveur hydrodynamique différentiable en JAX, modulaire et compatible avec l'exécution distribuée. Les fichiers centraux \texttt{equationmanager.py}, \texttt{riemann\_solver.py}, \texttt{fluxes.py} et \texttt{hydro\_core.py} ont été analysés pour expliquer le rôle des variables, des flux numériques, des méthodes d'évolution et de la parallélisation. Une attention particulière est portée à \texttt{equationmanager\_radiative\_transf\_no\_chat.py}, qui remplace les variables hydrodynamiques standards par un état radiatif à quatre composantes, et à l'ajout d'un solveur \texttt{LaxFriedrichs\_Radiative\_transfer}. Le document met également en évidence les limites actuelles de cette variante, notamment l'absence de fermeture physique complète et la nécessité de maintenir une cohérence stricte des formes des tenseurs dans JAX.
 
 \section*{Abstract}
 
-This document provides a technical overview of the DiffHydro code base and of the modifications introduced for a radiative-transfer-oriented branch. The repository is organized around a differentiable JAX-based hydrodynamics solver, with modular support for reconstruction, Riemann solvers, forcing terms, parallel execution and advanced evolve methods. The main files \texttt{equationmanager.py}, \texttt{riemann\_solver.py}, \texttt{fluxes.py} and \texttt{hydro\_core.py} are described in detail. Special attention is given to \texttt{equationmanager\_radiative\_transf\_no\_chat.py}, where the standard Euler variables are replaced by a four-component radiative state, and to the dedicated \texttt{LaxFriedrichs\_Radiative\_transfer} solver. The current implementation is identified as a useful experimental infrastructure, but not yet as a complete physical radiative transfer model.
-
+This document provides a technical overview of the DiffHydro code base and of the modifications introduced for a radiative-transfer-oriented branch. The repository is organised around a differentiable JAX-based hydrodynamics solver, with modular support for reconstruction, Riemann solvers, forcing terms, parallel execution, and advanced evolve methods. The main files \texttt{equationmanager.py}, \texttt{riemann\_solver.py}, \texttt{fluxes.py}, and \texttt{hydro\_core.py} are described in detail. Special attention is given to \texttt{equationmanager\_radiative\_transf\_no\_chat.py}, where the standard Euler variables are replaced by a four-component radiative state, and to the dedicated \texttt{LaxFriedrichs\_Radiative\_transfer} solver. The current implementation is identified as a useful experimental infrastructure, but not yet as a complete physical radiative transfer model.
 
 \newpage
-\section{Annexes}
 
-\subsection{Arborescence simplifiée du dépôt}
+%-----------------------------------------------------------------------
+\section{Annexes}
+%-----------------------------------------------------------------------
+
+\subsection{Simplified Repository Tree}
 \begin{verbatim}
 DiffHydro_public/
 |-- README.md
@@ -399,7 +563,7 @@ DiffHydro_public/
 |-- animations/
 \end{verbatim}
 
-\subsection{Fichiers de test identifiés}
+\subsection{Identified Test Files}
 \begin{itemize}
     \item \texttt{test\_conduction.py}
     \item \texttt{test\_grav\_fft\_vs\_mg.py}
@@ -410,7 +574,7 @@ DiffHydro_public/
     \item \texttt{test\_unit\_handler\_frontend.py}
 \end{itemize}
 
-\subsection{Méthodes d'évolution disponibles dans \texttt{hydro\_core.py}}
+\subsection{Evolution Methods Available in \texttt{hydro\_core.py}}
 \begin{itemize}
     \item \texttt{evolve}
     \item \texttt{evolve\_with\_callbacks}
@@ -419,7 +583,14 @@ DiffHydro_public/
     \item \texttt{evolve\_memory\_efficient}
 \end{itemize}
 
-\subsection{Conclusion technique courte}
-À ce stade, la branche radiative documentée ici apparaît comme une infrastructure expérimentale fonctionnelle pour tester une nouvelle définition d'état et un nouveau solveur numérique, tout en réutilisant le cadre distribué et différentiable de DiffHydro. Les prochaines étapes logiques seraient la fermeture physique complète du modèle radiatif, la clarification des variables conservées, et l'ajout de tests dédiés à cette nouvelle branche.
+\subsection{Short Technical Conclusion}
+À la version v1.3, la branche radiative est une infrastructure expérimentale fonctionnelle :
+\begin{itemize}
+    \item la fermeture M1 analytique est implémentée dans \texttt{get\_fluxes\_xi} via \texttt{\_eddington\_factor} et \texttt{\_radiation\_pressure\_tensor} ;
+    \item l'injection stellaire par scatter-add est opérationnelle pour un nombre arbitraire d'étoiles placées sur la grille ;
+    \item la géométrie de disque rempli est utilisée dans le notebook de validation ;
+    \item la contrainte pytree de \texttt{lax.while\_loop} sur \texttt{params} est documentée et corrigée.
+\end{itemize}
+Les prochaines étapes logiques sont : le couplage gaz--rayonnement, la clarification des variables conservatives, et l'ajout de tests dédiés à la branche radiative.
 
 \end{document}

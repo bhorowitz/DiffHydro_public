@@ -65,7 +65,14 @@ class StellarRadiationForce:
     Implements: N_i^{n+1} = N_i^n + (f_esc/V) * sum_stars m_* [Pi_i(tau^{n+1}, Z) - Pi_i(tau^n, Z)]
     """
     
-    def __init__(self, escape_fraction=0.1, stellar_spectrum_func=None, dx=1.0):
+    def __init__(
+        self,
+        escape_fraction=0.1,
+        stellar_spectrum_func=None,
+        dx=1.0,
+        injection_mode="physical",
+        stromgren_rate=1e-7,
+    ):# changer petit a petit stronmgren 
         """
         Parameters
         ----------
@@ -80,17 +87,19 @@ class StellarRadiationForce:
         self.escape_fraction = escape_fraction
         self.stellar_spectrum_func = stellar_spectrum_func
         self.dx = dx
+        self.injection_mode = injection_mode
+        self.stromgren_rate = stromgren_rate
         
     def get_stellar_emission(self, star_age, star_metallicity):
         """
-        Compute Pi_i(age, Z) = cumulative photon emission from a stellar population.
+        Compute a simple ionizing photon emission rate as a function of age and metallicity.
         
         This is a placeholder; replace with actual Starburst99, FSPS, or similar.
         """
         if self.stellar_spectrum_func is not None:
             return self.stellar_spectrum_func(star_age, star_metallicity)
         
-        # Simple default: Assume emission scales with age and metallicity
+        # Simple default: emission rate decays with age and scales with metallicity.
         # In practice, use look-up tables or pre-computed SED models
         age_factor = jnp.exp(-star_age / 10.0)  # Decay with time
         Z_factor = jnp.maximum(star_metallicity, 1e-4)  # Metallicity effect
@@ -101,6 +110,7 @@ class StellarRadiationForce:
         Conservative estimate: radiative sources don't impose CFL constraints
         unless coupled to gas energy. For now, use large dt.
         """
+        print("timestepblast")
         return 1e30  # No strict timestep constraint in the time step of hydro_core
 
 
@@ -133,34 +143,62 @@ class StellarRadiationForce:
         params : dict
             Unchanged
         """
-        
         # Early exit if no stellar data
-        if 'star_masses' not in params or params['star_masses'] is None:
+        if "star_masses" not in params or params["star_masses"] is None:
             return sol, params
-        
-        star_masses = jnp.asarray(params['star_masses'])
-        star_ages_old = jnp.asarray(params['star_ages'])
+
+        star_masses = jnp.asarray(params["star_masses"])
+        star_ages_old = jnp.asarray(params["star_ages"])
         star_ages_new = star_ages_old + dt
-        star_metallicities = jnp.asarray(params['star_metallicities'])
+        star_metallicities = jnp.asarray(params["star_metallicities"])
+
+        if self.injection_mode == "stromgren":
+            # Uniform per-star source rate (placeholder model), then aggregate by cell.
+            per_star_source = self.get_N_gamma_stromgen_sphere(
+                star_masses,
+                star_ages_old,
+                star_ages_new,
+                star_metallicities,
+                sol,
+            ) * dt
+        else:
+            # Source is computed per-star, then summed only in cells that contain stars.
+            per_star_source = self.get_N_gamma(
+                star_masses,
+                star_ages_old,
+                star_ages_new,
+                star_metallicities,
+                sol,
+            ) * dt
+
+        # Add to E_gamma (first component, index 0) by scatter-add on star cells.
+        # If multiple stars share a cell, their contributions are summed in that cell.
+        if "star_positions" in params and params["star_positions"] is not None:
+            star_positions = jnp.asarray(params["star_positions"], dtype=jnp.int32)
+            if jnp.ndim(per_star_source) == 0:
+                per_star_source = jnp.full((star_positions.shape[0],), per_star_source)
+
+            ix = star_positions[:, 0]
+            iy = star_positions[:, 1]
+            iz = star_positions[:, 2]
+            sol = sol.at[0, ix, iy, iz].add(per_star_source)
+        else:
+            # Fallback: poser tout à (50, 50, 50) si pas de positions
+            sol = sol.at[0, 50, 50, 50].add(jnp.sum(per_star_source))
         
-        # Compute emission at t^n and t^{n+1}
+        params_out = dict(params)
+        params_out["star_ages"] = star_ages_new
+        return sol, params_out
+    
+    def get_N_gamma(self, star_masses, star_ages_old, star_ages_new, star_metallicities, sol):
+        """Compute per-star photon source from Delta Pi (dt handled in force)."""
         emission_old = self.get_stellar_emission(star_ages_old, star_metallicities)
         emission_new = self.get_stellar_emission(star_ages_new, star_metallicities)
-        
-        # Delta emission (photons emitted during this step)
-        delta_emission = emission_new - emission_old  # Array of shape (n_stars,)
-        
-        # Cell volume (adapt for 2D/3D)
+        delta_emission = emission_new - emission_old
         cell_volume = self.dx ** (sol.ndim - 1)
-        
-        # Source strength per cell
-        # sum_stars m_* * delta_emission * f_esc / V
-        total_source = jnp.sum(star_masses * delta_emission) * self.escape_fraction / cell_volume
-        
-        # Add to E_gamma (first component, index 0)
-        # In practice, you might want to distribute this spatially based on star_positions
-        sol = sol.at[0].add(total_source )
-
-        params_out = dict(params)
-        params_out['star_ages'] = star_ages_new
-        return sol, params_out
+        return (star_masses * delta_emission) * self.escape_fraction / cell_volume
+    
+    def get_N_gamma_stromgen_sphere(self, star_masses, star_ages_old, star_ages_new, star_metallicities, sol):
+        """Simple Stromgren-like photon rate placeholder."""
+        del star_ages_old, star_ages_new, star_metallicities, star_masses
+        return self.stromgren_rate
