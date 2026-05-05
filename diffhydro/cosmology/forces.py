@@ -98,6 +98,7 @@ class JaxPMCoupledGravityForce:
         eps: float = 1.0e-20,
         cfl_ff: float = 0.5,
         timestep_percentile: float = 100.0,
+        stop_gradient_source: bool = False,
     ):
         self.eq = equation_manager
         self.mesh_shape = tuple(mesh_shape if mesh_shape is not None else equation_manager.mesh_shape)
@@ -110,6 +111,7 @@ class JaxPMCoupledGravityForce:
         self.eps = float(eps)
         self.cfl_ff = float(cfl_ff)
         self.timestep_percentile = float(timestep_percentile)
+        self.stop_gradient_source = bool(stop_gradient_source)
         nx, ny, nz = self.mesh_shape
 
         self.i_rho = self.eq.mass_ids
@@ -183,7 +185,10 @@ class JaxPMCoupledGravityForce:
 
         mean_total = jnp.mean(total_rho)
         source = total_rho - jnp.where(self.subtract_mean, mean_total, 0.0)
-        return source / (jnp.maximum(mean_total, self.eps))
+        delta = source / (jnp.maximum(mean_total, self.eps))
+        if self.stop_gradient_source:
+            delta = jax.lax.stop_gradient(delta)
+        return delta
 
     def _apply_gas_kick(self, U, rho_gas, accel_field, dt, kick_factor):
         ax = kick_factor * accel_field[..., 0]

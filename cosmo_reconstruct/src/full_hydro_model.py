@@ -66,6 +66,10 @@ class FullHydroConfig:
     force_eps: float = 1.0e-8
     checkpoint: bool = True
     checkpoint_every: int = 1
+    gravity_stop_gradient_source: bool = False
+    projection_stop_gradient_correction: bool = False
+    cooling_update_stop_gradient: bool = False
+    hydro_flux_stop_gradient: bool = False
     dual_energy: bool = True
     track_metallicity: bool = False
     metal_init: float = 0.0
@@ -242,6 +246,7 @@ def _build_hydrosim(
     hydro_repair_rho_floor: float = 1.0e-7,
     hydro_repair_pressure_floor: float = 1.0e-8,
     hydro_repair_max_kinetic_to_thermal_ratio: float = 1.0e6,
+    hydro_flux_stop_gradient: bool = False,
 ):
     ss = dh.signal_speed_Einfeldt
     sname = solver_name.lower()
@@ -285,6 +290,7 @@ def _build_hydrosim(
     sim.hydro_repair_rho_floor = float(hydro_repair_rho_floor)
     sim.hydro_repair_pressure_floor = float(hydro_repair_pressure_floor)
     sim.hydro_repair_max_kinetic_to_thermal_ratio = float(hydro_repair_max_kinetic_to_thermal_ratio)
+    sim.stop_hydro_flux_grad = bool(hydro_flux_stop_gradient)
     for flux in sim.fluxes:
         if hasattr(flux, "dx_o"):
             flux.dx_o = float(dx_o)
@@ -311,6 +317,7 @@ class CosmologicalHydrogenCoolingForce:
         subcycles: int = 8,
         dtmax_s: float = 1.0e16,
         stop_rate_grad: bool = False,
+        stop_update_grad: bool = False,
         eps: float = 1.0e-30,
     ):
         self.eq = equation_manager
@@ -328,6 +335,7 @@ class CosmologicalHydrogenCoolingForce:
         self.subcycles = int(max(1, subcycles))
         self.dtmax_s = float(dtmax_s)
         self.stop_rate_grad = bool(stop_rate_grad)
+        self.stop_update_grad = bool(stop_update_grad)
         self.eps = float(eps)
         self.gamma = float(getattr(self.eq, "gamma", 5.0 / 3.0))
         self.i_rho = self.eq.mass_ids
@@ -418,6 +426,8 @@ class CosmologicalHydrogenCoolingForce:
             rhoe_code_new = jnp.maximum(p_code_new / (self.gamma - 1.0), self.eq.eps)
             W_new = W_new.at[int(self.i_dual)].set(rhoe_code_new)
         U_new = self.eq.get_conservatives_from_primitives(W_new)
+        if self.stop_update_grad:
+            U_new = U + jax.lax.stop_gradient(U_new - U)
         return U_new, params
 
 
@@ -439,6 +449,7 @@ class NyxTabulatedCoolingForce:
         subcycles: int = 8,
         dtmax_s: float = 1.0e16,
         stop_rate_grad: bool = False,
+        stop_update_grad: bool = False,
         eps: float = 1.0e-40,
     ):
         self.eq = equation_manager
@@ -454,6 +465,7 @@ class NyxTabulatedCoolingForce:
         self.subcycles = int(max(1, subcycles))
         self.dtmax_s = float(dtmax_s)
         self.stop_rate_grad = bool(stop_rate_grad)
+        self.stop_update_grad = bool(stop_update_grad)
         self.eps = float(eps)
         self.gamma = float(getattr(self.eq, "gamma", 5.0 / 3.0))
         self.i_rho = self.eq.mass_ids
@@ -536,6 +548,8 @@ class NyxTabulatedCoolingForce:
         U_new = self.eq.get_conservatives_from_primitives(W_new)
         valid_mask = _raw_hydro_cell_valid_mask(U, self.i_rho)
         U_new = jnp.where(valid_mask[jnp.newaxis, ...], U_new, U)
+        if self.stop_update_grad:
+            U_new = U + jax.lax.stop_gradient(U_new - U)
         return U_new, params
 
 
@@ -559,6 +573,7 @@ class GrackleTabulatedCoolingForce:
         subcycles: int = 8,
         dtmax_s: float = 1.0e16,
         stop_rate_grad: bool = False,
+        stop_update_grad: bool = False,
         eps: float = 1.0e-40,
     ):
         self.eq = equation_manager
@@ -576,6 +591,7 @@ class GrackleTabulatedCoolingForce:
         self.subcycles = int(max(1, subcycles))
         self.dtmax_s = float(dtmax_s)
         self.stop_rate_grad = bool(stop_rate_grad)
+        self.stop_update_grad = bool(stop_update_grad)
         self.eps = float(eps)
         self.gamma = float(getattr(self.eq, "gamma", 5.0 / 3.0))
         self.i_rho = self.eq.mass_ids
@@ -698,6 +714,8 @@ class GrackleTabulatedCoolingForce:
         U_new = self.eq.get_conservatives_from_primitives(W_new)
    #     valid_mask = _raw_hydro_cell_valid_mask(U, self.i_rho)
    #     U_new = jnp.where(valid_mask[jnp.newaxis, ...], U_new, U)
+        if self.stop_update_grad:
+            U_new = U + jax.lax.stop_gradient(U_new - U)
         return U_new, params
 
 
@@ -738,6 +756,7 @@ def _build_cooling_force(eq, bg: LCDMBackground, cfg: FullHydroConfig):
             subcycles=int(cfg.cooling_subcycles),
             dtmax_s=float(cfg.cooling_dtmax_s),
             stop_rate_grad=bool(cfg.cooling_stop_gradient),
+            stop_update_grad=bool(cfg.cooling_update_stop_gradient),
         )
 
     if cooling_model == "nyx_table":
@@ -786,6 +805,7 @@ def _build_cooling_force(eq, bg: LCDMBackground, cfg: FullHydroConfig):
             subcycles=int(cfg.cooling_subcycles),
             dtmax_s=float(cfg.cooling_dtmax_s),
             stop_rate_grad=bool(cfg.cooling_stop_gradient),
+            stop_update_grad=bool(cfg.cooling_update_stop_gradient),
         )
 
     if cooling_model == "grackle_eq":
@@ -848,6 +868,7 @@ def _build_cooling_force(eq, bg: LCDMBackground, cfg: FullHydroConfig):
             subcycles=int(cfg.cooling_subcycles),
             dtmax_s=float(cfg.cooling_dtmax_s),
             stop_rate_grad=bool(cfg.cooling_stop_gradient),
+            stop_update_grad=bool(cfg.cooling_update_stop_gradient),
         )
 
     raise ValueError(f"Unsupported cooling model: {cfg.cooling_model}")
@@ -901,6 +922,7 @@ def build_full_hydro_system(cfg: FullHydroConfig, cosmo_lpt: jc.Cosmology) -> Fu
         dm_kick_factor=1.0,
         gas_kick_factor=(None if cfg.gas_kick_factor is None else float(cfg.gas_kick_factor)),
         eps=float(cfg.force_eps),
+        stop_gradient_source=bool(cfg.gravity_stop_gradient_source),
     )
 
     force_stack = [bg_force, grav_force]
@@ -967,6 +989,7 @@ def build_full_hydro_system(cfg: FullHydroConfig, cosmo_lpt: jc.Cosmology) -> Fu
         hydro_repair_rho_floor=cfg.hydro_repair_rho_floor,
         hydro_repair_pressure_floor=cfg.hydro_repair_pressure_floor,
         hydro_repair_max_kinetic_to_thermal_ratio=cfg.hydro_repair_max_kinetic_to_thermal_ratio,
+        hydro_flux_stop_gradient=cfg.hydro_flux_stop_gradient,
     )
     return FullHydroSystem(
         cosmo_lpt=cosmo_lpt,
@@ -1119,8 +1142,22 @@ def _run_hydro_scan(
         carry_out, dt_block = jax.lax.scan(block_inner_step, carry_in, xs=None, length=block)
         return carry_out, dt_block
 
-    if cfg.checkpoint:
-        block_step = jax.checkpoint(block_step)
+    # Ensure carry structure remains constant across JAX scan iterations
+    # by pre-initializing keys that are added dynamically in the loop.
+    for k in [
+        "_raw_nonfinite_flag",
+        "_raw_nonfinite_U_count",
+        "_raw_nonpositive_rho_count",
+        "_raw_nonfinite_dm_x_count",
+        "_raw_nonfinite_dm_p_count",
+        "_raw_nonfinite_star_mass_count",
+        "_hydro_repair_count",
+    ]:
+        if k not in params0:
+            if k == "_raw_nonfinite_flag":
+                params0[k] = jnp.asarray(False, dtype=jnp.bool_)
+            else:
+                params0[k] = jnp.asarray(0, dtype=jnp.int32)
 
     carry_with_idx = ((U0, params0), jnp.asarray(0, dtype=jnp.int32))
     dt_parts = []
@@ -1254,7 +1291,11 @@ def advance_full_hydro_step(
             U_new,
         )
     else:
-        U_new = _project_hydro_state_with_floors(U_new, params_new, system, cfg)
+        U_projected = _project_hydro_state_with_floors(U_new, params_new, system, cfg)
+        if bool(cfg.projection_stop_gradient_correction):
+            U_new = U_new + jax.lax.stop_gradient(U_projected - U_new)
+        else:
+            U_new = U_projected
     return (U_new, params_new), dtau
 
 

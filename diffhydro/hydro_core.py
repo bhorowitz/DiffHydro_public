@@ -553,10 +553,16 @@ class hydro:
             jax.debug.print("use ct")
             fields = self.mol_solve_step_ct(fields, dt, params)  # <<< unsplit (MOL + CT-on-state)
         elif self.use_mol:
+            fields_before_flux = fields
             fields = self.mol_solve_step(fields, dt, params)  # <<< unsplit (MOL + CT-on-state)
+            if bool(getattr(self, "stop_hydro_flux_grad", False)):
+                fields = fields_before_flux + jax.lax.stop_gradient(fields - fields_before_flux)
 
         else:
+            fields_before_flux = fields
             fields = self.sweep_stack(state, dt, i)
+            if bool(getattr(self, "stop_hydro_flux_grad", False)):
+                fields = fields_before_flux + jax.lax.stop_gradient(fields - fields_before_flux)
 
         # Guard against huge momentum living in near-vacuum cells before reverse source terms.
         fields = self.apply_vacuum_momentum_cap(fields)

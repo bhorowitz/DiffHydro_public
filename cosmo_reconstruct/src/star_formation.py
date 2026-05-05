@@ -151,19 +151,62 @@ def convolve_scalar_periodic(
 def compute_momentum_feedback_fields(
     source_field: jnp.ndarray,
     *,
-    momentum_scale: float,
+    momentum_scale: float | jnp.ndarray,
 ) -> tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]:
     src = jnp.asarray(source_field, dtype=jnp.float32)
-    coeff = jnp.asarray(float(momentum_scale), dtype=jnp.float32)
+    coeff = jnp.asarray(momentum_scale, dtype=jnp.float32)
     dmx = coeff * (jnp.roll(src, -1, axis=0) - jnp.roll(src, 1, axis=0))
     dmy = coeff * (jnp.roll(src, -1, axis=1) - jnp.roll(src, 1, axis=1))
     dmz = coeff * (jnp.roll(src, -1, axis=2) - jnp.roll(src, 1, axis=2))
     return dmx, dmy, dmz
 
 
-def smooth_sigmoid(x: jnp.ndarray, center: float, width: float) -> jnp.ndarray:
+@jax.custom_vjp
+def positive_source_product(scale: jnp.ndarray, source: jnp.ndarray) -> jnp.ndarray:
+    source_pos = jnp.maximum(jnp.asarray(source, dtype=jnp.float32), 0.0)
+    return jnp.asarray(scale, dtype=jnp.float32) * source_pos
+
+
+def _positive_source_product_fwd(scale: jnp.ndarray, source: jnp.ndarray):
+    scale_arr = jnp.asarray(scale, dtype=jnp.float32)
+    source_pos = jnp.maximum(jnp.asarray(source, dtype=jnp.float32), 0.0)
+    return scale_arr * source_pos, (scale_arr, source_pos)
+
+
+def _positive_source_product_bwd(res, g):
+    scale_arr, source_pos = res
+    active = source_pos > 0.0
+    g_finite = jnp.nan_to_num(jnp.asarray(g, dtype=jnp.float32), nan=0.0, posinf=0.0, neginf=0.0)
+    g_active = jnp.where(active, g_finite, 0.0)
+    dscale = jnp.sum(g_active * source_pos)
+    dsource = g_active * scale_arr
+    return dscale, dsource
+
+
+positive_source_product.defvjp(_positive_source_product_fwd, _positive_source_product_bwd)
+
+
+@jax.custom_vjp
+def finite_cotangent_sigmoid(x: jnp.ndarray) -> jnp.ndarray:
+    return jax.nn.sigmoid(jnp.asarray(x, dtype=jnp.float32))
+
+
+def _finite_cotangent_sigmoid_fwd(x: jnp.ndarray):
+    y = jax.nn.sigmoid(jnp.asarray(x, dtype=jnp.float32))
+    return y, y
+
+
+def _finite_cotangent_sigmoid_bwd(y, g):
+    g_finite = jnp.nan_to_num(jnp.asarray(g, dtype=jnp.float32), nan=0.0, posinf=0.0, neginf=0.0)
+    return (g_finite * y * (1.0 - y),)
+
+
+finite_cotangent_sigmoid.defvjp(_finite_cotangent_sigmoid_fwd, _finite_cotangent_sigmoid_bwd)
+
+
+def smooth_sigmoid(x: jnp.ndarray, center: float | jnp.ndarray, width: float | jnp.ndarray) -> jnp.ndarray:
     width_safe = max(float(width), 1.0e-10)
-    return jax.nn.sigmoid((x - float(center)) / width_safe)
+    return finite_cotangent_sigmoid((x - jnp.asarray(center, dtype=jnp.float32)) / width_safe)
 
 
 def gumbel_relaxed_bernoulli(
@@ -252,7 +295,7 @@ def evaluate_star_formation_diagnostics(
     mH_cgs: float,
     temperature_threshold_k: float,
     temperature_width_k: float,
-    sf_pi0: float,
+    sf_pi0: float | jnp.ndarray,
     sf_tau: float,
     sf_mass_scale: float,
     sf_max_fraction_per_step: float,
@@ -286,8 +329,8 @@ def evaluate_star_formation_diagnostics(
         raise ValueError(f"Unsupported density_threshold_mode: {density_threshold_mode}")
 
     s_rho = smooth_sigmoid(density_field, density_threshold, density_width)
-    s_temp = smooth_sigmoid(jnp.asarray(float(temperature_threshold_k), dtype=jnp.float32) - temp_k, 0.0, temperature_width_k)
-    pi0 = jnp.clip(float(sf_pi0) * s_rho * s_temp, 0.0, 1.0)
+    s_temp = smooth_sigmoid(jnp.asarray(temperature_threshold_k, dtype=jnp.float32) - temp_k, 0.0, temperature_width_k)
+    pi0 = jnp.clip(jnp.asarray(sf_pi0, dtype=jnp.float32) * s_rho * s_temp, 0.0, 1.0)
 
     mode_norm = str(mode).lower()
     if mode_norm == "gumbel":
@@ -423,6 +466,31 @@ class StellarFeedbackTracerForce:
         if dm_params is None or "x" not in dm_params:
             return U_gas, params
 
+        hyper = params.get("feedback_hyper", {})
+        density_threshold = hyper.get("sf_density_threshold", self.density_threshold)
+        temperature_threshold_k = hyper.get("sf_temperature_threshold_k", self.temperature_threshold_k)
+        snf_energy = jnp.maximum(
+            jnp.asarray(hyper.get("snf_energy", self.snf_energy), dtype=jnp.float32),
+            0.0,
+        )
+        stellar_wind_energy = jnp.maximum(
+            jnp.asarray(hyper.get("stellar_wind_energy", self.stellar_wind_energy), dtype=jnp.float32),
+            0.0,
+        )
+        feedback_momentum_scale = jnp.asarray(
+            hyper.get("feedback_momentum_scale", self.feedback_momentum_scale),
+            dtype=jnp.float32,
+        )
+        metal_yield = jnp.maximum(
+            jnp.asarray(hyper.get("metal_yield", self.metal_yield), dtype=jnp.float32),
+            0.0,
+        )
+        sf_pi0 = jnp.clip(
+            jnp.asarray(hyper.get("sf_pi0", self.sf_pi0), dtype=jnp.float32),
+            0.0,
+            1.0,
+        )
+
         i_step_arr = jnp.asarray(i_step, dtype=jnp.int32)
         rng_key = params.get("rng_sf", jr.PRNGKey(self.seed))
         dm_out = dict(dm_params)
@@ -435,14 +503,14 @@ class StellarFeedbackTracerForce:
             eq=self.eq,
             code_to_kelvin_temp=self.code_to_kelvin_temp,
             density_threshold_mode=self.density_threshold_mode,
-            density_threshold=self.density_threshold,
+            density_threshold=density_threshold,
             density_width=self.density_width,
             rho_unit_cgs=self.rho_unit_cgs,
             h_species=self.h_species,
             mH_cgs=self.mH_cgs,
-            temperature_threshold_k=self.temperature_threshold_k,
+            temperature_threshold_k=temperature_threshold_k,
             temperature_width_k=self.temperature_width_k,
-            sf_pi0=self.sf_pi0,
+            sf_pi0=sf_pi0,
             sf_tau=self.sf_tau,
             sf_mass_scale=self.sf_mass_scale,
             sf_max_fraction_per_step=self.sf_max_fraction_per_step,
@@ -528,11 +596,9 @@ class StellarFeedbackTracerForce:
             wind_source_grid = stellar_density_grid
             momentum_source_grid = gated_delta_star_grid
         dtau_arr = jnp.asarray(dtau, dtype=jnp.float32)
-        feedback_snf_energy = jnp.asarray(self.snf_energy, dtype=jnp.float32) * jnp.maximum(feedback_source_grid, 0.0)
+        feedback_snf_energy = positive_source_product(snf_energy, feedback_source_grid)
         feedback_stellar_wind_energy = (
-            jnp.asarray(self.stellar_wind_energy, dtype=jnp.float32)
-            * jnp.maximum(wind_source_grid, 0.0)
-            * dtau_arr
+            positive_source_product(stellar_wind_energy, wind_source_grid) * dtau_arr
         )
         feedback_clip_scale = jnp.ones_like(feedback_snf_energy)
         if self.feedback_energy_clip_fraction is not None:
@@ -554,10 +620,10 @@ class StellarFeedbackTracerForce:
         feedback_momentum_y = jnp.zeros_like(thermal_deposition_grid)
         feedback_momentum_z = jnp.zeros_like(thermal_deposition_grid)
         feedback_kinetic_energy = jnp.zeros_like(thermal_deposition_grid)
-        if self.enable_momentum_feedback and abs(self.feedback_momentum_scale) > 0.0:
+        if self.enable_momentum_feedback:
             feedback_momentum_x, feedback_momentum_y, feedback_momentum_z = compute_momentum_feedback_fields(
                 momentum_source_grid,
-                momentum_scale=self.feedback_momentum_scale,
+                momentum_scale=feedback_momentum_scale,
             )
             rho_cons = jnp.maximum(U_new[int(self.eq.mass_ids)], getattr(self.eq, "eps", 1.0e-20))
             mom_old = jnp.stack(
@@ -583,7 +649,7 @@ class StellarFeedbackTracerForce:
             U_new = U_new.at[int(i_dual)].add(thermal_deposition_grid)
         if self.enable_metal_source and bool(getattr(self.eq, "has_metallicity", lambda: False)()):
             metal_id = int(self.eq.metal_density_ids)
-            U_new = U_new.at[metal_id].add(jnp.maximum(self.metal_yield, 0.0) * metal_deposition_grid)
+            U_new = U_new.at[metal_id].add(metal_yield * metal_deposition_grid)
             U_new = U_new.at[metal_id].set(jnp.maximum(U_new[metal_id], 0.0))
 
         params_out = dict(params)
