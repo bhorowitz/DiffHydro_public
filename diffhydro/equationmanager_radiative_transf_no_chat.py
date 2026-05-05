@@ -29,11 +29,11 @@ class EquationManager:
     eps: float = 1e-20
     isothermal: bool = False
     light_speed: float = 1#3e8 #en m.s-1
-    fraction_escape: float = 0.1
-    volume_cell: float = 0.1
-    star_mass: float = 1.0
-    star_age: float = 1.0
-    star_metallicity: float = 1.0
+    # fraction_escape: float = 0.1
+    # volume_cell: float = 0.1
+    # star_mass: float = 1.0
+    # star_age: float = 1.0
+    # star_metallicity: float = 1.0
     mesh_shape: tuple[int, int, int] = (100, 100, 100)
     # Active variable names/order (single source of truth)
     active_names: tuple[str, ...] = ("E_gamma", "F_gamma_x", "F_gamma_y", "F_gamma_z")#,"p" 

@@ -72,6 +72,7 @@ class StellarRadiationForce:
         dx=1.0,
         injection_mode="physical",
         stromgren_rate=1e-7,
+        gaussian_star = True
     ):# changer petit a petit stronmgren 
         """
         Parameters
@@ -89,6 +90,7 @@ class StellarRadiationForce:
         self.dx = dx
         self.injection_mode = injection_mode
         self.stromgren_rate = stromgren_rate
+        self.gaussian_star = gaussian_star
         
     def get_stellar_emission(self, star_age, star_metallicity):
         """
@@ -171,21 +173,38 @@ class StellarRadiationForce:
                 sol,
             ) * dt
 
-        # Add to E_gamma (first component, index 0) by scatter-add on star cells.
-        # If multiple stars share a cell, their contributions are summed in that cell.
-        if "star_positions" in params and params["star_positions"] is not None:
-            star_positions = jnp.asarray(params["star_positions"], dtype=jnp.int32)
-            if jnp.ndim(per_star_source) == 0:
-                per_star_source = jnp.full((star_positions.shape[0],), per_star_source)
-
-            ix = star_positions[:, 0]
-            iy = star_positions[:, 1]
-            iz = star_positions[:, 2]
+        # Après le calcul de per_star_source...
+        
+        if "star_positions" not in params or params["star_positions"] is None:
+            sol = sol.at[0, 50, 50, 50].add(jnp.sum(per_star_source))
+            params_out = dict(params)
+            params_out["star_ages"] = star_ages_new
+            return sol, params_out
+        
+        star_positions = jnp.asarray(params["star_positions"], dtype=jnp.int32)
+        if jnp.ndim(per_star_source) == 0:
+            per_star_source = jnp.full((star_positions.shape[0],), per_star_source)
+        
+        ix = star_positions[:, 0]
+        iy = star_positions[:, 1]
+        iz = star_positions[:, 2]
+        
+        if not self.gaussian_star:
             sol = sol.at[0, ix, iy, iz].add(per_star_source)
         else:
-            # Fallback: poser tout à (50, 50, 50) si pas de positions
-            sol = sol.at[0, 50, 50, 50].add(jnp.sum(per_star_source))
+            sigma = 5.0
+            offsets = jnp.arange(-5, 6)
+            di, dj, dk = jnp.meshgrid(offsets, offsets, offsets, indexing='ij')
+            weights = jnp.exp(-(di**2 + dj**2 + dk**2) / (2 * sigma**2))
+            weights = weights / weights.sum()
         
+            def inject_star(sol, args):
+                xi, yi, zi, src = args
+                return sol.at[0, xi + di, yi + dj, zi + dk].add(src * weights)
+        
+            for s in range(star_positions.shape[0]):
+                sol = inject_star(sol, (ix[s], iy[s], iz[s], per_star_source[s]))
+
         params_out = dict(params)
         params_out["star_ages"] = star_ages_new
         return sol, params_out
