@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="fr">
+<html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>DiffHydro — Architecture d'exécution</title>
+<title>DiffHydro — Execution Architecture</title>
 <style>
   :root {
     --bg: #0f1117;
@@ -270,8 +270,8 @@
 </head>
 <body>
 
-<h1>⚡ DiffHydro — Architecture d'exécution (Blast)</h1>
-<p class="subtitle">Carte mentale des classes, fonctions et flux de données</p>
+<h1>⚡ DiffHydro — Execution Architecture (Blast)</h1>
+<p class="subtitle">Mind map of classes, functions, and data flows</p>
 
 <!-- LÉGENDE -->
 <div class="legend">
@@ -280,7 +280,7 @@
   <div class="legend-item"><div class="legend-dot" style="background:var(--c-eq)"></div>C — Equation Manager</div>
   <div class="legend-item"><div class="legend-dot" style="background:var(--c-riemann)"></div>D — Riemann Solver</div>
   <div class="legend-item"><div class="legend-dot" style="background:var(--c-recon)"></div>E — Reconstruction</div>
-  <div class="legend-item"><div class="legend-dot" style="background:var(--c-rt)"></div>F — Branche RT</div>
+  <div class="legend-item"><div class="legend-dot" style="background:var(--c-rt)"></div>F — RT Branch</div>
   <div class="legend-item"><div class="legend-dot" style="background:var(--c-cond)"></div>G — Conductive Flux</div>
 </div>
 
@@ -288,7 +288,7 @@
 <div class="main-grid">
 
   <!-- ══════════════════════════════════════════════════════════
-       COLONNE GAUCHE — Equation Manager + Reconstruction
+       LEFT COLUMN — Equation Manager + Reconstruction
   ═══════════════════════════════════════════════════════════ -->
   <div class="col col-left">
 
@@ -297,9 +297,9 @@
       <div class="section-header">⚙️ C — Equation Manager</div>
       <div class="section-body">
 
-        <div class="node" data-tip="Appelé par tout le pipeline">
+        <div class="node" data-tip="Called throughout the pipeline">
           <div class="node-name" style="color:var(--c-eq)">get_primitives_from_conservatives</div>
-          <div class="node-role">Convertit U → W (conservatives → primitives)</div>
+          <div class="node-role">Converts U → W (conservatives → primitives)</div>
           <div class="node-io">
             <span class="io-in">↳ IN: conservatives (n_cons, ...)</span><br>
             <span class="io-out">↳ OUT: primitives (n_cons, ...)</span>
@@ -308,7 +308,7 @@
 
         <div class="node">
           <div class="node-name" style="color:var(--c-eq)">get_conservatives_from_primitives</div>
-          <div class="node-role">Convertit W → U (primitives → conservatives)</div>
+          <div class="node-role">Converts W → U (primitives → conservatives)</div>
           <div class="node-io">
             <span class="io-in">↳ IN: primitives</span><br>
             <span class="io-out">↳ OUT: conservatives</span>
@@ -317,9 +317,9 @@
 
         <div class="node">
           <div class="node-name" style="color:var(--c-eq)">get_fluxes_xi</div>
-          <div class="node-role">Flux physique F(U) sur un axe<br>
+          <div class="node-role">Physical flux F(U) along an axis<br>
             <code>[ρu, ρu²+p, ρuv, ρuw, u(E+p)]</code><br>
-            + passifs : cons_p × u_axis</div>
+            + passives: cons_p × u_axis</div>
           <div class="node-io">
             <span class="io-in">↳ IN: primitives, conservatives, axis</span><br>
             <span class="io-out">↳ OUT: flux_physique</span>
@@ -327,21 +327,20 @@
         </div>
 
         <div class="node">
-          <div class="node-name" style="color:var(--c-eq)">get_signal_speed / get_speed_of_sound</div>
-          <div class="node-role">Célérité acoustique c_s = √(γp/ρ)<br>
-            Utilisée pour le CFL et les solveurs</div>
+          <div class="node-name" style="color:var(--c-eq)">get_signal_speed / get_speed_of_sound / get_wavespeeds_xi</div>
+          <div class="node-role">Acoustic speed c_s = √(γp/ρ)<br>
+            Used for CFL and solvers</div>
           <div class="node-io">
             <span class="io-in">↳ IN: p, rho</span><br>
             <span class="io-out">↳ OUT: c_s</span>
           </div>
         </div>
 
-        <!-- Layout mémoire -->
+        <!-- Memory layout -->
         <div class="eq-data">
-          <div class="eq-title">📦 Layout mémoire (n_cons)</div>
-          <div><span style="color:var(--c-eq)">slots 0..4</span> — actifs [ρ, vx, vy, vz, p/E]</div>
-          <div><span style="color:var(--c-conv)">slots 5..n-n_t</span> — scalaires passifs s_k</div>
-          <div><span style="color:var(--c-rt)">slots n-n_t..n</span> — traceurs ψ_k (identité)</div>
+          <div class="eq-title">📦 Memory layout (n_cons)</div>
+          <div><span style="color:var(--c-eq)">slots 0..4</span> — active [ρ, vx, vy, vz, p/E]</div>
+          <div><span style="color:var(--c-conv)">slots 5..n_cons</span> — passive scalars s_k (ρ·s_k stored)</div>
         </div>
 
       </div>
@@ -349,23 +348,25 @@
 
     <!-- RECONSTRUCTION -->
     <div class="section recon">
-      <div class="section-header">🔬 E — Reconstruction (PLM / MUSCL / WENO)</div>
+      <div class="section-header">🔬 E — Reconstruction (PLM / MUSCL / WENO / TENO / PPM)</div>
       <div class="section-body">
         <div class="node">
           <div class="node-name" style="color:var(--c-recon)">PLM.reconstruct_xi</div>
-          <div class="node-role">Extrapole états gauche/droite aux interfaces<br>
-            j=0 → face gauche (L), j=1 → face droite (R)<br>
-            Applique un limiteur (VanLeer, MC, ...)</div>
+          <div class="node-role">Extrapolates left/right states at interfaces<br>
+            j=0 → left face (L), j=1 → right face (R)<br>
+            Applies a limiter (VanLeer, MC, ...)</div>
           <div class="node-io">
             <span class="io-in">↳ IN: buffer (n_cons,...), axis, j</span><br>
-            <span class="io-out">↳ OUT: état à l'interface</span>
+            <span class="io-out">↳ OUT: state at interface</span>
           </div>
         </div>
         <div class="eq-data">
-          <div class="eq-title">Ordre et limiteurs disponibles</div>
-          WENO1 (ordre 1, positivity fallback)<br>
-          PLM (ordre 2, limiteur configurable)<br>
-          MUSCL3 (ordre 3)
+          <div class="eq-title">Available orders and limiters</div>
+          WENO1 (order 1, positivity fallback)<br>
+          PLM (order 2, configurable limiter)<br>
+          MUSCL3 (order 3)<br>
+          TENO5 / TENO5_alt (order 5)<br>
+          PPM (order 4, piecewise parabolic)
         </div>
       </div>
     </div>
@@ -374,17 +375,17 @@
 
 
   <!-- ══════════════════════════════════════════════════════════
-       COLONNE MILIEU — Hydro Driver (flux central d'exécution)
+       MIDDLE COLUMN — Hydro Driver (main execution flow)
   ═══════════════════════════════════════════════════════════ -->
   <div class="col col-mid">
 
     <!-- NOTEBOOK ENTRY -->
-    <div class="notebook-entry">📓 Notebook — cellule run</div>
+    <div class="notebook-entry">📓 Notebook — run cell</div>
 
     <div class="arrow-block">
       <div class="arrow-line"></div>
       <div class="arrow-head">▼</div>
-      <div class="arrow-label">appel</div>
+      <div class="arrow-label">calls</div>
     </div>
 
     <!-- HYDRO DRIVER -->
@@ -394,8 +395,8 @@
 
         <div class="node">
           <div class="node-name" style="color:var(--c-hydro)">evolve_till_time</div>
-          <div class="node-role">Boucle temporelle jusqu'à t_target<br>
-            Utilise jax.lax.while_loop (JIT-compilé)</div>
+          <div class="node-role">Time loop until t_target<br>
+            Uses jax.lax.while_loop (JIT-compiled)</div>
           <div class="node-io">
             <span class="io-in">↳ IN: fields₀, params, t_target</span><br>
             <span class="io-out">↳ OUT: fields_f, params_f, t_f, dt_hist, n_steps</span>
@@ -404,12 +405,20 @@
             <span class="call-badge badge-hydro">→ hydrostep_adapt</span>
           </div>
         </div>
-
+        <div class="node" style="border-color:color-mix(in srgb,var(--c-hydro) 30%,transparent); font-size:10px;">
+          <div class="node-name" style="color:var(--c-hydro); font-size:11px;">Other evolve methods</div>
+          <div class="node-role">
+            <code>evolve_with_callbacks</code> — step-level callbacks + snapshots<br>
+            <code>evolve_with_dt_schedule</code> — fixed dt array input<br>
+            <code>evolve</code> — simple fixed n_steps loop<br>
+            <code>evolve_memory_efficient</code> — gradient checkpointing
+          </div>
+        </div>
         <div class="arrow-block"><div class="arrow-line"></div><div class="arrow-head">▼</div></div>
 
         <div class="node">
           <div class="node-name" style="color:var(--c-hydro)">hydrostep_adapt</div>
-          <div class="node-role">Calcule dt adaptatif puis avance un pas complet</div>
+          <div class="node-role">Computes adaptive dt then advances one full step</div>
           <div class="node-io">
             <span class="io-in">↳ IN: i, (fields, params), t</span><br>
             <span class="io-out">↳ OUT: (fields_new, params_new), dt</span>
@@ -423,7 +432,7 @@
         <div class="mid-split">
           <div class="node">
             <div class="node-name" style="color:var(--c-hydro)">timestep</div>
-            <div class="node-role">CFL global via min de tous les flux/forces</div>
+            <div class="node-role">Global CFL via min over all fluxes/forces</div>
             <div class="node-io">
               <span class="io-in">↳ IN: fields</span><br>
               <span class="io-out">↳ OUT: dt</span>
@@ -435,7 +444,7 @@
           </div>
           <div class="node">
             <div class="node-name" style="color:var(--c-hydro)">_hydrostep</div>
-            <div class="node-role">Avancement numérique d'un pas<br>(forcing + solveur spatial)</div>
+            <div class="node-role">Numerical advancement of one step<br>(forcing + spatial solver)</div>
             <div class="node-io">
               <span class="io-in">↳ IN: i, (fields, params), dt</span><br>
               <span class="io-out">↳ OUT: fields_new, params_new</span>
@@ -451,8 +460,8 @@
 
         <div class="node">
           <div class="node-name" style="color:var(--c-hydro)">mol_solve_step</div>
-          <div class="node-role">Intégration temporelle via RHS unsplit<br>
-            Wrapppe l'intégrateur (SSPRK3, Euler, ...)</div>
+          <div class="node-role">Time integration via unsplit RHS<br>
+            Wraps the integrator (SSPRK3, Euler, ...)</div>
           <div class="node-io">
             <span class="io-in">↳ IN: sol, dt, params</span><br>
             <span class="io-out">↳ OUT: sol_new</span>
@@ -466,8 +475,8 @@
 
         <div class="node">
           <div class="node-name" style="color:var(--c-hydro)">rhs_unsplit</div>
-          <div class="node-role">Assemble −∇·F sur x,y,z (RHS Euler)<br>
-            Applique conditions aux limites + halos</div>
+          <div class="node-role">Assembles −∇·F over x,y,z (Euler RHS)<br>
+            Applies boundary conditions + halos</div>
           <div class="node-io">
             <span class="io-in">↳ IN: sol, params</span><br>
             <span class="io-out">↳ OUT: ∂U/∂t = −Σ_axis (F_{i+1/2} − F_{i-1/2}) / dx</span>
@@ -482,8 +491,8 @@
         <div class="arrow-block"><div class="arrow-line"></div><div class="arrow-head">▼</div></div>
 
         <div class="node">
-          <div class="node-name" style="color:var(--c-hydro)">flux  <span style="font-weight:400;font-size:10px;color:var(--muted)">(hydro_core.py:314)</span></div>
-          <div class="node-role">Somme de tous les flux actifs sur un axe<br>
+          <div class="node-name" style="color:var(--c-hydro)">flux  <span style="font-weight:400;font-size:10px;color:var(--muted)">(hydro_core.py:364)</span></div>
+          <div class="node-role">Sum of all active fluxes along one axis<br>
             F_total = F_conv + F_cond + F_RT + ...</div>
           <div class="node-io">
             <span class="io-in">↳ IN: sol, axis, params</span><br>
@@ -503,7 +512,7 @@
     <div class="arrow-block">
       <div class="arrow-line"></div>
       <div class="arrow-head">▼</div>
-      <div class="arrow-label">délègue le calcul à</div>
+      <div class="arrow-label">delegates to</div>
     </div>
 
     <!-- CONVECTIVE + CONDUCTIVE côte à côte -->
@@ -514,7 +523,7 @@
         <div class="section-body">
           <div class="node">
             <div class="node-name" style="color:var(--c-conv)">ConvectiveFlux.flux</div>
-            <div class="node-role">Pipeline complet :<br>
+            <div class="node-role">Full pipeline:<br>
               prim → reconstruction → Riemann → F_num</div>
             <div class="node-io">
               <span class="io-in">↳ IN: sol, ax, params, flux_prev</span><br>
@@ -528,12 +537,12 @@
           </div>
           <div class="node">
             <div class="node-name" style="color:var(--c-conv)">compute_positivity_preserving</div>
-            <div class="node-role">Corrige ρ&lt;0 ou p&lt;0<br>
-              avec WENO1 (ordre 1) comme fallback</div>
+            <div class="node-role">Corrects ρ&lt;0 or p&lt;0<br>
+              with WENO1 (order 1) as fallback</div>
           </div>
           <div class="node">
-            <div class="node-name" style="color:var(--c-conv)">timestep (CFL convectif)</div>
-            <div class="node-role">dt ∝ dx / (|u|+c_s)<br>Contrainte <strong>linéaire</strong> en dx</div>
+            <div class="node-name" style="color:var(--c-conv)">timestep (convective CFL)</div>
+            <div class="node-role">dt ∝ dx / (|u|+c_s)<br>Constraint <strong>linear</strong> in dx</div>
           </div>
         </div>
       </div>
@@ -543,17 +552,17 @@
         <div class="section-body">
           <div class="node">
             <div class="node-name" style="color:var(--c-cond)">ConductiveFlux.flux</div>
-            <div class="node-role">Loi de Fourier discrétisée<br>
-              q = −κ ∇T sur face harmonique<br>
-              Ne touche que le slot énergie</div>
+            <div class="node-role">Discretized Fourier's law<br>
+              q = −κ ∇T on harmonic face<br>
+              Only affects the energy slot</div>
             <div class="node-io">
               <span class="io-in">↳ IN: sol, axis, params</span><br>
-              <span class="io-out">↳ OUT: flux énergie seul</span>
+              <span class="io-out">↳ OUT: energy flux only</span>
             </div>
           </div>
           <div class="node">
-            <div class="node-name" style="color:var(--c-cond)">timestep (CFL diffusif)</div>
-            <div class="node-role">dt ∝ dx² / κ<br>Contrainte <strong>quadratique</strong> en dx<br>⚠️ très restrictif à haute résolution</div>
+            <div class="node-name" style="color:var(--c-cond)">timestep (diffusive CFL)</div>
+            <div class="node-role">dt ∝ dx² / κ<br>Constraint <strong>quadratic</strong> in dx<br>⚠️ very restrictive at high resolution</div>
           </div>
         </div>
       </div>
@@ -564,7 +573,7 @@
 
 
   <!-- ══════════════════════════════════════════════════════════
-       COLONNE DROITE — Riemann + Branche RT
+       RIGHT COLUMN — Riemann + RT Branch
   ═══════════════════════════════════════════════════════════ -->
   <div class="col col-right">
 
@@ -575,7 +584,7 @@
 
         <div class="node">
           <div class="node-name" style="color:var(--c-riemann)">solve_riemann_problem_xi</div>
-          <div class="node-role">Entrée générique, dispatch selon equation_type<br>
+          <div class="node-role">Generic entry, dispatches by equation_type<br>
             → single_phase / MHD / RT</div>
           <div class="node-io">
             <span class="io-in">↳ IN: W_L, W_R, U_L, U_R, axis</span><br>
@@ -585,9 +594,9 @@
 
         <div class="node">
           <div class="node-name" style="color:var(--c-riemann)">LaxFriedrichs._solve_riemann_problem_xi</div>
-          <div class="node-role">Rusanov / Lax-Friedrichs :<br>
-            F = ½(F_L+F_R) − ½α(U_R−U_L)<br>
-            α = max(|u|+c_s) — très stable, diffusif</div>
+          <div class="node-role">Rusanov / Lax-Friedrichs:<br>
+            F = ½(F_L+F_R) − ½cα(U_R−U_L)<br>
+            α = max(|u|+c_s) — very stable, diffusive</div>
           <div class="node-io">
             <span class="io-in">↳ IN: W_L, W_R, U_L, U_R, axis</span><br>
             <span class="io-out">↳ OUT: F_num, None, None</span>
@@ -599,10 +608,12 @@
         </div>
 
         <div class="eq-data">
-          <div class="eq-title">Comparatif solveurs</div>
-          <span style="color:var(--c-riemann)">Lax-Friedrichs</span> — simple, robuste, diffusif<br>
-          <span style="color:var(--c-hydro)">HLLC</span> — précis sur chocs/contacts<br>
-          <span style="color:var(--c-conv)">Roe</span> — exact au 1er ordre, coûteux
+          <div class="eq-title">Solver comparison</div>
+          <span style="color:var(--c-riemann)">Lax-Friedrichs / Rusanov</span> — simple, robust, diffusive<br>
+          <span style="color:var(--c-riemann)">LaxFriedrichs_safe</span> — clipped for guaranteed positivity<br>
+          <span style="color:var(--c-hydro)">HLLC / HLLC_RT</span> — accurate for shocks and contacts<br>
+          <span style="color:var(--c-conv)">HLL</span> — two-wave estimate, cheaper than HLLC<br>
+          <span style="color:var(--c-rt)">HLL_MHD / HLLD_MHD</span> — MHD-aware, resolves Alfvén waves
         </div>
 
       </div>
@@ -610,13 +621,13 @@
 
     <!-- BRANCHE RT -->
     <div class="section rt">
-      <div class="section-header">☢️ F — Branche Radiative Transfer (RT)</div>
+      <div class="section-header">☢️ F — Radiative Transfer Branch (RT)</div>
       <div class="section-body">
 
         <div class="node">
           <div class="node-name" style="color:var(--c-rt)">ConvectiveFlux_RT.flux</div>
-          <div class="node-role">Même pipeline que ConvectiveFlux<br>
-            mais avec eq_RT et solver_RT</div>
+          <div class="node-role">Same pipeline as ConvectiveFlux<br>
+            but with eq_RT and solver_RT</div>
           <div class="node-io">
             <span class="io-in">↳ IN: sol, ax, params, flux_prev</span><br>
             <span class="io-out">↳ OUT: F_interface_RT</span>
@@ -625,28 +636,28 @@
 
         <div class="node">
           <div class="node-name" style="color:var(--c-rt)">EquationManager_RT</div>
-          <div class="node-role">Variables RT :<br>
-            actifs : [ρ, vx, vy, vz, p]<br>
-            passifs : [E_r, F_rx, F_ry, F_rz]</div>
+          <div class="node-role">RT variables:<br>
+            active: [ρ, vx, vy, vz, p]<br>
+            passive: [E_r, F_rx, F_ry, F_rz]</div>
           <div class="node-io">
             <span class="io-out">↳ get_fluxes_xi : flux M1<br>
-            c²·P_rad ajoutable ici</span>
+            c²·P_rad can be added here</span>
           </div>
         </div>
 
         <div class="node">
           <div class="node-name" style="color:var(--c-rt)">LaxFriedrichs_RT._solve_riemann_xi</div>
-          <div class="node-role">Même formule LF mais sur variables RT<br>
+          <div class="node-role">Same LF formula but on RT variables<br>
             α_RT = max(|u|+c_rad)</div>
         </div>
 
         <!-- Système M1 -->
         <div class="eq-data">
-          <div class="eq-title">Système M1 (moments 0 et 1)</div>
+          <div class="eq-title">M1 System (moments 0 and 1)</div>
           ∂_t E_r + ∇·F_r = κ_a(a_r T⁴ − E_r)<br>
           ∂_t F_r + c²∇·P_r = −(κ_a+κ_s)F_r<br>
           <br>
-          <span style="color:var(--c-rt)">Fermeture Levermore :</span><br>
+          <span style="color:var(--c-rt)">Levermore closure:</span><br>
           𝔻 = [(1−χ)/2]𝕀 + [(3χ−1)/2]n̂⊗n̂<br>
           χ(f) = (3+4f²)/(5+2√(4−3f²))
         </div>

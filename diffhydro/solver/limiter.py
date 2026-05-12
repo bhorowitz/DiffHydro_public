@@ -15,14 +15,14 @@ def superbee_fun(r: Array) -> Array:
 def van_albada_fun(r: Array) -> Array:
     return jnp.maximum(0, r) * (1 + r) / (1 + r * r)
 
-def van_leer_fun(r: Array) -> Array:#VERSION DU CHAT
-    r_safe = jnp.nan_to_num(r, nan=0.0, posinf=0.0, neginf=0.0)
-    return jnp.maximum(0, 2*r_safe) / (1 + jnp.abs(r_safe))
-
-
-# def van_leer_fun(r: Array) -> Array: #VERSION DE BEN 
-#     # r_safe = jnp.nan_to_num(r, nan=0.0, posinf=0.0, neginf=0.0)
+# def van_leer_fun(r: Array) -> Array:#VERSION DU CHAT
+#     r_safe = jnp.nan_to_num(r, nan=0.0, posinf=0.0, neginf=0.0)
 #     return jnp.maximum(0, 2*r_safe) / (1 + jnp.abs(r_safe))
+
+
+def van_leer_fun(r: Array) -> Array: #VERSION DE BEN 
+    # r_safe = jnp.nan_to_num(r, nan=0.0, posinf=0.0, neginf=0.0)
+    return jnp.maximum(0, 2*r) / (1 + jnp.abs(r))
 
 
 def identity_fun(r: Array) -> Array:

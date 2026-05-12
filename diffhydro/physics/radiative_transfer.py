@@ -5,8 +5,9 @@ Placeholder functions for future radiative transfer physics.
 All methods currently return stub values.
 """
 
+import jax
 import jax.numpy as jnp
-
+from diffhydro.equationmanager_radiative_transf_no_chat import EquationManager as EquationManager_RT
 
 class RadiativeTransfer:
     """Placeholder for radiative transfer physics (not implemented)."""
@@ -56,7 +57,7 @@ RADIATIVE_CONFIG = {
     "radiation_constant": 8.0e-1,
 }
 
-#version du chat
+#new version 
 class StellarRadiationForce:
     """
     Radiative source term from stellar populations.
@@ -72,7 +73,11 @@ class StellarRadiationForce:
         dx=1.0,
         injection_mode="physical",
         stromgren_rate=1e-7,
-        gaussian_star = True
+        gaussian_star = True,
+        injection_geometry = "3D",
+        injection_momentum = False,
+        eq=None,
+        debug = False,
     ):# changer petit a petit stronmgren 
         """
         Parameters
@@ -84,6 +89,8 @@ class StellarRadiationForce:
             If None, use a simple blackbody-based default
         dx : float
             Grid spacing (cell volume = dx^3 in 3D or dx^2 in 2D)
+        eq : EquationManager, optional
+            Equation manager; if provided, light_speed is taken from eq.light_speed
         """
         self.escape_fraction = escape_fraction
         self.stellar_spectrum_func = stellar_spectrum_func
@@ -91,7 +98,10 @@ class StellarRadiationForce:
         self.injection_mode = injection_mode
         self.stromgren_rate = stromgren_rate
         self.gaussian_star = gaussian_star
-        
+        self.injection_geometry = injection_geometry
+        self.injection_momentum = injection_momentum
+        self.debug = debug
+        self.light_speed = eq.light_speed if eq is not None else 1.0
     def get_stellar_emission(self, star_age, star_metallicity):
         """
         Compute a simple ionizing photon emission rate as a function of age and metallicity.
@@ -156,13 +166,7 @@ class StellarRadiationForce:
 
         if self.injection_mode == "stromgren":
             # Uniform per-star source rate (placeholder model), then aggregate by cell.
-            per_star_source = self.get_N_gamma_stromgen_sphere(
-                star_masses,
-                star_ages_old,
-                star_ages_new,
-                star_metallicities,
-                sol,
-            ) * dt
+            per_star_source = self.get_N_gamma_stromgen_sphere() * dt
         else:
             # Source is computed per-star, then summed only in cells that contain stars.
             per_star_source = self.get_N_gamma(
@@ -172,6 +176,10 @@ class StellarRadiationForce:
                 star_metallicities,
                 sol,
             ) * dt
+
+        # Inject photons only at the first timestep (i == 0).
+        # inject_now = jnp.equal(i, 0)
+        # per_star_source = jnp.where(inject_now, per_star_source, 0.0)
 
         # Après le calcul de per_star_source...
         
@@ -192,21 +200,124 @@ class StellarRadiationForce:
         if not self.gaussian_star:
             sol = sol.at[0, ix, iy, iz].add(per_star_source)
         else:
-            sigma = 5.0
+            # attention sigma dois etre largement plus petit que la taille de la grille pour que ca fasse une gaussienne
+            sigma = 1 #modifier cette ligne et celle d'apres pour faire une gaussienne plus ou moins large
             offsets = jnp.arange(-5, 6)
             di, dj, dk = jnp.meshgrid(offsets, offsets, offsets, indexing='ij')
             weights = jnp.exp(-(di**2 + dj**2 + dk**2) / (2 * sigma**2))
             weights = weights / weights.sum()
-        
-            def inject_star(sol, args):
-                xi, yi, zi, src = args
-                return sol.at[0, xi + di, yi + dj, zi + dk].add(src * weights)
-        
-            for s in range(star_positions.shape[0]):
-                sol = inject_star(sol, (ix[s], iy[s], iz[s], per_star_source[s]))
+
+            if self.injection_geometry == "2D":
+                def inject_star_2D_YZ(sol, args):
+                    yi, zi, src = args
+                    return sol.at[0, yi + di, zi + dj].add(src * weights)
+                
+                for s in range(star_positions.shape[0]):
+                    sol = inject_star_2D_YZ(sol, (iy[s], iz[s], per_star_source[s]))
+            
+            elif self.injection_geometry == "3D":
+                def inject_star_3D(sol, args):
+                    xi, yi, zi, src = args
+                    # jax.debug.print("src={}", src)
+                    return sol.at[0, xi + di, yi + dj, zi + dk].add(src * weights)
+                
+                for s in range(star_positions.shape[0]):
+                    sol = inject_star_3D(sol, (ix[s], iy[s], iz[s], per_star_source[s]))
+
+        #Injection on the Moment
+        if self.injection_momentum == True:
+            def injection_moment_1D_X(sol): # attention ici c'est pas modulaire
+                xi = jnp.arange(25, 75)
+                total_source = jnp.sum(per_star_source)
+                return sol.at[1, xi, :, :].add(self.light_speed **2 * total_source / len(xi)) # attention ici c'est pas modulaire du tout, a revoir pour faire une injection plus physique et plus modulaire
+            sol = injection_moment_1D_X(sol)
 
         params_out = dict(params)
+    
         params_out["star_ages"] = star_ages_new
+
+        if self.debug == True:
+            # JAX-safe debug prints (compatible with jit/pjit tracing)
+            z_idx = 50
+            z_slice = sol[0, :, :, z_idx]
+            nonzero_count = jnp.count_nonzero(z_slice)
+            # Static-size argwhere to remain JIT-safe. Invalid rows are padded with -1.
+            coords_xy = jnp.argwhere(z_slice != 0, size=z_slice.size, fill_value=-1)
+            x_idx = coords_xy[:, 0]
+            y_idx = coords_xy[:, 1]
+            valid = x_idx >= 0
+            vals = jnp.where(valid, z_slice[x_idx, y_idx], 0.0)
+        
+            # Coordinates where log(|value|) is below a chosen threshold.
+            log_threshold = -17
+            log_abs_vals = jnp.where(valid, jnp.log(vals + 1e-300), jnp.inf)
+            below_log_mask = valid & (log_abs_vals < log_threshold)
+            n_below_log = jnp.count_nonzero(below_log_mask)
+            x_below_min = jnp.min(jnp.where(below_log_mask, x_idx, 1000))
+            x_below_max = jnp.max(jnp.where(below_log_mask, x_idx, -1))
+            y_below_min = jnp.min(jnp.where(below_log_mask, y_idx, 1000))
+            y_below_max = jnp.max(jnp.where(below_log_mask, y_idx, -1))
+            x_below_size = jnp.maximum(x_below_max - x_below_min + 1, 0)
+            y_below_size = jnp.maximum(y_below_max - y_below_min + 1, 0)
+            x_below_min_i = x_below_min.astype(jnp.int32)
+            x_below_max_i = x_below_max.astype(jnp.int32)
+            y_below_min_i = y_below_min.astype(jnp.int32)
+            y_below_max_i = y_below_max.astype(jnp.int32)
+            x_below_size_i = x_below_size.astype(jnp.int32)
+            y_below_size_i = y_below_size.astype(jnp.int32)
+        
+            # Compute bounding box sizes
+            x_min = jnp.min(jnp.where(valid, x_idx, 1000))
+            x_max = jnp.max(jnp.where(valid, x_idx, -1))
+            y_min = jnp.min(jnp.where(valid, y_idx, 1000))
+            y_max = jnp.max(jnp.where(valid, y_idx, -1))
+            x_size = jnp.maximum(x_max - x_min + 1, 0)
+            y_size = jnp.maximum(y_max - y_min + 1, 0)
+            x_min_i = x_min.astype(jnp.int32)
+            x_max_i = x_max.astype(jnp.int32)
+            y_min_i = y_min.astype(jnp.int32)
+            y_max_i = y_max.astype(jnp.int32)
+            x_size_i = x_size.astype(jnp.int32)
+            y_size_i = y_size.astype(jnp.int32)
+
+            # Extract 1D arrays for x and y with z fixed at 50
+            z_idx = 50
+
+            # Non-zero values on 1D lines (JIT-safe static-size indices).
+            line_x = sol[0, :, 50, z_idx]
+            line_y = sol[0, 50, :, z_idx]
+            jax.debug.print("Line x at y=50, z=50: {line}", line=line_x)
+            jax.debug.print("Line y at x=50, z=50: {line}", line=line_y)
+            non_zero_x = jnp.argwhere(line_x != 0, size=line_x.size, fill_value=-1)[:, 0]
+            non_zero_y = jnp.argwhere(line_y != 0, size=line_y.size, fill_value=-1)[:, 0]
+
+            # log10(|value|) below threshold on the same 1D lines (JIT-safe).
+            log_threshold = -11
+            log_line_x = jnp.log10(line_x + 1e-300)
+            log_line_y = jnp.log10(line_y + 1e-300)
+            log_x = jnp.argwhere(log_line_x < log_threshold, size=log_line_x.size, fill_value=-1)[:, 0]
+            log_y = jnp.argwhere(log_line_y < log_threshold, size=log_line_y.size, fill_value=-1)[:, 0]
+
+            # Debug outputs
+            jax.debug.print("Non-zero x for y=50, z=50: {x}", x=non_zero_x)
+            jax.debug.print("Non-zero y for x=50, z=50: {y}", y=non_zero_y)
+            jax.debug.print("Log x for y=50, z=50: {x}", x=log_x)
+            jax.debug.print("Log y for x=50, z=50: {y}", y=log_y)
+
+            jax.debug.print("\n=== Timestep {} === Non-zero on [0,:,:,{}] ===", i, z_idx)
+            jax.debug.print("Non-zero count: {}", nonzero_count)
+            jax.debug.print("X range: [{}, {}] (size: {})", x_min_i, x_max_i, x_size_i)
+            jax.debug.print("Y range: [{}, {}] (size: {})", y_min_i, y_max_i, y_size_i)
+            jax.debug.print("Z plane: [{}] (size: 1)", z_idx)
+            jax.debug.print("Coordinates x: {}", x_idx)
+            jax.debug.print("Coordinates y: {}", y_idx)
+            jax.debug.print("Values      : {}", vals)
+            jax.debug.print("Log threshold: {}", log_threshold)
+            jax.debug.print("Count log(|value|) < threshold: {}", n_below_log)
+            jax.debug.print("X where log(|value|) < threshold: [{}, {}] (size: {})", x_below_min_i, x_below_max_i, x_below_size_i)
+            jax.debug.print("Y where log(|value|) < threshold: [{}, {}] (size: {})", y_below_min_i, y_below_max_i, y_below_size_i)
+            jax.debug.print("Format target: [0][x][y][{}]", z_idx)
+        
         return sol, params_out
     
     def get_N_gamma(self, star_masses, star_ages_old, star_ages_new, star_metallicities, sol):
@@ -217,7 +328,6 @@ class StellarRadiationForce:
         cell_volume = self.dx ** (sol.ndim - 1)
         return (star_masses * delta_emission) * self.escape_fraction / cell_volume
     
-    def get_N_gamma_stromgen_sphere(self, star_masses, star_ages_old, star_ages_new, star_metallicities, sol):
+    def get_N_gamma_stromgen_sphere(self):
         """Simple Stromgren-like photon rate placeholder."""
-        del star_ages_old, star_ages_new, star_metallicities, star_masses
         return self.stromgren_rate
