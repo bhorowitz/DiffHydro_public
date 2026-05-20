@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 import jax.numpy as jnp
 import jax
 from matplotlib import axis
+import numpy as np
 
 
 @dataclass
@@ -140,7 +141,7 @@ class EquationManager:
 
         if conservatives.shape[0] > self.n_active:
             cons_p = conservatives[self.passive_slice]
-            prim_p = cons_p * inv_E_gamma[jnp.newaxis, ...] 
+            prim_p = cons_p * 1/E_gamma[jnp.newaxis, ...] 
             return jnp.concatenate([prim_a, prim_p], axis=0)
 
         return prim_a
@@ -237,7 +238,6 @@ class EquationManager:
 
         F_vec = jnp.stack([F_gamma_x, F_gamma_y, F_gamma_z], axis=0)
         P = self._radiation_pressure_tensor(E_gamma, F_vec)  
-
         E_flux = F_vec[axis]
         c2 = self.light_speed * self.light_speed
 
@@ -245,6 +245,18 @@ class EquationManager:
             [E_flux, c2 * P[axis, 0], c2 * P[axis, 1], c2 * P[axis, 2]],
             axis=0,
         )
+        # jax.debug.print("flux_a: {v}", v=flux_a[0, :, :, :])
+        # nonzero_coords = jnp.argwhere(flux_a[0, :, :, :] != 0, size=flux_a[0].size, fill_value=-1)
+        # jax.debug.print("flux_a non-zero coords (i,j,k): {v}", v=nonzero_coords)
+        nx, ny, nz = flux_a.shape[1], flux_a.shape[2], flux_a.shape[3]
+        coords = jnp.argwhere(flux_a[0, :, :, :] != 0, size=nx * ny * nz, fill_value=-1)
+        x, y, z = coords[:, 0], coords[:, 1], coords[:, 2]
+        jax.debug.print("flux_a non-zero x (padding=-1): {v}", v=x)
+        jax.debug.print("flux_a non-zero y (padding=-1): {v}", v=y)
+        jax.debug.print("flux_a non-zero z (padding=-1): {v}", v=z)
+
+
+        
 
         if conservatives.shape[0] > self.n_active:
             # Passive block transporté de manière upwind dans ConvectiveFlux
