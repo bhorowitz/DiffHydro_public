@@ -134,9 +134,7 @@ class EquationManager:
     def get_pressure(self, e, rho):
         if self.isothermal:
             return self.get_isothermal_pressure(rho)
-        rho_safe = jnp.maximum(rho, self.eps)
-        e_safe = jnp.maximum(e, self.eps)
-        return (self.gamma - 1.0) * rho_safe * e_safe     
+        return (self.gamma - 1.0) * jnp.maximum(e, self.eps) * jnp.maximum(rho, self.eps)
      # --- Slices for solver interface ---
 
     @property

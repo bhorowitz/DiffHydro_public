@@ -28,10 +28,12 @@ class hydro:
                  maxjit=True,
                  use_mol=True,
                  use_ct=True,
-                 integrator="RK2"):
+                 integrator="RK2",
+                 debug_fixed_dt: float | None = None):
         #parameters that are held constant per run (i.e. probably don't want to take derivatives with respect to...)
         self.splitting_schemes = splitting_schemes #strang splitting for x,y,z sweeps
         self.max_dt = max_dt
+        self.debug_fixed_dt = debug_fixed_dt
         self.boundary = boundary
         #supersteps, each superstep has len(splitting_schemes) time steps
         self.n_super_step = n_super_step
@@ -124,7 +126,12 @@ class hydro:
         fields, params, t = state
         ttt = self.timestep(fields)
         ttt = jnp.minimum(self.max_dt, ttt)
-        dt = ttt
+        if self.debug_fixed_dt is not None:#debug option by the chat
+            fixed_dt = jnp.array(self.debug_fixed_dt, dtype=ttt.dtype)
+            dt = jnp.minimum(ttt, fixed_dt)
+            jax.debug.print("hydro_core_CT: debug_fixed_dt active, dt = {}", dt)
+        else:
+            dt = ttt
         fields2, params2 = self._hydrostep(i, (fields, params), dt)  # unchanged _hydrostep
         return (fields2, params2, t + dt)
 

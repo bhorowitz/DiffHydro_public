@@ -4,6 +4,8 @@ from jax import Array
 from dataclasses import dataclass, field
 import jax.numpy as jnp
 import jax
+from matplotlib import axis
+import numpy as np
 
 
 @dataclass
@@ -11,66 +13,66 @@ class EquationManager:
     """
     Generic compressible Euler equation manager with optional passive scalars.
 
-    Active variables (always first, fixed order for compatibility):
-      primitives active:  [rho, vx, vy, vz, p]
-      conservatives active: [rho, rho*vx, rho*vy, rho*vz, Etot]
+        Active variables (always first, fixed order for compatibility):
+            primitives active:  [E_gamma, F_gamma_x, F_gamma_y, F_gamma_z]
+            conservatives active: [E_gamma, E_gamma*F_gamma_x, E_gamma*F_gamma_y, E_gamma*F_gamma_z]
 
     Passive variables (any extra slots beyond active):
       primitives passive:  s_k
-      conservatives passive: rho * s_k
+      conservatives passive: E_gamma * s_k
 
     The code below avoids hard-coded indices in the numerics by:
       - defining active indices once in __post_init__
       - using active_slice/passive_slice everywhere else.
     """
     gamma: float = 1.6
-    n_cons: int = 5 #avant c etait 5
+    n_cons: int = 4 #avant c etait 5
     eps: float = 1e-20
     isothermal: bool = False
-    isothermal_sound_speed: float = 1.0
-
+    light_speed: float = 1#3e8 #en m.s-1
+    # fraction_escape: float = 0.1
+    # volume_cell: float = 0.1
+    # star_mass: float = 1.0
+    # star_age: float = 1.0
+    # star_metallicity: float = 1.0
+    mesh_shape: tuple[int, int, int] = (100, 100, 100)
     # Active variable names/order (single source of truth)
-    active_names: tuple[str, ...] = ("rho", "vx", "vy", "vz", "p")#,"psi"
+    active_names: tuple[str, ...] = ("E_gamma", "F_gamma_x", "F_gamma_y", "F_gamma_z")#,"p" 
+    # passive_names: tuple[str, ...] = ("E_gamma",) #new
 
     # Derived index maps (filled in __post_init__)
     active_map: dict[str, int] = field(init=False, repr=False)
     mass_ids: int = field(init=False)
     vel_ids: tuple[int, int, int] = field(init=False)
-    energy_ids: int = field(init=False)  # p in primitives, Etot in conservatives
     n_active: int = field(init=False)
-
+    # energy_ids: int = field(init=False)
     def __post_init__(self):
         self.n_active = len(self.active_names)
-        if self.n_active != self.n_cons:
+        if self.n_active > self.n_cons:
             raise ValueError(
-                f"Expected {self.n_cons} active vars (rho,vx,vy,vz,p). Got {self.n_active}."#,psi
-            )
-        if self.n_cons < self.n_active:
-            raise ValueError(
-                f"n_cons={self.n_cons} must be >= n_active={self.n_active}."
+                f"Expected max {self.n_cons} total vars. Got {self.n_active} active."
             )
 
         self.active_map = {name: i for i, name in enumerate(self.active_names)}
-        self.mass_ids = self.active_map["rho"]
+        self.mass_ids = self.active_map["E_gamma"]
         self.vel_ids = (
-            self.active_map["vx"],
-            self.active_map["vy"],
-            self.active_map["vz"],
+            self.active_map["F_gamma_x"],
+            self.active_map["F_gamma_y"],
+            self.active_map["F_gamma_z"],
         )
-        
-        self.energy_ids = self.active_map["p"]
-        # self.psi_ids = self.active_map["psi"]
+        # self.energy_ids = self.active_map["p"]
         self.velocity_minor_axes = ((2, 3), (3, 1), (1, 2))
         self.equation_type = "SINGLE-PHASE"#equation_information.equation_type
         self.thermal_conductivity_model = "SUTHERLAND"
         self.sutherland_parameters = [0.1, 1.0, 1.0]
-        self.cfl = 0.4
-        self.mesh_shape = [100,100,100]
+        self.cfl = 0.4 #original value 0.4
+        # self.mesh_shape = list(self.mesh_shape)
         self.R = 1.0
         self.cp = self.gamma / (self.gamma - 1.0) * self.R
-        self.isothermal_sound_speed = float(self.isothermal_sound_speed)
-        if self.isothermal_sound_speed <= 0.0:
-            raise ValueError("isothermal_sound_speed must be > 0.")
+        self.light_speed = float(self.light_speed)
+        if self.light_speed <= 0.0:
+            raise ValueError("light_speed must be > 0.")
+        
     def get_conservatives_from_primitives(self, primitives):
         """
         primitives: (>= n_active, ...)
@@ -78,22 +80,22 @@ class EquationManager:
         """
         prim_a = primitives[self.active_slice]
 
-        rho = prim_a[self.mass_ids]
+        E_gamma = prim_a[self.mass_ids]
+        # jax.debug.print("E_gamma: {v}", v=E_gamma[ :, :, :])
         u, v, w = (prim_a[i] for i in self.vel_ids)
-        p = prim_a[self.energy_ids]
-        if self.isothermal:
-            p = self.get_isothermal_pressure(rho)
-
-        e = self.get_specific_energy(p, rho)
-        kin = 0.5 * (u*u + v*v + w*w)
-        Etot = rho * (kin + e)
-
-        cons_a = jnp.stack([rho, rho*u, rho*v, rho*w, Etot], axis=0)
-
+        # # p = prim_a[self.energy_ids]
+        # if self.isothermal:
+        #     p = self.get_isothermal_pressure(E_gamma)
+            
+        # e = self.get_specific_energy(E_gamma)
+        # kin = 0.5 * (u*u + v*v + w*w)
+        # Etot = E_gamma * (kin + e) #a modifier
+        cons_a = jnp.stack([E_gamma, E_gamma*u, E_gamma*v, E_gamma*w], axis=0) #Etot
+        # cons_a = prim_a
         if primitives.shape[0] > self.n_active:
             prim_p = primitives[self.passive_slice]                 # (n_passive,...)
-            cons_p = rho[jnp.newaxis, ...] * prim_p                 # rho*s_k
-            return jnp.concatenate([cons_a, cons_p], axis=0)
+            cons_p = E_gamma[jnp.newaxis, ...] * prim_p             # E_gamma*s_k
+            return jnp.concatenate([cons_a,cons_p], axis=0) #, cons_p
 
         return cons_a
 
@@ -104,28 +106,44 @@ class EquationManager:
         """
         cons_a = conservatives[self.active_slice]
 
-        rho = cons_a[self.mass_ids]
-        rho_safe = jnp.maximum(rho, self.eps)
-        inv_rho = 1.0 / rho_safe
+        # E_gamma = cons_a[self.mass_ids]
+        # E_gamma_safe = jnp.maximum(E_gamma, self.eps)
+        # inv_E_gamma = 1.0 / E_gamma_safe
 
-        u = cons_a[1] * inv_rho
-        v = cons_a[2] * inv_rho
-        w = cons_a[3] * inv_rho
+        # u = cons_a[1] * inv_E_gamma
+        # v = cons_a[2] * inv_E_gamma
+        # w = cons_a[3] * inv_E_gamma
 
-        E = cons_a[4] * inv_rho
-        kin = 0.5 * (u*u + v*v + w*w)
-        e = jnp.maximum(E - kin, self.eps)
+        # E = cons_a[4] * inv_E_gamma
+        # kin = 0.5 * (u*u + v*v + w*w)
+        # e = jnp.maximum(E - kin, self.eps) #a modifier
 
-        if self.isothermal:
-            p = self.get_isothermal_pressure(rho_safe)
-        else:
-            p = self.get_pressure(e, rho_safe)
+        # if self.isothermal:
+        #     p = self.get_isothermal_pressure(E_gamma_safe)
+        # else:
+        #     p = self.get_pressure(e, E_gamma_safe)
+            
+        # prim_a = jnp.stack([E_gamma_safe, u, v, w], axis=0) #new ,p
 
-        prim_a = jnp.stack([rho_safe, u, v, w, p], axis=0)
+        # if conservatives.shape[0] > self.n_active:
+        #     cons_p = conservatives[self.passive_slice]              # (n_passive,...)
+        #     prim_p = cons_p * inv_E_gamma[jnp.newaxis, ...]             # s_k
+        #     return jnp.concatenate([prim_a, prim_p], axis=0)
+        """
+        For the RT moment system, active primitives and conservatives are identical.
+        """
+        cons_a = conservatives[self.active_slice]
+        # jax.debug.print("cons_a: {v}", v=cons_a[:, 0, 0, 0])
+        E_gamma = jnp.maximum(cons_a[self.mass_ids], self.eps) #ajouter garde fous division par 0 
+        F_gamma_x = cons_a[1]/E_gamma
+        F_gamma_y = cons_a[2]/E_gamma
+        F_gamma_z = cons_a[3]/E_gamma 
+
+        prim_a = jnp.stack([E_gamma, F_gamma_x, F_gamma_y, F_gamma_z], axis=0)
 
         if conservatives.shape[0] > self.n_active:
-            cons_p = conservatives[self.passive_slice]              # (n_passive,...)
-            prim_p = cons_p * inv_rho[jnp.newaxis, ...]             # s_k
+            cons_p = conservatives[self.passive_slice]
+            prim_p = cons_p * 1/E_gamma[jnp.newaxis, ...] 
             return jnp.concatenate([prim_a, prim_p], axis=0)
 
         return prim_a
@@ -135,89 +153,128 @@ class EquationManager:
     # ---------------------------
     @property
     def active_slice(self):
-        return slice(0, self.n_active)
+        return slice(0, self.n_active) #modifier ici pour choisir quoi utiliser probablement 4 
     
-    def get_pressure(self, e, rho):
-        if self.isothermal:
-            return self.get_isothermal_pressure(rho)
-        rho_safe = jnp.maximum(rho, self.eps)
-        e_safe = jnp.maximum(e, self.eps)
-        return (self.gamma - 1.0) * rho_safe * e_safe
+    @property
+    def passive_slice(self):
+        return slice(self.n_active, self.n_cons)
 
-    def get_signal_speed(self, primitives, axis):
-        p = primitives[self.energy_ids]
-        rho = primitives[self.mass_ids]
-        return self.get_speed_of_sound(p, rho)
-    
-    def get_speed_of_sound(self, p: Array, rho: Array) -> Array:
-        """See base class. """
+    @property
+    def n_passive(self) -> int:
+        return max(0, self.n_cons - self.n_active)
+
+    def get_pressure(self, e, E_gamma):
         if self.isothermal:
-            rho_safe = jnp.maximum(rho, self.eps)
-            return jnp.full_like(rho_safe, self.isothermal_sound_speed)
-        return jnp.sqrt( self.gamma * jnp.maximum( p, self.eps) / jnp.maximum( rho, self.eps ) )
+            return self.get_isothermal_pressure(E_gamma)
+        return (self.gamma - 1.0) * jnp.maximum(e, self.eps) * jnp.maximum(E_gamma, self.eps)
+    
+    def get_signal_speed(self, primitives, axis): #probablement a changer pour c of speed
+        # p = primitives[self.energy_ids]
+        E_gamma = primitives[self.mass_ids]
+        return self.get_speed_of_sound(E_gamma)
+    
+    def get_speed_of_sound(self, E_gamma: Array) -> Array: # self, p: Array,probablement a changer pour retourne speed of light
+        """See base class. """
+        E_gamma_safe = jnp.maximum(E_gamma, self.eps)
+        return jnp.full_like(E_gamma_safe, self.light_speed)
+
+    def _eddington_factor(self, reduced_flux: Array) -> Array:
+        f = jnp.clip(reduced_flux, 0.0, 1.0 - 1e-6)
+        return (3.0 + 4.0 * f * f) / (5.0 + 2.0 * jnp.sqrt(4.0 - 3.0 * f * f))
+
+
+    def _radiation_pressure_tensor(self, E_gamma: Array, F_vec: Array) -> Array:
+        """
+        Returns P_ij with M1 closure:
+        P = D * E
+        D = (1-chi)/2 I + (3chi-1)/2 n⊗n
+        """
+        c = self.light_speed
+        F_norm = jnp.sqrt(jnp.sum(F_vec * F_vec, axis=0))
+        reduced_flux = F_norm / (c * jnp.maximum(E_gamma, self.eps))
+        chi = self._eddington_factor(reduced_flux)
+
+        n = F_vec / jnp.maximum(F_norm, self.eps)
+
+        ndim = E_gamma.ndim
+        eye = jnp.eye(3).reshape(3, 3, *([1] * ndim))
+        outer = n[:, None, ...] * n[None, :, ...]
+
+        D = (
+            ((1.0 - chi) / 2.0)[None, None, ...] * eye
+            + ((3.0 * chi - 1.0) / 2.0)[None, None, ...] * outer
+        )
+
+        return D * E_gamma[None, None, ...]
+
 
     # ---------------------------
-    def get_specific_energy(self, p, rho):
-        rho_safe = jnp.maximum(rho, self.eps)
-        p_safe = jnp.maximum(p, self.eps)
-        if self.isothermal:
-            p_safe = self.get_isothermal_pressure(rho_safe)
-        return p_safe / ((self.gamma - 1.0) * rho_safe + self.eps)
+    # def get_specific_energy(self, E_gamma: Array):
+    #     E_gamma_safe = jnp.maximum(E_gamma, self.eps)
+    #     # p_safe = jnp.maximum(p, self.eps)
+    #     energy_thermique = 0.0
+    #     if self.isothermal:
+    #         # p_safe = self.get_isothermal_pressure(E_gamma_safe)
+    #     return energy_thermique + #p_safe / ((self.gamma - 1.0) * E_gamma_safe + self.eps)
 
-    def get_fluxes_xi(self, primitives, conservatives, axis: int):
+    def get_fluxes_xi(self, primitives, conservatives, axis: int): ##ATTENTION AU UNITE POUR ETRE CONSISTANT AVEC GET PRIMITIVE AND CONSERVATIVE 
         """
-        Physical flux in direction axis=0,1,2.
-        Returns flux array same leading dim as conservatives/primitives.
+        RT moments (M1 closure), direction axis in {0,1,2}.
+        State:
+        U = [E_gamma, F_gamma_x, F_gamma_y, F_gamma_z]
+        Flux in direction i:
+        F_i(U) = [F_i, c^2 P_{i,x}, c^2 P_{i,y}, c^2 P_{i,z}]
         """
+        del primitives
 
-        prim_a = primitives[self.active_slice]
+        # Cohérence d'unités: on part des variables conservatives.
+        # Hypothèse conservative active: [E_gamma, E_gamma*F_x, E_gamma*F_y, E_gamma*F_z].
         cons_a = conservatives[self.active_slice]
+        E_gamma = jnp.maximum(cons_a[self.mass_ids], self.eps)
+        E_gamma_safe = jnp.maximum(E_gamma, self.eps)
 
-        rho = prim_a[self.mass_ids]
-        u, v, w = (prim_a[i] for i in self.vel_ids)
-        p = prim_a[self.energy_ids]
-        Etot = cons_a[-1]  # last active conservative slot
+        mom_x, mom_y, mom_z = (cons_a[i] for i in self.vel_ids)
+        # mom_x = jnp.maximum(mom_x, self.eps)
+        # mom_y = jnp.maximum(mom_y, self.eps)
+        # mom_z = jnp.maximum(mom_z, self.eps)
+        F_gamma_x = mom_x #/ E_gamma_safe
+        F_gamma_y = mom_y #/ E_gamma_safe
+        F_gamma_z = mom_z #/ E_gamma_safe
 
-        vel = (u, v, w)
-        ui = vel[axis]
-        rho_ui = rho * ui
+        F_vec = jnp.stack([F_gamma_x, F_gamma_y, F_gamma_z], axis=0)
+        P = self._radiation_pressure_tensor(E_gamma, F_vec)  
+        E_flux = F_vec[axis]
+        c2 = self.light_speed * self.light_speed
 
-        # momentum flux components
-        fx_rhou = rho_ui * u
-        fx_rhov = rho_ui * v
-        fx_rhow = rho_ui * w
+        flux_a = jnp.stack(
+            [E_flux, c2 * P[axis, 0], c2 * P[axis, 1], c2 * P[axis, 2]],
+            axis=0,
+        )
+        # jax.debug.print("flux_a: {v}", v=flux_a[0, :, :, :])
+        # nonzero_coords = jnp.argwhere(flux_a[0, :, :, :] != 0, size=flux_a[0].size, fill_value=-1)
+        # jax.debug.print("flux_a non-zero coords (i,j,k): {v}", v=nonzero_coords)
+        # nx, ny, nz = flux_a.shape[1], flux_a.shape[2], flux_a.shape[3]
+        # coords = jnp.argwhere(flux_a[0, :, :, :] != 0, size=nx * ny * nz, fill_value=-1)
+        # x, y, z = coords[:, 0], coords[:, 1], coords[:, 2]
+        # jax.debug.print("flux_a non-zero x (padding=-1): {v}", v=x)
+        # jax.debug.print("flux_a non-zero y (padding=-1): {v}", v=y)
+        # jax.debug.print("flux_a non-zero z (padding=-1): {v}", v=z)
 
-        if axis == 0:
-            fx_rhou = fx_rhou + p
-        elif axis == 1:
-            fx_rhov = fx_rhov + p
-        else:
-            fx_rhow = fx_rhow + p
 
-        fx_E = ui * (Etot + p)
-
-        flux_a = jnp.stack([rho_ui, fx_rhou, fx_rhov, fx_rhow, fx_E], axis=0)
+        
 
         if conservatives.shape[0] > self.n_active:
-            cons_p = conservatives[self.passive_slice]              # (n_passive,...)
-            flux_p = cons_p * ui                                    # (rho*s_k)*ui
-            return jnp.concatenate([flux_a, flux_p], axis=0)
+            # Passive block transporté de manière upwind dans ConvectiveFlux
+            return jnp.concatenate([flux_a, conservatives[self.passive_slice]], axis=0)
 
         return flux_a
 
 
-#     @property
-#     def passive_slice(self):
-#         return slice(self.n_active, self.n_cons)
 
-#     @property
-#     def n_passive(self) -> int:
-#         return max(0, self.n_cons - self.n_active)
-
-#     def get_isothermal_pressure(self, rho):
-#         rho_safe = jnp.maximum(rho, self.eps)
-#         cs2 = self.isothermal_sound_speed * self.isothermal_sound_speed
-#         return cs2 * rho_safe
+#     def get_isothermal_pressure(self, E_gamma):
+#         E_gamma_safe = jnp.maximum(E_gamma, self.eps)
+#         cs2 = self.light_speed * self.light_speed
+#         return cs2 * E_gamma_safe
 
 #     # ---------------------------
 #     # Thermodynamics
@@ -225,12 +282,12 @@ class EquationManager:
 
 
 
-#     def get_sound_speed(self, p, rho):
-#         rho_safe = jnp.maximum(rho, self.eps)
+#     def get_sound_speed(self, p, E_gamma):
+#         E_gamma_safe = jnp.maximum(E_gamma, self.eps)
 #         if self.isothermal:
-#             return jnp.full_like(rho_safe, self.isothermal_sound_speed)
+#             return jnp.full_like(E_gamma_safe, self.light_speed)
 #         p_safe = jnp.maximum(p, self.eps)
-#         return jnp.sqrt(self.gamma * p_safe / rho_safe)
+#         return jnp.sqrt(self.gamma * p_safe / E_gamma_safe)
 
 #     # ---------------------------
 #     # Primitive <-> Conservative
@@ -245,10 +302,10 @@ class EquationManager:
 #     # ---------------------------
 #     def get_wavespeeds_xi(self, primitives, axis: int):
 #         prim_a = primitives[self.active_slice]
-#         rho = prim_a[self.mass_ids]
+#         E_gamma = prim_a[self.mass_ids]
 #         p = prim_a[self.energy_ids]
 #         ui = prim_a[self.vel_ids[axis]]
-#         a = self.get_sound_speed(p, rho)
+#         a = self.get_sound_speed(p, E_gamma)
 #         return ui - a, ui + a
 
 #     def get_specific_heat_capacity(self, T: Array): #-> Union[float, Array]:
@@ -274,34 +331,34 @@ class EquationManager:
 #         """
 #         return self.gamma
 
-#     def get_psi(self, p: Array, rho: Array) -> Array:
+#     def get_E_gamma(self, p: Array, E_gamma: Array) -> Array:
 #         """See base class. """
-#         return p / rho
+#         return p / E_gamma
 
-#     def get_grueneisen(self, rho: Array, T: Array = None) -> Array:
+#     def get_grueneisen(self, E_gamma: Array, T: Array = None) -> Array:
 #         """See base class. """
 #         return self.gamma - 1
 
 
-#     def get_pressure(self, e, rho):
+#     def get_pressure(self, e, E_gamma):
 #         if self.isothermal:
-#             return self.get_isothermal_pressure(rho)
-#         return (self.gamma - 1.0) * jnp.maximum(e, self.eps) * jnp.maximum(rho, self.eps)
+#             return self.get_isothermal_pressure(E_gamma)
+#         return (self.gamma - 1.0) * jnp.maximum(e, self.eps) * jnp.maximum(E_gamma, self.eps)
 
-#     def get_temperature(self, p, rho):
+#     def get_temperature(self, p, E_gamma):
 #         p_safe   = jnp.maximum(p,   self.eps)
-#         rho_safe = jnp.maximum(rho, self.eps)
-#         T = p_safe / (rho_safe * self.R + self.eps)
+#         E_gamma_safe = jnp.maximum(E_gamma, self.eps)
+#         T = p_safe / (E_gamma_safe * self.R + self.eps)
 #         # cap used temp to keep any downstream log/exp/table sane
 #         return jnp.clip(T, 0.10, 10.0**10.5) 
 
-#     def get_specific_energy(self, p, rho):
+#     def get_specific_energy(self, p, E_gamma):
 #         if self.isothermal:
-#             p_safe = self.get_isothermal_pressure(rho)
+#             p_safe = self.get_isothermal_pressure(E_gamma)
 #         else:
 #             p_safe = jnp.maximum(p, self.eps)
-#         rho_safe = jnp.maximum(rho, self.eps)
-#         return p_safe / (rho_safe * (self.gamma - 1.0) + self.eps)
+#         E_gamma_safe = jnp.maximum(E_gamma, self.eps)
+#         return p_safe / (E_gamma_safe * (self.gamma - 1.0) + self.eps)
 
 #     def project_conservatives_to_eos(self, conservatives):
 #         if not self.isothermal:
@@ -312,7 +369,7 @@ class EquationManager:
 #     def get_total_energy(
 #             self,
 #             p:Array,
-#             rho:Array,
+#             E_gamma:Array,
 #             u:Array,
 #             v:Array,
 #             w:Array
@@ -320,12 +377,12 @@ class EquationManager:
 #         """See base class. """
 #         # Total energy per unit volume
 #         # (sensible, i.e., without heat of formation)
-#         return p / (self.gamma - 1) + 0.5 * rho * ( (u * u + v * v + w * w) )
+#         return p / (self.gamma - 1) + 0.5 * E_gamma * ( (u * u + v * v + w * w) )
 
 #     def get_total_enthalpy(
 #             self,
 #             p:Array,
-#             rho:Array,
+#             E_gamma:Array,
 #             u:Array,
 #             v:Array,
 #             w:Array
@@ -333,17 +390,17 @@ class EquationManager:
 #         """See base class. """
 #         # Total specific enthalpy
 #         # (sensible, i.e., without heat of formation)
-#         return (self.get_total_energy(p, rho, u, v, w) + p) / rho
+#         return (self.get_total_energy(p, E_gamma, u, v, w) + p) / E_gamma
 
 #     def get_stagnation_temperature(
 #             self,
 #             p:Array,
-#             rho:Array,
+#             E_gamma:Array,
 #             u:Array,
 #             v:Array,
 #             w:Array
 #         ) -> Array:
-#         T = self.get_temperature(p, rho)
+#         T = self.get_temperature(p, E_gamma)
 #         cp = self.get_specific_heat_capacity(T)
 #         return T + 0.5 * (u * u + v * v + w * w) / cp
 
@@ -414,24 +471,24 @@ class EquationManager:
 #             #hydrogen mass over Boltzmann constant in simulation unit
 #             MHKB=115.98518596699539
 
-#             rho = primitives[self.mass_ids]
+#             E_gamma = primitives[self.mass_ids]
 #             p   = primitives[self.energy_ids]
             
 #             # Physical temperature like Athena (Kelvin)
-#             # numeric factor mirrors their 1.272727*MHKB*p/rho
-#             T_phys = 1.272727 * MHKB * p / (rho + self.eps)
+#             # numeric factor mirrors their 1.272727*MHKB*p/E_gamma
+#             T_phys = 1.272727 * MHKB * p / (E_gamma + self.eps)
             
 #             # Hot vs. cool branches (Spitzer / Parker)
 #             temp7 = T_phys / 1.0e7
-#             ne2   = jnp.maximum(EPSILON * rho, self.eps)  # guard
+#             ne2   = jnp.maximum(EPSILON * E_gamma, self.eps)  # guard
             
 #             kappa_hot  = (1.7e11 * temp7**2.5) / (1.0 + 0.029 * jnp.log(temp7 / jnp.sqrt(ne2)))  # NATURAL log
 #             kappa_cool = 2.5e5 * jnp.sqrt(jnp.maximum(T_phys / 1.0e4, 0.0))
             
 #             kappa = jnp.where(T_phys > 6.6e4, kappa_hot, kappa_cool)
             
-#             # Athena "adjust for units": multiply by 1.4*MHKB/rho
-#             kappa = kappa * 1.4 * MHKB / (rho + self.eps)
+#             # Athena "adjust for units": multiply by 1.4*MHKB/E_gamma
+#             kappa = kappa * 1.4 * MHKB / (E_gamma + self.eps)
             
 #             # Apply El-Badry ceiling here (saturation comes later)
 #             k_ceiling = 1.8e12/ DELTA * 1.4 * MHKB #1.8e12 / DELTA * 1.4 * MHKB
@@ -455,16 +512,16 @@ class EquationManager:
 #             MHKB = 115.98518596699539
 #             EPSILON = 3468.366826027353
 
-#             rho = primitives[self.mass_ids]
+#             E_gamma = primitives[self.mass_ids]
 #             p   = primitives[self.energy_ids]
 
 #             # Temperature in Kelvin (matching Athena++ line 416)
-#             T_phys = 1.272727 * MHKB * p / (rho + self.eps)
+#             T_phys = 1.272727 * MHKB * p / (E_gamma + self.eps)
 
 #             # Hot vs. cool branches (matching Athena++ lines 418-427)
 #             temp7 = T_phys / 1.0e7
 #             temp4 = T_phys / 1.0e4
-#             ne2   = EPSILON * rho
+#             ne2   = EPSILON * E_gamma
 
 #             # Spitzer conductivity for hot gas (T > 6.6e4 K)
 #             kappa_hot = (1.7e11 * temp7**2.5) / (1.0 + 0.029 * jnp.log(temp7 / jnp.sqrt(ne2)))
@@ -477,7 +534,7 @@ class EquationManager:
 
 #             # Adjust for Athena++ units (line 430)
 #             # This converts from physical units to code units
-#             kappa = kappa * 1.4 * MHKB / (rho + self.eps)
+#             kappa = kappa * 1.4 * MHKB / (E_gamma + self.eps)
 
 #             return kappa
 
