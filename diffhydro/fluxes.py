@@ -45,6 +45,10 @@ class ConvectiveFlux:
         primitives = eq.get_primitives_from_conservatives(sol)
 
         # reconstructed face primitives (full state, incl passives)
+        jax.debug.print("fluxes: any nan primitives = {}", jnp.any(jnp.isnan(primitives)))
+        jax.debug.print("fluxes: any inf primitives = {}", jnp.any(jnp.isinf(primitives)))
+        jax.debug.print("fluxes: min primitives = {}", jnp.min(primitives))
+        jax.debug.print("fluxes: max primitives = {}", jnp.max(primitives))
         primitives_xi_L = self.recon.reconstruct_xi(
             primitives,
             axis=ax,
@@ -364,6 +368,10 @@ class ConvectiveFlux_Radiative_transfer:
         primitives = eq.get_primitives_from_conservatives(sol)
 
         # reconstructed face primitives (full state, incl passives)
+        # jax.debug.print("fluxes: any nan primitives = {}", jnp.any(jnp.isnan(primitives)))
+        # jax.debug.print("fluxes: any inf primitives = {}", jnp.any(jnp.isinf(primitives)))
+        # jax.debug.print("fluxes: min primitives = {}", jnp.min(primitives))
+        # jax.debug.print("fluxes: max primitives = {}", jnp.max(primitives))
         primitives_xi_L = self.recon.reconstruct_xi(
             primitives,
             axis=ax,

@@ -65,7 +65,7 @@ class EquationManager:
         self.equation_type = "SINGLE-PHASE"#equation_information.equation_type
         self.thermal_conductivity_model = "SUTHERLAND"
         self.sutherland_parameters = [0.1, 1.0, 1.0]
-        self.cfl = 0.4
+        self.cfl = 0.4 #original value 0.4
         # self.mesh_shape = list(self.mesh_shape)
         self.R = 1.0
         self.cp = self.gamma / (self.gamma - 1.0) * self.R
@@ -81,6 +81,7 @@ class EquationManager:
         prim_a = primitives[self.active_slice]
 
         E_gamma = prim_a[self.mass_ids]
+        # jax.debug.print("E_gamma: {v}", v=E_gamma[ :, :, :])
         u, v, w = (prim_a[i] for i in self.vel_ids)
         # # p = prim_a[self.energy_ids]
         # if self.isothermal:
@@ -132,6 +133,7 @@ class EquationManager:
         For the RT moment system, active primitives and conservatives are identical.
         """
         cons_a = conservatives[self.active_slice]
+        # jax.debug.print("cons_a: {v}", v=cons_a[:, 0, 0, 0])
         E_gamma = jnp.maximum(cons_a[self.mass_ids], self.eps) #ajouter garde fous division par 0 
         F_gamma_x = cons_a[1]/E_gamma
         F_gamma_y = cons_a[2]/E_gamma
@@ -232,6 +234,9 @@ class EquationManager:
         E_gamma_safe = jnp.maximum(E_gamma, self.eps)
 
         mom_x, mom_y, mom_z = (cons_a[i] for i in self.vel_ids)
+        # mom_x = jnp.maximum(mom_x, self.eps)
+        # mom_y = jnp.maximum(mom_y, self.eps)
+        # mom_z = jnp.maximum(mom_z, self.eps)
         F_gamma_x = mom_x #/ E_gamma_safe
         F_gamma_y = mom_y #/ E_gamma_safe
         F_gamma_z = mom_z #/ E_gamma_safe
@@ -248,12 +253,12 @@ class EquationManager:
         # jax.debug.print("flux_a: {v}", v=flux_a[0, :, :, :])
         # nonzero_coords = jnp.argwhere(flux_a[0, :, :, :] != 0, size=flux_a[0].size, fill_value=-1)
         # jax.debug.print("flux_a non-zero coords (i,j,k): {v}", v=nonzero_coords)
-        nx, ny, nz = flux_a.shape[1], flux_a.shape[2], flux_a.shape[3]
-        coords = jnp.argwhere(flux_a[0, :, :, :] != 0, size=nx * ny * nz, fill_value=-1)
-        x, y, z = coords[:, 0], coords[:, 1], coords[:, 2]
-        jax.debug.print("flux_a non-zero x (padding=-1): {v}", v=x)
-        jax.debug.print("flux_a non-zero y (padding=-1): {v}", v=y)
-        jax.debug.print("flux_a non-zero z (padding=-1): {v}", v=z)
+        # nx, ny, nz = flux_a.shape[1], flux_a.shape[2], flux_a.shape[3]
+        # coords = jnp.argwhere(flux_a[0, :, :, :] != 0, size=nx * ny * nz, fill_value=-1)
+        # x, y, z = coords[:, 0], coords[:, 1], coords[:, 2]
+        # jax.debug.print("flux_a non-zero x (padding=-1): {v}", v=x)
+        # jax.debug.print("flux_a non-zero y (padding=-1): {v}", v=y)
+        # jax.debug.print("flux_a non-zero z (padding=-1): {v}", v=z)
 
 
         

@@ -103,7 +103,37 @@ class StellarRadiationForce:
     def timestep(self, sol):
         print("timestepblast")
         return 1e30
+    
+    # def force(self, i, sol, params, dt):
+    #     if self.one_injection:
+    #         inject_now = jnp.equal(i, 0)
+    #     else:
+    #         inject_now = True
 
+    #     amp = self.stromgren_rate * dt
+
+    #     ix = self.mesh_shape[0] // 2
+    #     iy = self.mesh_shape[1] // 2
+    #     iz = self.mesh_shape[2] // 2
+
+    #     e_inj = jnp.where(inject_now, amp, 0.0)
+    #     fx_inj = jnp.where(inject_now, amp * self.light_speed**(-2), 0.0)
+
+    #     if not self.momentum_only:
+    #         sol = sol.at[0, ix, iy, iz].add(e_inj)
+
+    #     if self.injection_momentum:
+    #         sol = sol.at[1, ix, iy, iz].add(fx_inj)
+
+    #     jax.debug.print("i = {}", i)
+    #     jax.debug.print("E injected at center = {}", sol[0, ix, iy, iz])
+    #     jax.debug.print("Fx injected at center = {}", sol[1, ix, iy, iz])
+
+    #     params_out = dict(params)
+    #     if "star_ages" in params and params["star_ages"] is not None:
+    #         params_out["star_ages"] = jnp.asarray(params["star_ages"]) + dt
+
+    #     return sol, params_out
     def force(self, i, sol, params, dt):
         if "star_masses" not in params or params["star_masses"] is None:
             return sol, params
@@ -145,20 +175,18 @@ class StellarRadiationForce:
                 if not self.gaussian_star:
                     sol = sol.at[0, ix, iy, iz].add(per_star_source)
                 else:
-                    sigma   = round(self.mesh_shape[0] // 100)  #ajouter des rounds pour des cas comme 199 ou 150 
-                    offsets = jnp.arange(
-                        -round(5 * self.mesh_shape[0] // 100),
-                         round(5 * self.mesh_shape[0] // 100) + 1
-                    )
-                    
+                    sigma = max(1,round(self.mesh_shape[0] // 100))  #ajouter des rounds pour des cas comme 199 ou 150 
+                    # offsets = jnp.arange(
+                    #     -round(5 * self.mesh_shape[0] // 100),
+                    #      round(5 * self.mesh_shape[0] // 100) + 1
+                    # )
+                    offsets = jnp.arange(-3 * sigma, 3 * sigma + 1)
                     if self.injection_geometry == "2D":
                         di2, dj2 = jnp.meshgrid(offsets, offsets, indexing="ij")
                         weights2 = jnp.exp(-(di2**2 + dj2**2) / (2 * sigma**2))
                         weights2 = weights2 / weights2.sum()
                         for s in range(star_positions.shape[0]):
-                            sol = sol.at[0, ix[s], iy[s] + di2, iz[s] + dj2].add(
-                                per_star_source[s] * weights2
-                            )
+                            sol = sol.at[0, ix[s], iy[s] + di2, iz[s] + dj2].add(per_star_source[s] * weights2)
                             # sol = sol.at[1, ix[s], iy[s] + di2, iz[s] + dj2].add(per_star_source[s] * weights2 *self.light_speed**(-2))
                             # sol = sol.at[2:3, ix[s], iy[s] + di2, iz[s] + dj2].add(0)
                     elif self.injection_geometry == "3D":
@@ -168,22 +196,58 @@ class StellarRadiationForce:
 
                         for s in range(star_positions.shape[0]):
                             sol = sol.at[0, ix[s] + di3, iy[s] + dj3, iz[s] + dk3].add(
-                                per_star_source[s] * weights3
-                            )
+                                per_star_source[s] * weights3)
+                            
                     # ── Injection de momentum ─────────────────────────────────────────────
-                    if self.injection_momentum == True:
+                    # ── Injection de momentum orientée +x ────────────────────────────────
+                    # if self.injection_momentum:
+                    #     for s in range(star_positions.shape[0]):
+                    #         if self.injection_geometry == "2D":
+                    #             di2, dj2 = jnp.meshgrid(offsets, offsets, indexing="ij")
+
+                    #             weights2 = jnp.exp(-(di2**2 + dj2**2) / (2 * sigma**2))
+                    #             mask_x = (di2 >= 0).astype(weights2.dtype)
+                    #             weights_dir = weights2 * mask_x
+                    #             weights_dir = weights_dir / (weights_dir.sum() + 1e-30)
+
+                    #             sol = sol.at[1, ix[s], iy[s] + di2, iz[s] + dj2].add(
+                    #             per_star_source[s] * weights_dir * self.light_speed**(-2))
+
+                    # elif self.injection_geometry == "3D":
+                    #     di3, dj3, dk3 = jnp.meshgrid(offsets, offsets, offsets, indexing="ij")
+
+                    #     weights3 = jnp.exp(-(di3**2 + dj3**2 + dk3**2) / (2 * sigma**2))
+                    #     mask_x = (di3 >= 0).astype(weights3.dtype)
+                    #     weights_dir = weights3 * mask_x
+                    #     weights_dir = weights_dir / (weights_dir.sum() + 1e-30)
+
+                    #     sol = sol.at[1, ix[s] + di3, iy[s] + dj3, iz[s] + dk3].add(
+                    #     per_star_source[s] * weights_dir * self.light_speed**(-2))
+                    if self.injection_momentum:
                         for s in range(star_positions.shape[0]):
-                            sol = sol.at[1, ix[s], iy[s] + di2, iz[s] + dj2].add(per_star_source[s] * weights2 *self.light_speed**(-2))#
-                            # sol = sol.at[2:3, ix[s], iy[s] + di2, iz[s] + dj2].add(0)
-                    #old version non functionnal
-                    # xi           = jnp.arange(43, 57)
-                    # total_source = jnp.sum(per_star_source)
-                    # sol          = sol.at[1:3, xi, 0, xi].add(
-                    #     total_source / len(xi)  
+                            if self.injection_geometry == "2D":
+                                di2, dj2 = jnp.meshgrid(offsets, offsets, indexing="ij")
+                                weights2 = jnp.exp(-(di2**2 + dj2**2) / (2 * sigma**2))
+                                mask_x = (di2 >= 0).astype(weights2.dtype)
+                                weights_dir = weights2 * mask_x
+                                weights_dir = weights_dir / (weights_dir.sum() + 1e-30)
+                                sol = sol.at[1, ix[s], iy[s] + di2, iz[s] + dj2].add(per_star_source[s] * weights_dir * self.light_speed**(-2))
+
+                            elif self.injection_geometry == "3D":
+                                di3, dj3, dk3 = jnp.meshgrid(offsets, offsets, offsets, indexing="ij")
+                                weights3 = jnp.exp(-(di3**2 + dj3**2 + dk3**2) / (2 * sigma**2))
+                                mask_x = (di3 >= 0).astype(weights3.dtype)
+                                weights_dir = weights3 * mask_x
+                                weights_dir = weights_dir / (weights_dir.sum() + 1e-30)
+                                sol = sol.at[1, ix[s] + di3, iy[s] + dj3, iz[s] + dk3].add(per_star_source[s] * weights_dir * self.light_speed**(-2))
+
+                        #old version non functionnal
+                        # xi           = jnp.arange(43, 57)
+                        # total_source = jnp.sum(per_star_source)
+                        # sol          = sol.at[1:3, xi, 0, xi].add(
+                        #     total_source / len(xi)  
                     
-                    #     )#self.light_speed**2 *
-
-
+                        #     )#self.light_speed**2 *
         # ── Debug ─────────────────────────────────────────────────────────────
         if self.debug:
             z_idx        = self.mesh_shape[2] // 2
@@ -244,6 +308,18 @@ class StellarRadiationForce:
             jax.debug.print("Count log(|value|) < threshold: {}", n_below_log)
             jax.debug.print("X where log < threshold: [{}, {}] (size: {})", x_below_min.astype(jnp.int32), x_below_max.astype(jnp.int32), x_below_size.astype(jnp.int32))
             jax.debug.print("Y where log < threshold: [{}, {}] (size: {})", y_below_min.astype(jnp.int32), y_below_max.astype(jnp.int32), y_below_size.astype(jnp.int32))
+            xmid = self.mesh_shape[0] // 2
+            ymid = self.mesh_shape[1] // 2
+            zmid = self.mesh_shape[2] // 2
+            Fx_line = sol[1, :, ymid, zmid]
+            jax.debug.print("Fx line: {}", Fx_line)
+            jax.debug.print("sum Fx(x>x0) = {}", jnp.sum(Fx_line[xmid+1:]))
+            jax.debug.print("sum Fx(x<x0) = {}", jnp.sum(Fx_line[:xmid]))
+            x0 = 0
+            Fx_line = sol[1, :, ymid, zmid]
+            jax.debug.print("Fx line at y=50,z=50: {}", Fx_line)
+            jax.debug.print("Fx at injection point x=0: {}", Fx_line[x0])
+            jax.debug.print("sum Fx for x>0: {}", jnp.sum(Fx_line[x0+1:]))
 
         params_out               = dict(params)
         params_out["star_ages"]  = star_ages_new

@@ -137,11 +137,13 @@ class hydro:
                 snapshot_every: int | None = None,
                 snapshot_dir: str = "snapshots",
                 snapshot_prefix: str = "fields",
-                track_time: bool = True):
+                track_time: bool = True,
+                debug_fixed_dt: float | None = None):
         # Paramètres fixes d'une simulation (plutôt statiques vis-à-vis de l'optimisation).
    #     self.init_dt = init_dt # tiny starting timestep to smooth out anything too sharp
         self.splitting_schemes = splitting_schemes #strang splitting for x,y,z sweeps
         self.max_dt = max_dt
+        self.debug_fixed_dt = debug_fixed_dt
         self.boundary = None
         # Nombre d'itérations globales (chaque super-step applique un schéma de sweep complet).
         self.n_super_step = n_super_step
@@ -420,7 +422,12 @@ class hydro:
         # Calcule un dt local admissible puis le borne par max_dt.
         ttt = self.timestep(fields)
         ttt = jnp.minimum(self.max_dt, ttt)
-        dt = (ttt)
+        if self.debug_fixed_dt is not None: #debug option by the chat
+            fixed_dt = jnp.array(self.debug_fixed_dt, dtype=ttt.dtype)
+            dt = jnp.minimum(ttt, fixed_dt)
+            jax.debug.print("hydro_core: debug_fixed_dt active, dt = {}", dt)
+        else:
+            dt = ttt
         # Applique un pas hydro avec le dt sélectionné.
         fields, params = self._hydrostep(i, (fields, params), dt)
         # return both the new state and the dt so host can accumulate time
