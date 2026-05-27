@@ -4,6 +4,7 @@ from typing import List
 from .solver import recon
 from .solver.stencils import *
 from .physics import mhd
+from .utils.debug_checks import _check_finite
 import jax.numpy as jnp
 import jax
 from jax.experimental import checkify
@@ -44,11 +45,8 @@ class ConvectiveFlux:
         # cell primitives
         primitives = eq.get_primitives_from_conservatives(sol)
 
-        # reconstructed face primitives (full state, incl passives)
-        jax.debug.print("fluxes: any nan primitives = {}", jnp.any(jnp.isnan(primitives)))
-        jax.debug.print("fluxes: any inf primitives = {}", jnp.any(jnp.isinf(primitives)))
-        jax.debug.print("fluxes: min primitives = {}", jnp.min(primitives))
-        jax.debug.print("fluxes: max primitives = {}", jnp.max(primitives))
+        # quick finite check on primitives before reconstruction
+        _check_finite("primitives", primitives)
         primitives_xi_L = self.recon.reconstruct_xi(
             primitives,
             axis=ax,
@@ -367,11 +365,8 @@ class ConvectiveFlux_Radiative_transfer:
         # cell primitives
         primitives = eq.get_primitives_from_conservatives(sol)
 
-        # reconstructed face primitives (full state, incl passives)
-        # jax.debug.print("fluxes: any nan primitives = {}", jnp.any(jnp.isnan(primitives)))
-        # jax.debug.print("fluxes: any inf primitives = {}", jnp.any(jnp.isinf(primitives)))
-        # jax.debug.print("fluxes: min primitives = {}", jnp.min(primitives))
-        # jax.debug.print("fluxes: max primitives = {}", jnp.max(primitives))
+        # quick finite check on primitives before reconstruction
+        _check_finite("primitives", primitives)
         primitives_xi_L = self.recon.reconstruct_xi(
             primitives,
             axis=ax,
