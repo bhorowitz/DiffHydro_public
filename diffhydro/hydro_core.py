@@ -32,6 +32,7 @@ import jax.lax as lax
 
 import numpy as onp
 from jax.experimental import io_callback  # side-effect callback inside jit/pjit
+from .utils.debug_checks import _check_finite
 
 # ---- Remat/checkpoint compatibility shim ----
 import jax
@@ -452,6 +453,9 @@ class hydro:
         else:
             # Fallback split-directionnel classique.
             fields = self.sweep_stack(state, dt, i)
+
+        # Quick sanity check after the hydro update (before final forcing)
+        _check_finite("sol after hydro", fields)
 
         # Demi-pas final des forces (ferme le splitting symétrique).
         fields, params = self.forcing(i, fields, params, dt/2)

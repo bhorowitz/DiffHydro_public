@@ -39,7 +39,7 @@ class EquationManager:
     # Active variable names/order (single source of truth)
     active_names: tuple[str, ...] = ("E_gamma", "F_gamma_x", "F_gamma_y", "F_gamma_z")#,"p" 
     # passive_names: tuple[str, ...] = ("E_gamma",) #new
-
+    debug: bool = False
     # Derived index maps (filled in __post_init__)
     active_map: dict[str, int] = field(init=False, repr=False)
     mass_ids: int = field(init=False)
@@ -47,6 +47,7 @@ class EquationManager:
     n_active: int = field(init=False)
     # energy_ids: int = field(init=False)
     def __post_init__(self):
+        self.debug = bool(self.debug)
         self.n_active = len(self.active_names)
         if self.n_active > self.n_cons:
             raise ValueError(
@@ -55,6 +56,7 @@ class EquationManager:
 
         self.active_map = {name: i for i, name in enumerate(self.active_names)}
         self.mass_ids = self.active_map["E_gamma"]
+        
         self.vel_ids = (
             self.active_map["F_gamma_x"],
             self.active_map["F_gamma_y"],
@@ -65,7 +67,7 @@ class EquationManager:
         self.equation_type = "SINGLE-PHASE"#equation_information.equation_type
         self.thermal_conductivity_model = "SUTHERLAND"
         self.sutherland_parameters = [0.1, 1.0, 1.0]
-        self.cfl = 0.4 #original value 0.4
+        self.cfl = 0.01 #original value 0.4
         # self.mesh_shape = list(self.mesh_shape)
         self.R = 1.0
         self.cp = self.gamma / (self.gamma - 1.0) * self.R
@@ -96,7 +98,13 @@ class EquationManager:
             prim_p = primitives[self.passive_slice]                 # (n_passive,...)
             cons_p = E_gamma[jnp.newaxis, ...] * prim_p             # E_gamma*s_k
             return jnp.concatenate([cons_a,cons_p], axis=0) #, cons_p
-
+        if self.debug:
+            jax.debug.print("any nan primitives = {}", jnp.any(jnp.isnan(primitives)))
+            jax.debug.print("any inf primitives = {}", jnp.any(jnp.isinf(primitives)))
+            jax.debug.print("min primitives = {}", jnp.nanmin(primitives))
+            jax.debug.print("max primitives = {}", jnp.nanmax(primitives))
+            # jax.debug.print("Value variables mass ids: {}", self.mass_ids)
+            
         return cons_a
 
     def get_primitives_from_conservatives(self, conservatives):
@@ -104,7 +112,7 @@ class EquationManager:
         conservatives: (>= n_active, ...)
         returns primitives: (>= n_active, ...)
         """
-        cons_a = conservatives[self.active_slice]
+        # cons_a = conservatives[self.active_slice]
 
         # E_gamma = cons_a[self.mass_ids]
         # E_gamma_safe = jnp.maximum(E_gamma, self.eps)
@@ -133,7 +141,9 @@ class EquationManager:
         For the RT moment system, active primitives and conservatives are identical.
         """
         cons_a = conservatives[self.active_slice]
-        # jax.debug.print("cons_a: {v}", v=cons_a[:, 0, 0, 0])
+        if self.debug:
+            jax.debug.print("cons_a_0: {v}", v=cons_a[0,0,50,50])
+
         E_gamma = jnp.maximum(cons_a[self.mass_ids], self.eps) #ajouter garde fous division par 0 
         F_gamma_x = cons_a[1]/E_gamma
         F_gamma_y = cons_a[2]/E_gamma
@@ -163,10 +173,10 @@ class EquationManager:
     def n_passive(self) -> int:
         return max(0, self.n_cons - self.n_active)
 
-    def get_pressure(self, e, E_gamma):
-        if self.isothermal:
-            return self.get_isothermal_pressure(E_gamma)
-        return (self.gamma - 1.0) * jnp.maximum(e, self.eps) * jnp.maximum(E_gamma, self.eps)
+    # def get_pressure(self, e, E_gamma):
+    #     if self.isothermal:
+    #         return self.get_isothermal_pressure(E_gamma)
+    #     return (self.gamma - 1.0) * jnp.maximum(e, self.eps) * jnp.maximum(E_gamma, self.eps)
     
     def get_signal_speed(self, primitives, axis): #probablement a changer pour c of speed
         # p = primitives[self.energy_ids]
@@ -183,18 +193,46 @@ class EquationManager:
         return (3.0 + 4.0 * f * f) / (5.0 + 2.0 * jnp.sqrt(4.0 - 3.0 * f * f))
 
 
-    def _radiation_pressure_tensor(self, E_gamma: Array, F_vec: Array) -> Array:
-        """
-        Returns P_ij with M1 closure:
-        P = D * E
-        D = (1-chi)/2 I + (3chi-1)/2 n⊗n
-        """
-        c = self.light_speed
-        F_norm = jnp.sqrt(jnp.sum(F_vec * F_vec, axis=0))
-        reduced_flux = F_norm / (c * jnp.maximum(E_gamma, self.eps))
-        chi = self._eddington_factor(reduced_flux)
+    # def _radiation_pressure_tensor(self, E_gamma: Array, F_vec: Array) -> Array:
+    #     """
+    #     Returns P_ij with M1 closure:
+    #     P = D * E
+    #     D = (1-chi)/2 I + (3chi-1)/2 n⊗n
+    #     """
+        
+    #     c = self.light_speed
+    #     F_norm = jnp.sqrt(jnp.sum(F_vec * F_vec, axis=0))
+    #     reduced_flux = F_norm / (c * jnp.maximum(E_gamma, self.eps))
+    #     chi = self._eddington_factor(reduced_flux)
 
-        n = F_vec / jnp.maximum(F_norm, self.eps)
+    #     n = F_vec / jnp.maximum(F_norm, self.eps)
+
+    #     ndim = E_gamma.ndim
+    #     eye = jnp.eye(3).reshape(3, 3, *([1] * ndim))
+    #     outer = n[:, None, ...] * n[None, :, ...]
+
+    #     D = (
+    #         ((1.0 - chi) / 2.0)[None, None, ...] * eye
+    #         + ((3.0 * chi - 1.0) / 2.0)[None, None, ...] * outer
+    #     )
+
+    #     return D * E_gamma[None, None, ...]
+
+
+    def _radiation_pressure_tensor(self, E_gamma, F_vec):
+        c = self.light_speed
+
+        E_safe = jnp.where(jnp.isfinite(E_gamma) & (E_gamma > self.eps), E_gamma, self.eps)
+        F_vec_safe = jnp.where(jnp.isfinite(F_vec), F_vec, 0.0)
+
+        F_norm = jnp.sqrt(jnp.sum(F_vec_safe * F_vec_safe, axis=0))
+        F_norm_safe = jnp.maximum(F_norm, self.eps)
+
+        reduced_flux = F_norm / (c * E_safe)
+        reduced_flux = jnp.where(jnp.isfinite(reduced_flux), reduced_flux, 0.0)
+
+        chi = self._eddington_factor(reduced_flux)
+        n = F_vec_safe / F_norm_safe
 
         ndim = E_gamma.ndim
         eye = jnp.eye(3).reshape(3, 3, *([1] * ndim))
@@ -204,9 +242,13 @@ class EquationManager:
             ((1.0 - chi) / 2.0)[None, None, ...] * eye
             + ((3.0 * chi - 1.0) / 2.0)[None, None, ...] * outer
         )
+        if self.debug:
+            jax.debug.print("E_gamma has nan? {}", jnp.any(jnp.isnan(E_gamma)))
+            jax.debug.print("F_vec has nan? {}", jnp.any(jnp.isnan(F_vec)))
+            jax.debug.print("E_gamma min/max: {} {}", jnp.min(E_gamma), jnp.max(E_gamma))
+            jax.debug.print("F_norm min/max: {} {}", jnp.min(F_norm), jnp.max(F_norm))
 
-        return D * E_gamma[None, None, ...]
-
+        return D * E_safe[None, None, ...]
 
     # ---------------------------
     # def get_specific_energy(self, E_gamma: Array):
@@ -250,18 +292,32 @@ class EquationManager:
             [E_flux, c2 * P[axis, 0], c2 * P[axis, 1], c2 * P[axis, 2]],
             axis=0,
         )
-        # jax.debug.print("flux_a: {v}", v=flux_a[0, :, :, :])
-        # nonzero_coords = jnp.argwhere(flux_a[0, :, :, :] != 0, size=flux_a[0].size, fill_value=-1)
-        # jax.debug.print("flux_a non-zero coords (i,j,k): {v}", v=nonzero_coords)
-        # nx, ny, nz = flux_a.shape[1], flux_a.shape[2], flux_a.shape[3]
-        # coords = jnp.argwhere(flux_a[0, :, :, :] != 0, size=nx * ny * nz, fill_value=-1)
-        # x, y, z = coords[:, 0], coords[:, 1], coords[:, 2]
-        # jax.debug.print("flux_a non-zero x (padding=-1): {v}", v=x)
-        # jax.debug.print("flux_a non-zero y (padding=-1): {v}", v=y)
-        # jax.debug.print("flux_a non-zero z (padding=-1): {v}", v=z)
+        if self.debug:
+            jax.debug.print("flux_a: {v}", v=flux_a[0, :, :, :])
+            nonzero_coords = jnp.argwhere(flux_a[0, :, :, :] != 0, size=flux_a[0].size, fill_value=-1)
+            jax.debug.print("flux_a non-zero coords (i,j,k): {v}", v=nonzero_coords)
+            nx, ny, nz = flux_a.shape[1], flux_a.shape[2], flux_a.shape[3]
+            coords = jnp.argwhere(flux_a[0, :, :, :] != 0, size=nx * ny * nz, fill_value=-1)
+            x, y, z = coords[:, 0], coords[:, 1], coords[:, 2]
+            jax.debug.print("flux_a non-zero x (padding=-1): {v}", v=x)
+            jax.debug.print("flux_a non-zero y (padding=-1): {v}", v=y)
+            jax.debug.print("flux_a non-zero z (padding=-1): {v}", v=z)
 
+            mask = flux_a[0] != 0
+            n_nonzero = jnp.sum(mask)
 
-        
+            jax.debug.print("flux_a[0] min/max: {} {}", jnp.min(flux_a[0]), jnp.max(flux_a[0]))
+            jax.debug.print("flux_a[0] nonzero count: {}", n_nonzero)
+
+            jax.debug.print("F_gamma_x min/max: {} {}", jnp.min(F_gamma_x), jnp.max(F_gamma_x))
+            jax.debug.print("F_gamma_y min/max: {} {}", jnp.min(F_gamma_y), jnp.max(F_gamma_y))
+            jax.debug.print("F_gamma_z min/max: {} {}", jnp.min(F_gamma_z), jnp.max(F_gamma_z))
+            jax.debug.print("c2*P[axis,0] min/max: {} {}", 
+                            jnp.min(c2 * P[axis, 0]), jnp.max(c2 * P[axis, 0]))
+            jax.debug.print("c2*P[axis,1] min/max: {} {}", 
+                            jnp.min(c2 * P[axis, 1]), jnp.max(c2 * P[axis, 1]))
+            jax.debug.print("c2*P[axis,2] min/max: {} {}", 
+                            jnp.min(c2 * P[axis, 2]), jnp.max(c2 * P[axis, 2]))
 
         if conservatives.shape[0] > self.n_active:
             # Passive block transporté de manière upwind dans ConvectiveFlux
@@ -269,7 +325,35 @@ class EquationManager:
 
         return flux_a
 
+    # def get_fluxes_xi(self, primitives, conservatives, axis: int): #version chat
+    #     prim_a = primitives[self.active_slice]
+    #     # cons_a = conservatives[self.active_slice]
 
+    #     E_gamma = jnp.maximum(prim_a[self.mass_ids], self.eps)
+
+    #     f_x, f_y, f_z = (prim_a[i] for i in self.vel_ids)
+    #     vel = (f_x,f_y,f_z)
+    #     ui = vel[axis]
+    #     E_gamma_ui = E_gamma * ui
+    #     F_gamma_x = E_gamma_ui * f_x
+    #     F_gamma_y = E_gamma_ui * f_y
+    #     F_gamma_z = E_gamma_ui * f_z
+        
+
+    #     F_vec = jnp.stack([F_gamma_x, F_gamma_y, F_gamma_z], axis=0)
+
+    #     P = self._radiation_pressure_tensor(E_gamma, F_vec)
+
+    #     c2 = self.light_speed * self.light_speed
+    #     flux_a = jnp.stack(
+    #         [F_vec[axis], c2 * P[axis, 0], c2 * P[axis, 1], c2 * P[axis, 2]],
+    #         axis=0,
+    #     )
+
+    #     if conservatives.shape[0] > self.n_active:
+    #         return jnp.concatenate([flux_a, conservatives[self.passive_slice]], axis=0)
+
+    #     return flux_a
 
 #     def get_isothermal_pressure(self, E_gamma):
 #         E_gamma_safe = jnp.maximum(E_gamma, self.eps)

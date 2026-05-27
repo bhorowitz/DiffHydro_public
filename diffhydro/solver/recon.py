@@ -558,10 +558,10 @@ class PPM_CW:
         """
         dq_b = q   - qm1
         dq_f = qp1 - q
-        jax.debug.print("nan dqp = {}", jnp.any(jnp.isnan(dq_f)))
-        jax.debug.print("nan dqm = {}", jnp.any(jnp.isnan(dq_b)))
-        jax.debug.print("min dqm = {}", jnp.min(dq_b))
-        jax.debug.print("max dqm = {}", jnp.max(dq_b))
+        # jax.debug.print("nan dqp = {}", jnp.any(jnp.isnan(dq_f)))
+        # jax.debug.print("nan dqm = {}", jnp.any(jnp.isnan(dq_b)))
+        # jax.debug.print("min dqm = {}", jnp.min(dq_b))
+        # jax.debug.print("max dqm = {}", jnp.max(dq_b))
         r    = self._safe_div(dq_f, dq_b, self.eps_ratio)
         phi  = self.limiter_fun(r)
         return phi * dq_b
