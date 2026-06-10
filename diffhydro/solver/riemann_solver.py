@@ -6,6 +6,8 @@ import jax.numpy as jnp
 from jax import Array
 
 from .signal_speeds import compute_sstar
+from diffhydro.equationmanager_radiative_transf_no_chat import EquationManager as EquationManager_RT
+from diffhydro.physics.radiative_transfer import StellarRadiationForce
 
 #adapted from jaxfluids, added more magnetic-solvers, need to reorganize sometime...
 
@@ -30,7 +32,8 @@ class RiemannSolver(ABC): #class global sur tous ce programme
         self.equation_manager = equation_manager
 #        self.equation_information = equation_manager.equation_information
         self.signal_speed = signal_speed
-
+        self.StellarRadiationForce = StellarRadiationForce()
+        self.equation_manager_RT = EquationManager_RT() #for radiative transfer specific helpers, to avoid circular imports
         # MINOR AXIS DIRECTIONS 
         self.velocity_minor = self.equation_manager.velocity_minor_axes
 
@@ -232,25 +235,192 @@ class LaxFriedrichs_Radiative_transfer(RiemannSolver):
             ) -> None:
         super().__init__(equation_manager, signal_speed)
 
+        self.E_id = self.equation_manager.mass_ids
+        self.eps = self.equation_manager.eps
+        self.c = self.equation_manager.light_speed
+        self.c_square = self.c * self.c  # c^2 for radiation transport (from light_speed)
+        self.equation_manager_RT = EquationManager_RT() #for radiative transfer specific helpers, to avoid circular imports
+        self.velocity_ids_RT = self.equation_manager_RT.vel_ids #override in case of radiative transfer equation manager, to ensure we get the right velocity indices for the flux calculations
+        self.mass_ids_RT = self.equation_manager_RT.mass_ids #override in case of radiative transfer equation manager, to ensure we get the right mass/energy indices for the flux calculations
+        self.stellar_force = StellarRadiationForce()
     def _solve_riemann_problem_xi_single_phase(
-            self, 
+            self,
             primitives_L: Array,
-            primitives_R: Array, 
+            primitives_R: Array,
             conservatives_L: Array,
-            conservatives_R: Array, 
+            conservatives_R: Array,
             axis: int,
             **kwargs
             ) -> Tuple[Array, Array, Array]:
+        # jax.debug.print("c^2 test avant: {dtype}", dtype=self.c_square)
+        # -------------------------
+        # États gauche / droite
+        # -------------------------
+        Eg_L = jnp.maximum(primitives_L[self.E_id], self.eps)
+        Eg_R = jnp.maximum(primitives_R[self.E_id], self.eps)
 
+        fx_L, fy_L, fz_L = (primitives_L[i] for i in self.equation_manager.vel_ids)
+        fx_R, fy_R, fz_R = (primitives_R[i] for i in self.equation_manager.vel_ids)
+
+        F_norm_L = Eg_L * jnp.sqrt(fx_L * fx_L + fy_L * fy_L + fz_L * fz_L)
+        F_norm_R = Eg_R * jnp.sqrt(fx_R * fx_R + fy_R * fy_R + fz_R * fz_R)
+
+        f_L = F_norm_L / (self.c * Eg_L)
+        f_R = F_norm_R / (self.c * Eg_R)
+        # -------------------------
+        # Overflow / non-finite checks
+        # -------------------------
+        dtype_EgL = Eg_L.dtype
+        finfo_EgL = jnp.finfo(dtype_EgL)
+        max_float = finfo_EgL.max
+
+        EgL_nan = jnp.any(jnp.isnan(Eg_L))
+        EgR_nan = jnp.any(jnp.isnan(Eg_R))
+        FL_nan = jnp.any(jnp.isnan(F_norm_L))
+        FR_nan = jnp.any(jnp.isnan(F_norm_R))
+        fL_nan = jnp.any(jnp.isnan(f_L))
+        fR_nan = jnp.any(jnp.isnan(f_R))
+
+        EgL_inf = jnp.any(jnp.isinf(Eg_L))
+        EgR_inf = jnp.any(jnp.isinf(Eg_R))
+        FL_inf = jnp.any(jnp.isinf(F_norm_L))
+        FR_inf = jnp.any(jnp.isinf(F_norm_R))
+        fL_inf = jnp.any(jnp.isinf(f_L))
+        fR_inf = jnp.any(jnp.isinf(f_R))
+
+        EgL_nonfinite = jnp.any(~jnp.isfinite(Eg_L))
+        EgR_nonfinite = jnp.any(~jnp.isfinite(Eg_R))
+        FL_nonfinite = jnp.any(~jnp.isfinite(F_norm_L))
+        FR_nonfinite = jnp.any(~jnp.isfinite(F_norm_R))
+        fL_nonfinite = jnp.any(~jnp.isfinite(f_L))
+        fR_nonfinite = jnp.any(~jnp.isfinite(f_R))
+
+        EgL_near_overflow = jnp.any(jnp.abs(Eg_L) >= 0.9 * max_float)
+        EgR_near_overflow = jnp.any(jnp.abs(Eg_R) >= 0.9 * max_float)
+        FL_near_overflow = jnp.any(jnp.abs(F_norm_L) >= 0.9 * max_float)
+        FR_near_overflow = jnp.any(jnp.abs(F_norm_R) >= 0.9 * max_float)
+        fL_near_overflow = jnp.any(jnp.abs(f_L) >= 0.9 * max_float)
+        fR_near_overflow = jnp.any(jnp.abs(f_R) >= 0.9 * max_float)
+        # f_over_E_ratio = self.velocity_ids[0]/self.mass_ids 
+        jax.debug.print(
+            """
+            [LF_M1 BEFORE] axis={axis}
+            E_L(mean)={EgL_mean}
+            E_R(mean)={EgR_mean}
+            |F|_L(mean)={FnormL_mean}
+            |F|_R(mean)={FnormR_mean}
+            f_L(mean)={fL_mean}
+            f_R(mean)={fR_mean}
+            f_L max={fL_max}
+            f_R max={fR_max}
+            f_L in [0,1]? {fL_ok}
+            f_R in [0,1]? {fR_ok}
+            
+            dtype={dtype}
+            float_max={float_max}
+
+            E_L: nan={EgL_nan} inf={EgL_inf} nonfinite={EgL_nonfinite} near_overflow={EgL_near_overflow}
+            E_R: nan={EgR_nan} inf={EgR_inf} nonfinite={EgR_nonfinite} near_overflow={EgR_near_overflow}
+            |F|_L: nan={FL_nan} inf={FL_inf} nonfinite={FL_nonfinite} near_overflow={FL_near_overflow}
+            |F|_R: nan={FR_nan} inf={FR_inf} nonfinite={FR_nonfinite} near_overflow={FR_near_overflow}
+            f_L: nan={fL_nan} inf={fL_inf} nonfinite={fL_nonfinite} near_overflow={fL_near_overflow}
+            f_R: nan={fR_nan} inf={fR_inf} nonfinite={fR_nonfinite} near_overflow={fR_near_overflow}
+            """,
+            axis=axis,
+            EgL_mean=jnp.mean(Eg_L),
+            EgR_mean=jnp.mean(Eg_R),
+            FnormL_mean=jnp.mean(F_norm_L),
+            FnormR_mean=jnp.mean(F_norm_R),
+            fL_mean=jnp.mean(f_L),
+            fR_mean=jnp.mean(f_R),
+            fL_max=jnp.max(f_L),
+            fR_max=jnp.max(f_R),
+            fL_ok=jnp.all(f_L <= 1.0 + 1e-6),
+            fR_ok=jnp.all(f_R <= 1.0 + 1e-6),
+
+            dtype=dtype_EgL,
+            float_max=max_float,
+
+            EgL_nan=EgL_nan,
+            EgL_inf=EgL_inf,
+            EgL_nonfinite=EgL_nonfinite,
+            EgL_near_overflow=EgL_near_overflow,
+
+            EgR_nan=EgR_nan,
+            EgR_inf=EgR_inf,
+            EgR_nonfinite=EgR_nonfinite,
+            EgR_near_overflow=EgR_near_overflow,
+
+            FL_nan=FL_nan,
+            FL_inf=FL_inf,
+            FL_nonfinite=FL_nonfinite,
+            FL_near_overflow=FL_near_overflow,
+
+            FR_nan=FR_nan,
+            FR_inf=FR_inf,
+            FR_nonfinite=FR_nonfinite,
+            FR_near_overflow=FR_near_overflow,
+
+            fL_nan=fL_nan,
+            fL_inf=fL_inf,
+            fL_nonfinite=fL_nonfinite,
+            fL_near_overflow=fL_near_overflow,
+
+            fR_nan=fR_nan,
+            fR_inf=fR_inf,
+            fR_nonfinite=fR_nonfinite,
+            fR_near_overflow=fR_near_overflow,
+            
+            ordered=True,
+        )
+        
+        # jax.debug.print("sol = {}", self.stellar_force.sol, ordered=True)
+        # jax.debug.print("|F|/E {f_over_E_ratio}", f_over_E_ratio=f_over_E_ratio)
+        # -------------------------
+        # Flux physiques gauche / droite
+        # -------------------------
         fluxes_L = self.equation_manager.get_fluxes_xi(primitives_L, conservatives_L, axis)
+        fluxes_L = jnp.maximum(fluxes_L, 1e-12 )
         fluxes_R = self.equation_manager.get_fluxes_xi(primitives_R, conservatives_R, axis)
-
+        fluxes_R = jnp.maximum(fluxes_R, 1e-12 )
         celerity = self.equation_manager.light_speed
 
+        # -------------------------
+        # Flux de Lax-Friedrichs
+        # -------------------------
         fluxes_xi = 0.5 * (fluxes_L + fluxes_R) - 0.5 * celerity * (conservatives_R - conservatives_L)
-            
-        return fluxes_xi, None, None
 
+        # -------------------------
+        # Diagnostic sortie flux
+        # -------------------------
+        F_out_norm = jnp.sqrt(jnp.sum(fluxes_xi[1:] ** 2, axis=0))
+        E_out = jnp.maximum(conservatives_R[self.E_id], self.eps)
+        f_out = F_out_norm / (self.c * E_out)
+
+        jax.debug.print(
+                            """
+                [LF_M1 AFTER] axis={axis}
+                |F|_out(mean)={Fout_mean}
+                |F|_out(max)={Fout_max}
+                E_out(mean)={Eout_mean}
+                E_out(min)={Eout_min}
+                f_out(mean)={fout_mean}
+                f_out(max)={fout_max}
+                f_out constraint (f<=1)? {fout_ok}
+                """,
+                            axis=axis,
+                            Fout_mean=jnp.mean(F_out_norm),
+                            Fout_max=jnp.max(F_out_norm),
+                            Eout_mean=jnp.mean(E_out),
+                            Eout_min=jnp.min(E_out),
+                            fout_mean=jnp.mean(f_out),
+                            fout_max=jnp.max(f_out),
+                            fout_ok=jnp.all(f_out <= 1.0 + 1e-6),
+                            ordered=True,
+                        )
+        # jax.debug.print("c^2 test apres: {dtype}", dtype=self.c_square)
+        return fluxes_xi, None, None
+        
 class HLLC(RiemannSolver):
     """HLLC Riemann Solver
     Toro et al. 1994
@@ -569,21 +739,25 @@ class HLL(RiemannSolver):
 
         return fluxes_xi, None, None
 
-class HLL_MHD(RiemannSolver):
+class HLL_radiative_transfer(RiemannSolver):
     """
-    Two-wave HLL Riemann solver for ideal MHD.
-    Uses Davis-type bounds S_L, S_R from fast magnetosonic speeds.
+    Two-wave HLL Riemann solver for ideal hydrodynamics (Euler).
+    Uses Davis-type bounds S_L, S_R from the same signal_speed
+    function as HLLC.
     """
     def __init__(self, equation_manager, signal_speed, **kwargs):
         super().__init__(equation_manager, signal_speed)
 
     def _solve_riemann_problem_xi_single_phase(
             self,
-            primitives_L, primitives_R,
-            conservatives_L, conservatives_R,
+            primitives_L,
+            primitives_R,
+            conservatives_L,
+            conservatives_R,
             axis: int,
             **kwargs):
-        # Physical fluxes from the equation manager (same pattern as other solvers)
+
+        # Physical fluxes
         F_L = self.equation_manager.get_fluxes_xi(primitives_L, conservatives_L, axis)
         F_R = self.equation_manager.get_fluxes_xi(primitives_R, conservatives_R, axis)
 
@@ -591,22 +765,173 @@ class HLL_MHD(RiemannSolver):
         uL = primitives_L[self.velocity_ids[axis]]
         uR = primitives_R[self.velocity_ids[axis]]
 
-        # Fast magnetosonic speed bounds (requires EquationManagerMHD.get_fast_magnetosonic_speed)
-        c_fL = self.equation_manager.get_fast_magnetosonic_speed(primitives_L, axis)
-        c_fR = self.equation_manager.get_fast_magnetosonic_speed(primitives_R, axis)
+        # Speed of sound (same as HLLC)
+        cs_L = self.equation_manager.get_speed_of_sound(
+            primitives_L[self.equation_manager.energy_ids],
+            primitives_L[self.equation_manager.mass_ids],
+        )
+        cs_R = self.equation_manager.get_speed_of_sound(
+            primitives_R[self.equation_manager.energy_ids],
+            primitives_R[self.equation_manager.mass_ids],
+        )
 
-        # Davis bounds
-        S_L = jnp.minimum(uL - c_fL, uR - c_fR)
-        S_R = jnp.maximum(uL + c_fL, uR + c_fR)
+        # Davis-type bounds from the SAME signal_speed as HLLC
+        S_L_raw, S_R_raw = self.signal_speed(
+            uL, uR,
+            cs_L, cs_R,
+            E_gamma_L=primitives_L[self.mass_ids],
+            E_gamma_R=primitives_R[self.mass_ids],
+            p_L=primitives_L[self.energy_ids],
+            p_R=primitives_R[self.energy_ids],
+            gamma=self.equation_manager.gamma,
+        )
 
-        # Degenerate case: fallback to local Lax–Friedrichs if S_R ≈ S_L
-        denom = jnp.where(jnp.abs(S_R - S_L) < self.eps, 1.0, S_R - S_L)
+        # Enforce upwind: left waves negative, right waves positive
+        S_L = jnp.minimum(S_L_raw, 0.0)
+        S_R = jnp.maximum(S_R_raw, 0.0)
 
-        # HLL flux: (S_R F_L - S_L F_R + S_L S_R (U_R - U_L)) / (S_R - S_L)
-        fluxes_xi = (S_R * F_L - S_L * F_R + S_L * S_R * (conservatives_R - conservatives_L)) / denom
+        # HLL flux (only used where S_L < 0 < S_R)
+        # Safe denominator for that region
+        denom = S_R - S_L
+        denom_safe = jnp.where(jnp.abs(denom) < self.eps, 1.0, denom)
+
+        F_hll = (
+            S_R * F_L
+            - S_L * F_R
+            + S_L * S_R * (conservatives_R - conservatives_L)
+        ) / denom_safe
+
+        # Piecewise selection to avoid spurious division / NaNs
+        fluxes_xi = jnp.where(
+            S_L >= 0.0,
+            F_L,  # all waves go right
+            jnp.where(
+                S_R <= 0.0,
+                F_R,  # all waves go left
+                F_hll,
+            ),
+        )
 
         return fluxes_xi, None, None
+    
 
+class HLL_radiative_transfer_chat(RiemannSolver):
+    """
+    HLL pour transfert radiatif pur (M1).
+    Utilise des vitesses de signal dérivées du flux réduit f = |F| / (c E).
+    État radiatif (EquationManager):
+      primitives:   [E_gamma, F_gamma_x, F_gamma_y, F_gamma_z]
+      conservatives: [E_gamma, E_gamma*F_gamma_x, ...]
+    """
+
+    def __init__(self, equation_manager, **kwargs):
+        # signal_speed n'est plus utilisé, on passe None
+        super().__init__(equation_manager, signal_speed=None)
+        self.eqm = equation_manager
+        self.c   = float(equation_manager.light_speed)
+        self.eps = float(equation_manager.eps)
+
+        # Indices radiatifs fournis par l'EquationManager
+        self.E_id  = equation_manager.mass_ids      # 0 (E_gamma)
+        self.F_ids = equation_manager.vel_ids       # (1, 2, 3)
+
+    # ---------------------------
+    # Valeurs propres M1 en 1D
+    # ---------------------------
+    def _eigen_speeds_M1(self, f):
+        """
+        Vitesses propres +/- pour M1, en unités physiques (multipliées par c).
+        f = |F| / (c E), 0 <= f < 1.
+        Approximation standard:
+          lambda_{+-} = 0.5 * (f +- sqrt(4 - 3 f^2)) * c
+        """
+        f_clipped = jnp.clip(f, 0.0, 1.0 - 1e-6)
+        root = jnp.sqrt(jnp.maximum(4.0 - 3.0 * f_clipped**2, 0.0))
+        lam_plus  = 0.5 * (f_clipped + root) * self.c
+        lam_minus = 0.5 * (f_clipped - root) * self.c
+        return lam_minus, lam_plus
+
+    # ---------------------------
+    # Riemann 1D le long de axis
+    # ---------------------------
+    def _solve_riemann_problem_xi_single_phase(
+            self,
+            primitives_L,
+            primitives_R,
+            conservatives_L,
+            conservatives_R,
+            axis: int,
+            **kwargs):
+
+        # 1) Flux physiques radiatifs (M1 déjà géré par EquationManager)
+        F_L = self.eqm.get_fluxes_xi(primitives_L, conservatives_L, axis)
+        F_R = self.eqm.get_fluxes_xi(primitives_R, conservatives_R, axis)
+
+        # 2) Egamma gauche/droite
+        Eg_L = primitives_L[self.E_id]
+        Eg_R = primitives_R[self.E_id]
+
+        Eg_L_safe = jnp.maximum(Eg_L, self.eps)
+        Eg_R_safe = jnp.maximum(Eg_R, self.eps)
+
+        # 3) Vecteurs de flux radiatif F = (Fx,Fy,Fz) côté L/R,
+        #    à partir des primitives (où F_gamma_x/y/z sont déjà des flux physiques)
+        Fx_L = primitives_L[self.F_ids[0]]
+        Fy_L = primitives_L[self.F_ids[1]]
+        Fz_L = primitives_L[self.F_ids[2]]
+
+        Fx_R = primitives_R[self.F_ids[0]]
+        Fy_R = primitives_R[self.F_ids[1]]
+        Fz_R = primitives_R[self.F_ids[2]]
+
+        F_vec_L = jnp.stack([Fx_L, Fy_L, Fz_L], axis=0)
+        F_vec_R = jnp.stack([Fx_R, Fy_R, Fz_R], axis=0)
+
+        F_norm_L = jnp.sqrt(jnp.sum(F_vec_L * F_vec_L, axis=0))
+        F_norm_R = jnp.sqrt(jnp.sum(F_vec_R * F_vec_R, axis=0))
+
+        # 4) Flux réduit f = |F| / (c E)
+        f_L = F_norm_L / (self.c * Eg_L_safe)
+        f_R = F_norm_R / (self.c * Eg_R_safe)
+
+
+
+        # 5) Valeurs propres M1 pour chaque côté
+        lamL_minus, lamL_plus = self._eigen_speeds_M1(f_L)
+        lamR_minus, lamR_plus = self._eigen_speeds_M1(f_R)
+
+        # 6) Bornes HLL (Davis-type)
+        S_L_raw = jnp.minimum(lamL_minus, lamR_minus)
+        S_R_raw = jnp.maximum(lamL_plus,  lamR_plus)
+
+        # Upwind: S_L <= 0 <= S_R
+        S_L = jnp.minimum(S_L_raw, 0.0)
+        S_R = jnp.maximum(S_R_raw, 0.0)
+
+        # 7) Flux HLL
+        denom = S_R - S_L
+        denom_safe = jnp.where(jnp.abs(denom) < self.eps, 1.0, denom)
+
+        F_hll = (
+            S_R * F_L
+            - S_L * F_R
+            + S_L * S_R * (conservatives_R - conservatives_L)
+        ) / denom_safe
+
+        # 8) Sélection piècewise (HLL classique)
+        fluxes_xi = jnp.where(
+            S_L >= 0.0,
+            F_L,   # toutes les ondes vers la droite
+            jnp.where(
+                S_R <= 0.0,
+                F_R,  # toutes les ondes vers la gauche
+                F_hll,
+            ),
+        )
+
+
+
+        return fluxes_xi, None, None
 
 class HLLD_MHD(RiemannSolver):
     """HLLD Riemann Solver for ideal MHD (Miyoshi & Kusano, 2005)

@@ -32,7 +32,7 @@ import jax.lax as lax
 
 import numpy as onp
 from jax.experimental import io_callback  # side-effect callback inside jit/pjit
-from .utils.debug_checks import _check_finite
+from .utils.debug_checks import _check_finite, _check_float_status
 
 # ---- Remat/checkpoint compatibility shim ----
 import jax
@@ -420,6 +420,7 @@ class hydro:
 
     def hydrostep_adapt(self, i, state, current_time):
         fields, params = state
+        fields = fields.at[0].set(jnp.maximum(fields[0], 0.0))
         # Calcule un dt local admissible puis le borne par max_dt.
         ttt = self.timestep(fields)
         ttt = jnp.minimum(self.max_dt, ttt)
@@ -555,7 +556,7 @@ class hydro:
         sh_arr = NamedSharding(self.mesh, self.FIELD_XYZ)
         # Place l'etat initial sur devices avec ce sharding.
         fields0 = jax.device_put(input_fields, sh_arr)
-
+        print("caca evolve")
         # Etat initial de la boucle: temps = 0, compteur de pas = 0.
         t0 = jnp.array(0.0, dtype=fields0.dtype)
         step0 = jnp.array(0, dtype=jnp.int32)
@@ -836,6 +837,8 @@ class hydro:
         elif name in ("RK2", "HEUN", "MIDPOINT"):
             # --- RK2 (Heun) ---
             # RK2 stage 1.
+            print("caca rk2")
+            jax.debug.print("E min dans Rk2 stage 1: {}", jnp.min(sol[0]))
             k1 = self.rhs_unsplit(sol, params); u1 = sol + dt * k1
             u1 = self._apply_ct_on_state(u1, params, dt)
 

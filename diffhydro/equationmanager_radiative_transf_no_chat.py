@@ -27,7 +27,7 @@ class EquationManager:
     """
     gamma: float = 1.6
     n_cons: int = 4 #avant c etait 5
-    eps: float = 1e-20
+    eps: float = 1e-10
     isothermal: bool = False
     light_speed: float = 1#3e8 #en m.s-1
     # fraction_escape: float = 0.1
@@ -82,7 +82,7 @@ class EquationManager:
         """
         prim_a = primitives[self.active_slice]
 
-        E_gamma = prim_a[self.mass_ids]
+        E_gamma = jnp.maximum(prim_a[self.mass_ids], self.eps)
         # jax.debug.print("E_gamma: {v}", v=E_gamma[ :, :, :])
         u, v, w = (prim_a[i] for i in self.vel_ids)
         # # p = prim_a[self.energy_ids]
@@ -188,24 +188,51 @@ class EquationManager:
         E_gamma_safe = jnp.maximum(E_gamma, self.eps)
         return jnp.full_like(E_gamma_safe, self.light_speed)
 
-    def _eddington_factor(self, reduced_flux: Array) -> Array:
-        f = jnp.clip(reduced_flux, 0.0, 1.0 - 1e-6)
-        return (3.0 + 4.0 * f * f) / (5.0 + 2.0 * jnp.sqrt(4.0 - 3.0 * f * f))
+    # def _eddington_factor(self, reduced_flux: Array) -> Array:
+    #     f = jnp.clip(reduced_flux, 0.0, 1.0 - 1e-6)
+    #     return (3.0 + 4.0 * f * f) / (5.0 + 2.0 * jnp.sqrt(4.0 - 3.0 * f * f))
 
 
-    # def _radiation_pressure_tensor(self, E_gamma: Array, F_vec: Array) -> Array:
-    #     """
-    #     Returns P_ij with M1 closure:
-    #     P = D * E
-    #     D = (1-chi)/2 I + (3chi-1)/2 n⊗n
-    #     """
+    # # def _radiation_pressure_tensor(self, E_gamma: Array, F_vec: Array) -> Array:
+    # #     """
+    # #     Returns P_ij with M1 closure:
+    # #     P = D * E
+    # #     D = (1-chi)/2 I + (3chi-1)/2 n⊗n
+    # #     """
         
-    #     c = self.light_speed
-    #     F_norm = jnp.sqrt(jnp.sum(F_vec * F_vec, axis=0))
-    #     reduced_flux = F_norm / (c * jnp.maximum(E_gamma, self.eps))
-    #     chi = self._eddington_factor(reduced_flux)
+    # #     c = self.light_speed
+    # #     F_norm = jnp.sqrt(jnp.sum(F_vec * F_vec, axis=0))
+    # #     reduced_flux = F_norm / (c * jnp.maximum(E_gamma, self.eps))
+    # #     chi = self._eddington_factor(reduced_flux)
 
-    #     n = F_vec / jnp.maximum(F_norm, self.eps)
+    # #     n = F_vec / jnp.maximum(F_norm, self.eps)
+
+    # #     ndim = E_gamma.ndim
+    # #     eye = jnp.eye(3).reshape(3, 3, *([1] * ndim))
+    # #     outer = n[:, None, ...] * n[None, :, ...]
+
+    # #     D = (
+    # #         ((1.0 - chi) / 2.0)[None, None, ...] * eye
+    # #         + ((3.0 * chi - 1.0) / 2.0)[None, None, ...] * outer
+    # #     )
+
+    # #     return D * E_gamma[None, None, ...]
+
+
+    # def _radiation_pressure_tensor(self, E_gamma, F_vec):
+    #     c = self.light_speed
+
+    #     E_safe = jnp.where(jnp.isfinite(E_gamma) & (E_gamma > self.eps), E_gamma, self.eps)
+    #     F_vec_safe = jnp.where(jnp.isfinite(F_vec), F_vec, 0.0)
+
+    #     F_norm = jnp.sqrt(jnp.sum(F_vec_safe * F_vec_safe, axis=0))
+    #     F_norm_safe = jnp.maximum(F_norm, self.eps)
+
+    #     reduced_flux = F_norm / (c * E_safe)
+    #     reduced_flux = jnp.where(jnp.isfinite(reduced_flux), reduced_flux, 0.0)
+
+    #     chi = self._eddington_factor(reduced_flux)
+    #     n = F_vec_safe / F_norm_safe
 
     #     ndim = E_gamma.ndim
     #     eye = jnp.eye(3).reshape(3, 3, *([1] * ndim))
@@ -215,40 +242,75 @@ class EquationManager:
     #         ((1.0 - chi) / 2.0)[None, None, ...] * eye
     #         + ((3.0 * chi - 1.0) / 2.0)[None, None, ...] * outer
     #     )
+    #     if self.debug:
+    #         jax.debug.print("E_gamma has nan? {}", jnp.any(jnp.isnan(E_gamma)))
+    #         jax.debug.print("F_vec has nan? {}", jnp.any(jnp.isnan(F_vec)))
+    #         jax.debug.print("E_gamma min/max: {} {}", jnp.min(E_gamma), jnp.max(E_gamma))
+    #         jax.debug.print("F_norm min/max: {} {}", jnp.min(F_norm), jnp.max(F_norm))
 
-    #     return D * E_gamma[None, None, ...]
+    #     return D * E_safe[None, None, ...]
 
 
-    def _radiation_pressure_tensor(self, E_gamma, F_vec):
-        c = self.light_speed
+    def _m1_chi_from_reduced_flux(self, fred: Array) -> Array:
+        """
+        M1 Eddington factor:
+            chi(f) = (3 + 4 f^2) / (5 + 2 sqrt(4 - 3 f^2))
 
-        E_safe = jnp.where(jnp.isfinite(E_gamma) & (E_gamma > self.eps), E_gamma, self.eps)
-        F_vec_safe = jnp.where(jnp.isfinite(F_vec), F_vec, 0.0)
+        Here fred = |F| / (c E), so fred in [0, 1].
+        """
+        fred = jnp.clip(fred, 0.0, 1.0 - 1e-12)
+        radicand = jnp.maximum(4.0 - 3.0 * fred * fred, self.eps)
+        return (3.0 + 4.0 * fred * fred) / (5.0 + 2.0 * jnp.sqrt(radicand))
 
-        F_norm = jnp.sqrt(jnp.sum(F_vec_safe * F_vec_safe, axis=0))
+    def _radiation_pressure_tensor(self, E_gamma: Array, F_vec: Array) -> Array:
+        """
+        Compute M1 radiation pressure tensor P_ij from:
+            E_gamma : (...)
+            F_vec   : (3, ...)
+
+        Returns:
+            P : (3, 3, ...)
+        """
+        E_safe = jnp.maximum(E_gamma, self.eps)
+        F_norm = jnp.sqrt(jnp.sum(F_vec * F_vec, axis=0))
+        fred = F_norm / (self.light_speed * E_safe)
+        fred = jnp.clip(fred, 0.0, 1.0 - 1e-12)
+
+        chi = self._m1_chi_from_reduced_flux(fred)
+
         F_norm_safe = jnp.maximum(F_norm, self.eps)
+        n_vec = F_vec / F_norm_safe[jnp.newaxis, ...]
 
-        reduced_flux = F_norm / (c * E_safe)
-        reduced_flux = jnp.where(jnp.isfinite(reduced_flux), reduced_flux, 0.0)
+        # identity tensor with broadcast shape
+        I = jnp.eye(3, dtype=E_gamma.dtype).reshape(
+            3, 3, *([1] * E_gamma.ndim)
+        )
 
-        chi = self._eddington_factor(reduced_flux)
-        n = F_vec_safe / F_norm_safe
-
-        ndim = E_gamma.ndim
-        eye = jnp.eye(3).reshape(3, 3, *([1] * ndim))
-        outer = n[:, None, ...] * n[None, :, ...]
+        n_outer = jnp.einsum("i...,j...->ij...", n_vec, n_vec)
 
         D = (
-            ((1.0 - chi) / 2.0)[None, None, ...] * eye
-            + ((3.0 * chi - 1.0) / 2.0)[None, None, ...] * outer
+            0.5 * (1.0 - chi)[jnp.newaxis, jnp.newaxis, ...] * I
+            + 0.5 * (3.0 * chi - 1.0)[jnp.newaxis, jnp.newaxis, ...] * n_outer
         )
-        if self.debug:
-            jax.debug.print("E_gamma has nan? {}", jnp.any(jnp.isnan(E_gamma)))
-            jax.debug.print("F_vec has nan? {}", jnp.any(jnp.isnan(F_vec)))
-            jax.debug.print("E_gamma min/max: {} {}", jnp.min(E_gamma), jnp.max(E_gamma))
-            jax.debug.print("F_norm min/max: {} {}", jnp.min(F_norm), jnp.max(F_norm))
 
-        return D * E_safe[None, None, ...]
+        # isotropic limit when F -> 0
+        D_iso = (1.0 / 3.0) * I
+        mask_zero = (F_norm <= self.eps)[jnp.newaxis, jnp.newaxis, ...]
+        D = jnp.where(mask_zero, D_iso, D)
+
+        P = D * E_safe[jnp.newaxis, jnp.newaxis, ...]
+        return P
+
+    def get_radiative_pressure_tensor_from_primitives(self, primitives: Array) -> Array:
+        """
+        Convenience wrapper from primitive state [E, f_x, f_y, f_z].
+        Returns P_ij shape: (3, 3, ...)
+        """
+        prim_a = primitives[self.active_slice]
+        E_gamma = jnp.maximum(prim_a[self.mass_ids], self.eps)
+        fx, fy, fz = (prim_a[i] for i in self.vel_ids)
+        F_vec = E_gamma[jnp.newaxis, ...] * jnp.stack([fx, fy, fz], axis=0)
+        return self._radiation_pressure_tensor(E_gamma, F_vec)
 
     # ---------------------------
     # def get_specific_energy(self, E_gamma: Array):
@@ -306,24 +368,101 @@ class EquationManager:
             mask = flux_a[0] != 0
             n_nonzero = jnp.sum(mask)
 
-            jax.debug.print("flux_a[0] min/max: {} {}", jnp.min(flux_a[0]), jnp.max(flux_a[0]))
-            jax.debug.print("flux_a[0] nonzero count: {}", n_nonzero)
+            
+            ratio_FE = jnp.sqrt(F_gamma_x**2 + F_gamma_y**2 + F_gamma_z**2) / E_gamma_safe**2
+            jax.debug.print("F_gamma / E_gamma dans eqmana no cond min: {}", jnp.min(ratio_FE))
+            jax.debug.print("F_gamma / E_gamma dans eqmana no cond max: {}", jnp.max(ratio_FE))
+            # if jnp.max(ratio_FE) != 4 :
+            #     jax.debug.print("flux_a[0] min/max/mean: {} {} {}", jnp.min(flux_a[0]), jnp.max(flux_a[0]), jnp.mean(flux_a[0]))
+            #     jax.debug.print("flux_a[0] nonzero count: {}", n_nonzero)
+            #     jax.debug.print("E_gamma min/max/mean: {} {} {}", jnp.min(E_gamma), jnp.max(E_gamma), jnp.mean(E_gamma))
+            #     jax.debug.print("F_gamma_x min/max/mean: {} {} {}", jnp.min(F_gamma_x), jnp.max(F_gamma_x), jnp.mean(F_gamma_x))
+            #     jax.debug.print("F_gamma_y min/max/mean: {} {} {}", jnp.min(F_gamma_y), jnp.max(F_gamma_y), jnp.mean(F_gamma_y))
+            #     jax.debug.print("F_gamma_z min/max/mean: {} {} {}", jnp.min(F_gamma_z), jnp.max(F_gamma_z), jnp.mean(F_gamma_z))
+            #     jax.debug.print("c2*P[axis,0] min/max/mean: {} {} {}", 
+            #                     jnp.min(c2 * P[axis, 0]), jnp.max(c2 * P[axis, 0]), jnp.mean(c2 * P[axis, 0]))
+            #     jax.debug.print("c2*P[axis,1] min/max/mean: {} {} {}", 
+            #                     jnp.min(c2 * P[axis, 1]), jnp.max(c2 * P[axis, 1]), jnp.mean(c2 * P[axis, 1]))
+            #     jax.debug.print("c2*P[axis,2] min/max/mean: {} {} {}", 
+            #                     jnp.min(c2 * P[axis, 2]), jnp.max(c2 * P[axis, 2]), jnp.mean(c2 * P[axis, 2]))
+            #     jax.debug.print("F_gamma / E_gamma dans eqmana min: {}", jnp.min(ratio_FE))
+            #     jax.debug.print("F_gamma / E_gamma dans eqmana max: {}", jnp.max(ratio_FE))
+            ratio_FE = jnp.sqrt(F_gamma_x**2 + F_gamma_y**2 + F_gamma_z**2) / E_gamma_safe
+            pred = jnp.max(ratio_FE) != 4
 
-            jax.debug.print("F_gamma_x min/max: {} {}", jnp.min(F_gamma_x), jnp.max(F_gamma_x))
-            jax.debug.print("F_gamma_y min/max: {} {}", jnp.min(F_gamma_y), jnp.max(F_gamma_y))
-            jax.debug.print("F_gamma_z min/max: {} {}", jnp.min(F_gamma_z), jnp.max(F_gamma_z))
-            jax.debug.print("c2*P[axis,0] min/max: {} {}", 
-                            jnp.min(c2 * P[axis, 0]), jnp.max(c2 * P[axis, 0]))
-            jax.debug.print("c2*P[axis,1] min/max: {} {}", 
-                            jnp.min(c2 * P[axis, 1]), jnp.max(c2 * P[axis, 1]))
-            jax.debug.print("c2*P[axis,2] min/max: {} {}", 
-                            jnp.min(c2 * P[axis, 2]), jnp.max(c2 * P[axis, 2]))
+            def true_branch(_):
+                jax.debug.print("flux_a[0] min/max/mean: {} {} {}", jnp.min(flux_a[0]), jnp.max(flux_a[0]), jnp.mean(flux_a[0]))
+                jax.debug.print("flux_a[0] nonzero count: {}", n_nonzero)
+                jax.debug.print("E_gamma min/max/mean: {} {} {}", jnp.min(E_gamma), jnp.max(E_gamma), jnp.mean(E_gamma))
+                jax.debug.print("F_gamma_x min/max/mean: {} {} {}", jnp.min(F_gamma_x), jnp.max(F_gamma_x), jnp.mean(F_gamma_x))
+                jax.debug.print("F_gamma_y min/max/mean: {} {} {}", jnp.min(F_gamma_y), jnp.max(F_gamma_y), jnp.mean(F_gamma_y))
+                jax.debug.print("F_gamma_z min/max/mean: {} {} {}", jnp.min(F_gamma_z), jnp.max(F_gamma_z), jnp.mean(F_gamma_z))
+                jax.debug.print("c2*P[axis,0] min/max/mean: {} {} {}", 
+                                jnp.min(c2 * P[axis, 0]), jnp.max(c2 * P[axis, 0]), jnp.mean(c2 * P[axis, 0]))
+                jax.debug.print("c2*P[axis,1] min/max/mean: {} {} {}", 
+                                jnp.min(c2 * P[axis, 1]), jnp.max(c2 * P[axis, 1]), jnp.mean(c2 * P[axis, 1]))
+                jax.debug.print("c2*P[axis,2] min/max/mean: {} {} {}", 
+                                jnp.min(c2 * P[axis, 2]), jnp.max(c2 * P[axis, 2]), jnp.mean(c2 * P[axis, 2]))
+                jax.debug.print("F_gamma / E_gamma dans eqmana min: {}", jnp.min(ratio_FE))
+                jax.debug.print("F_gamma / E_gamma dans eqmana max: {}", jnp.max(ratio_FE))
+                return 0
 
+            def false_branch(_):
+                return 0
+
+            jax.lax.cond(pred, true_branch, false_branch, operand=None)
         if conservatives.shape[0] > self.n_active:
             # Passive block transporté de manière upwind dans ConvectiveFlux
             return jnp.concatenate([flux_a, conservatives[self.passive_slice]], axis=0)
 
         return flux_a
+    
+    def get_energy_grid(self, primitives: Array) -> Array:
+        """
+        Retourne E sur toute la grille.
+        primitives shape: (nvar, Nx, Ny, Nz)
+        return shape: (Nx, Ny, Nz)
+        """
+        prim_a = primitives[self.active_slice]
+        return jnp.maximum(prim_a[self.mass_ids], self.eps)
+
+    def get_F_over_E_components_grid(self, primitives: Array) -> Array:
+        """
+        Retourne F/E composante par composante sur toute la grille.
+        Dans ta convention actuelle, c'est directement (f_x, f_y, f_z).
+
+        return shape: (3, Nx, Ny, Nz)
+        """
+        prim_a = primitives[self.active_slice]
+        fx, fy, fz = (prim_a[i] for i in self.vel_ids)
+        return jnp.stack([fx, fy, fz], axis=0)
+
+    def get_F_components_grid(self, primitives: Array) -> Array:
+        """
+        Retourne F = E * (F/E) sur toute la grille.
+
+        return shape: (3, Nx, Ny, Nz)
+        """
+        E = self.get_energy_grid(primitives)
+        F_over_E = self.get_F_over_E_components_grid(primitives)
+        return E[jnp.newaxis, ...] * F_over_E
+
+    def get_F_over_E_norm_grid(self, primitives: Array) -> Array:
+        """
+        Retourne |F|/E sur toute la grille.
+
+        return shape: (Nx, Ny, Nz)
+        """
+        F_over_E = self.get_F_over_E_components_grid(primitives)
+        return jnp.sqrt(jnp.sum(F_over_E * F_over_E, axis=0))
+
+    def get_reduced_flux_grid(self, primitives: Array) -> Array:
+        """
+        Retourne |F|/(cE) sur toute la grille.
+
+        return shape: (Nx, Ny, Nz)
+        """
+        return self.get_F_over_E_norm_grid(primitives) / self.light_speed
 
     # def get_fluxes_xi(self, primitives, conservatives, axis: int): #version chat
     #     prim_a = primitives[self.active_slice]
