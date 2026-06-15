@@ -264,7 +264,7 @@ class LaxFriedrichs_Radiative_transfer(RiemannSolver):
 
         F_norm_L = Eg_L * jnp.sqrt(fx_L * fx_L + fy_L * fy_L + fz_L * fz_L)
         F_norm_R = Eg_R * jnp.sqrt(fx_R * fx_R + fy_R * fy_R + fz_R * fz_R)
-
+ 
         f_L = F_norm_L / (self.c * Eg_L)
         f_R = F_norm_R / (self.c * Eg_R)
         # -------------------------

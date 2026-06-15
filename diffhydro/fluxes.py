@@ -629,124 +629,134 @@ class ConvectiveFlux_Radiative_transfer:
     #         ordered=True,
     #     )
     def _debug_grid_stats(self, sol, eq, label, ax):
-        E = jnp.maximum(sol[0], eq.eps)
+        E = sol[0]#jnp.maximum(sol[0], eq.eps)
         Fx = sol[1]
         Fy = sol[2]
         Fz = sol[3]
 
         Fmag = jnp.sqrt(Fx**2 + Fy**2 + Fz**2)
-        ratio = Fmag / jnp.maximum(E**2, 1e-30)
 
         mask = sol[0] > eq.eps
+        mask_ratio = E > eq.eps
+
+        ratio = jnp.where(mask_ratio, Fmag / jnp.maximum(E**2, 1e-30), 0.0)
+
         n_active = jnp.sum(mask)
+        n_ratio_active = jnp.sum(mask_ratio)
 
         E_masked     = jnp.where(mask, E, 0.0)
         Fx_masked    = jnp.where(mask, Fx, 0.0)
         Fy_masked    = jnp.where(mask, Fy, 0.0)
         Fz_masked    = jnp.where(mask, Fz, 0.0)
         Fmag_masked  = jnp.where(mask, Fmag, 0.0)
-        ratio_masked = jnp.where(mask, ratio, 0.0)
+        ratio_masked = jnp.where(mask_ratio, ratio, 0.0)
 
         E_min_vis     = jnp.min(jnp.where(mask, E, jnp.inf))
         Fx_min_vis    = jnp.min(jnp.where(mask, Fx, jnp.inf))
         Fy_min_vis    = jnp.min(jnp.where(mask, Fy, jnp.inf))
         Fz_min_vis    = jnp.min(jnp.where(mask, Fz, jnp.inf))
         Fmag_min_vis  = jnp.min(jnp.where(mask, Fmag, jnp.inf))
-        ratio_min_vis = jnp.min(jnp.where(mask, ratio, jnp.inf))
+        ratio_min_vis = jnp.min(jnp.where(mask_ratio, ratio, jnp.inf))
 
         E_max_vis     = jnp.max(jnp.where(mask, E, -jnp.inf))
         Fx_max_vis    = jnp.max(jnp.where(mask, Fx, -jnp.inf))
         Fy_max_vis    = jnp.max(jnp.where(mask, Fy, -jnp.inf))
         Fz_max_vis    = jnp.max(jnp.where(mask, Fz, -jnp.inf))
         Fmag_max_vis  = jnp.max(jnp.where(mask, Fmag, -jnp.inf))
-        ratio_max_vis = jnp.max(jnp.where(mask, ratio, -jnp.inf))
+        ratio_max_vis = jnp.max(jnp.where(mask_ratio, ratio, -jnp.inf))
 
         denom = jnp.maximum(n_active, 1)
+        denom_ratio = jnp.maximum(n_ratio_active, 1)
 
         E_mean_vis     = jnp.sum(E_masked) / denom
         Fx_mean_vis    = jnp.sum(Fx_masked) / denom
         Fy_mean_vis    = jnp.sum(Fy_masked) / denom
         Fz_mean_vis    = jnp.sum(Fz_masked) / denom
         Fmag_mean_vis  = jnp.sum(Fmag_masked) / denom
-        ratio_mean_vis = jnp.sum(ratio_masked) / denom
+        ratio_mean_vis = jnp.sum(ratio_masked) / denom_ratio
 
         any_active = jnp.any(mask)
+        any_ratio_active = jnp.any(mask_ratio)
 
         jax.debug.print(
-                    """
-            [{label}] ax={ax}
-            shape = {shape}
-            n_active = {n_active}
-            any_active = {any_active}
+        """
+        [{label}] ax={ax}
+        shape = {shape}
+        n_active = {n_active}
+        n_ratio_active = {n_ratio_active}
+        any_active = {any_active}
+        any_ratio_active = {any_ratio_active}
 
-            E on active cells:
-            mean={E_mean} min={E_min} max={E_max}
-            any nan? {E_nan}
-            any inf? {E_inf}
-            any nonfinite? {E_bad}
+        E on active cells:
+        mean={E_mean} min={E_min} max={E_max}
+        any nan? {E_nan}
+        any inf? {E_inf}
+        any nonfinite? {E_bad}
 
-            Fx on active cells:
-            mean={Fx_mean} min={Fx_min} max={Fx_max}
+        Fx on active cells:
+        mean={Fx_mean} min={Fx_min} max={Fx_max}
 
-            Fy on active cells:
-            mean={Fy_mean} min={Fy_min} max={Fy_max}
+        Fy on active cells:
+        mean={Fy_mean} min={Fy_min} max={Fy_max}
 
-            Fz on active cells:
-            mean={Fz_mean} min={Fz_min} max={Fz_max}
+        Fz on active cells:
+        mean={Fz_mean} min={Fz_min} max={Fz_max}
 
-            |F| on active cells:
-            mean={F_mean} min={F_min} max={F_max}
-            any nan? {F_nan}
-            any inf? {F_inf}
-            any nonfinite? {F_bad}
+        |F| on active cells:
+        mean={F_mean} min={F_min} max={F_max}
+        any nan? {F_nan}
+        any inf? {F_inf}
+        any nonfinite? {F_bad}
 
-            |F|/(E^2) on active cells:
-            mean={r_mean} min={r_min} max={r_max}
-            any > 1 ? {r_gt1}
+        |F|/(E^2) on cells where E > eps:
+        mean={r_mean} min={r_min} max={r_max}
+        any > 1 ? {r_gt1}
 
-            ratio slice:
-            {ratio_slice}
-            """,
-            label=label,
-            ax=ax,
-            shape=sol.shape,
-            n_active=n_active,
-            any_active=any_active,
+        ratio slice:
+        {ratio_slice}
+        """,
+        label=label,
+        ax=ax,
+        shape=sol.shape,
+        n_active=n_active,
+        n_ratio_active=n_ratio_active,
+        any_active=any_active,
+        any_ratio_active=any_ratio_active,
 
-            E_mean=E_mean_vis,
-            E_min=jnp.where(any_active, E_min_vis, 0.0),
-            E_max=jnp.where(any_active, E_max_vis, 0.0),
-            E_nan=jnp.any(jnp.isnan(jnp.where(mask, E, jnp.nan))),
-            E_inf=jnp.any(jnp.isinf(jnp.where(mask, E, 0.0))),
-            E_bad=jnp.any(~jnp.isfinite(jnp.where(mask, E, 0.0))),
+        E_mean=E_mean_vis,
+        E_min=jnp.where(any_active, E_min_vis, 0.0),
+        E_max=jnp.where(any_active, E_max_vis, 0.0),
+        E_nan=jnp.any(jnp.isnan(jnp.where(mask, E, jnp.nan))),
+        E_inf=jnp.any(jnp.isinf(jnp.where(mask, E, 0.0))),
+        E_bad=jnp.any(~jnp.isfinite(jnp.where(mask, E, 0.0))),
 
-            Fx_mean=Fx_mean_vis,
-            Fx_min=jnp.where(any_active, Fx_min_vis, 0.0),
-            Fx_max=jnp.where(any_active, Fx_max_vis, 0.0),
+        Fx_mean=Fx_mean_vis,
+        Fx_min=jnp.where(any_active, Fx_min_vis, 0.0),
+        Fx_max=jnp.where(any_active, Fx_max_vis, 0.0),
 
-            Fy_mean=Fy_mean_vis,
-            Fy_min=jnp.where(any_active, Fy_min_vis, 0.0),
-            Fy_max=jnp.where(any_active, Fy_max_vis, 0.0),
+        Fy_mean=Fy_mean_vis,
+        Fy_min=jnp.where(any_active, Fy_min_vis, 0.0),
+        Fy_max=jnp.where(any_active, Fy_max_vis, 0.0),
 
-            Fz_mean=Fz_mean_vis,
-            Fz_min=jnp.where(any_active, Fz_min_vis, 0.0),
-            Fz_max=jnp.where(any_active, Fz_max_vis, 0.0),
+        Fz_mean=Fz_mean_vis,
+        Fz_min=jnp.where(any_active, Fz_min_vis, 0.0),
+        Fz_max=jnp.where(any_active, Fz_max_vis, 0.0),
 
-            F_mean=Fmag_mean_vis,
-            F_min=jnp.where(any_active, Fmag_min_vis, 0.0),
-            F_max=jnp.where(any_active, Fmag_max_vis, 0.0),
-            F_nan=jnp.any(jnp.isnan(jnp.where(mask, Fmag, jnp.nan))),
-            F_inf=jnp.any(jnp.isinf(jnp.where(mask, Fmag, 0.0))),
-            F_bad=jnp.any(~jnp.isfinite(jnp.where(mask, Fmag, 0.0))),
+        F_mean=Fmag_mean_vis,
+        F_min=jnp.where(any_active, Fmag_min_vis, 0.0),
+        F_max=jnp.where(any_active, Fmag_max_vis, 0.0),
+        F_nan=jnp.any(jnp.isnan(jnp.where(mask, Fmag, jnp.nan))),
+        F_inf=jnp.any(jnp.isinf(jnp.where(mask, Fmag, 0.0))),
+        F_bad=jnp.any(~jnp.isfinite(jnp.where(mask, Fmag, 0.0))),
 
-            r_mean=ratio_mean_vis,
-            r_min=jnp.where(any_active, ratio_min_vis, 0.0),
-            r_max=jnp.where(any_active, ratio_max_vis, 0.0),
-            r_gt1=jnp.any(jnp.where(mask, ratio > 1.0 + 1e-6, False)),
+        r_mean=ratio_mean_vis,
+        r_min=jnp.where(any_ratio_active, ratio_min_vis, 0.0),
+        r_max=jnp.where(any_ratio_active, ratio_max_vis, 0.0),
+        r_gt1=jnp.any(jnp.where(mask_ratio, ratio > 1.0 + 1e-6, False)),
 
-            ratio_slice=ratio[0:20, 40:60, 50],
-            ordered=True,
-        )
+        ratio_slice=jnp.where(mask_ratio[0:20, 40:60, 50], ratio[0:20, 40:60, 50], 0.0),
+        ordered=True,
+    )
     def flux(self, sol, ax, params, flux):
         eq = self.eq_manage
         
@@ -760,39 +770,45 @@ class ConvectiveFlux_Radiative_transfer:
         # quick finite check on primitives before reconstruction
         _check_finite("primitives", primitives)
 
-        # primitives_xi_L = self.recon.reconstruct_xi(
-        #     primitives,
-        #     axis=ax,
-        #     j=0)
+        primitives_xi_L = self.recon.reconstruct_xi(
+            primitives,
+            axis=ax,
+            j=0)
 
-        # primitives_xi_R = self.recon.reconstruct_xi(
-        #     primitives,
-        #     axis=ax,
-        #     j=1)
+        primitives_xi_R = self.recon.reconstruct_xi(
+            primitives,
+            axis=ax,
+            j=1)
         
-        # # convert reconstructed primitives -> conservatives (full state)
-        # conservative_xi_L = eq.get_conservatives_from_primitives(primitives_xi_L)
-        # conservative_xi_R = eq.get_conservatives_from_primitives(primitives_xi_R)
-        primitives_xi_L = jnp.roll(primitives, shift=1, axis=ax)
-        primitives_xi_R = primitives
+        # convert reconstructed primitives -> conservatives (full state)
+        conservative_xi_L = eq.get_conservatives_from_primitives(primitives_xi_L)
+        conservative_xi_R = eq.get_conservatives_from_primitives(primitives_xi_R)
+        # primitives_xi_L = jnp.roll(primitives, shift=1, axis=ax)
+        # primitives_xi_R = primitives
 
-        conservative_xi_L = jnp.roll(sol, shift=1, axis=ax)
-        conservative_xi_R = sol
+        # conservative_xi_L = jnp.roll(sol, shift=1, axis=ax)
+        # conservative_xi_R = sol
 
-
-
+        F_norme = jnp.sqrt(sol[1]**2 + sol[2]**2 + sol[3]**2)
+        F_x_normalize = sol[1]/F_norme*eq.light_speed**2*sol[0]**2
+        F_y_normalize = sol[2]/F_norme*eq.light_speed**2*sol[0]**2
+        F_z_normalize = sol[3]/F_norme*eq.light_speed**2*sol[0]**2
+        sol = sol.at[1].set(F_x_normalize)
+        sol = sol.at[2].set(F_y_normalize)
+        sol = sol.at[3].set(F_z_normalize)
         # positivity fix (full state)
-        # if self.positivity:
-        #     conservative_xi_L, primitives_xi_L, count_L = self.compute_positivity_preserving_interpolation(
-        #         primitives=primitives,
-        #         primitives_xi_j=primitives_xi_L,
-        #         j=0,
-        #         axis=ax)
-        #     conservative_xi_R, primitives_xi_R, count_R = self.compute_positivity_preserving_interpolation(
-        #         primitives=primitives,
-        #         primitives_xi_j=primitives_xi_R,
-        #         j=1,
-        #         axis=ax)
+        self._debug_grid_stats(sol, eq, "GRID AFTER NORMALISATION", ax)
+        if self.positivity:
+            conservative_xi_L, primitives_xi_L, count_L = self.compute_positivity_preserving_interpolation(
+                primitives=primitives,
+                primitives_xi_j=primitives_xi_L,
+                j=0,
+                axis=ax)
+            conservative_xi_R, primitives_xi_R, count_R = self.compute_positivity_preserving_interpolation(
+                primitives=primitives,
+                primitives_xi_j=primitives_xi_R,
+                j=1,
+                axis=ax)
           
         self._debug_grid_stats(sol, eq, "PRIMITIVES LEFT AFTER RECON", ax)
 
@@ -862,6 +878,13 @@ class ConvectiveFlux_Radiative_transfer:
             F = jnp.concatenate([F, F_passive], axis=0)
             print("caca conservative")
         # DEBUG: flux retourné sur toute la grille après Riemann
+        F_norme = jnp.sqrt(sol[1]**2 + sol[2]**2 + sol[3]**2)
+        F_x_normalize = sol[1]/F_norme*eq.light_speed**2*sol[0]**2
+        F_y_normalize = sol[2]/F_norme*eq.light_speed**2*sol[0]**2
+        F_z_normalize = sol[3]/F_norme*eq.light_speed**2*sol[0]**2
+        sol = sol.at[1].set(F_x_normalize)
+        sol = sol.at[2].set(F_y_normalize)
+        sol = sol.at[3].set(F_z_normalize)
         self._debug_grid_stats(F, eq, "GRID AFTER RIEMANN", ax)
         jax.debug.print('min dans flux de E apres{}', jnp.min(primitives[0]))
         return F

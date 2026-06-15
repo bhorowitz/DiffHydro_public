@@ -120,80 +120,134 @@ class StellarRadiationForce:
         return 1e30
     
     def debug_grid_stats(self, sol, eq, label, ax):
-        E = jnp.maximum(sol[0], eq.eps)
+        E = sol[0]#jnp.maximum(sol[0], eq.eps)
         Fx = sol[1]
         Fy = sol[2]
         Fz = sol[3]
 
         Fmag = jnp.sqrt(Fx**2 + Fy**2 + Fz**2)
-        ratio = Fmag / jnp.maximum(E**2, 1e-30)
+
+        mask = sol[0] > eq.eps
+        mask_ratio = E > eq.eps
+
+        ratio = jnp.where(mask_ratio, Fmag / jnp.maximum(E**2, 1e-30), 0.0)
+
+        n_active = jnp.sum(mask)
+        n_ratio_active = jnp.sum(mask_ratio)
+
+        E_masked     = jnp.where(mask, E, 0.0)
+        Fx_masked    = jnp.where(mask, Fx, 0.0)
+        Fy_masked    = jnp.where(mask, Fy, 0.0)
+        Fz_masked    = jnp.where(mask, Fz, 0.0)
+        Fmag_masked  = jnp.where(mask, Fmag, 0.0)
+        ratio_masked = jnp.where(mask_ratio, ratio, 0.0)
+
+        E_min_vis     = jnp.min(jnp.where(mask, E, jnp.inf))
+        Fx_min_vis    = jnp.min(jnp.where(mask, Fx, jnp.inf))
+        Fy_min_vis    = jnp.min(jnp.where(mask, Fy, jnp.inf))
+        Fz_min_vis    = jnp.min(jnp.where(mask, Fz, jnp.inf))
+        Fmag_min_vis  = jnp.min(jnp.where(mask, Fmag, jnp.inf))
+        ratio_min_vis = jnp.min(jnp.where(mask_ratio, ratio, jnp.inf))
+
+        E_max_vis     = jnp.max(jnp.where(mask, E, -jnp.inf))
+        Fx_max_vis    = jnp.max(jnp.where(mask, Fx, -jnp.inf))
+        Fy_max_vis    = jnp.max(jnp.where(mask, Fy, -jnp.inf))
+        Fz_max_vis    = jnp.max(jnp.where(mask, Fz, -jnp.inf))
+        Fmag_max_vis  = jnp.max(jnp.where(mask, Fmag, -jnp.inf))
+        ratio_max_vis = jnp.max(jnp.where(mask_ratio, ratio, -jnp.inf))
+
+        denom = jnp.maximum(n_active, 1)
+        denom_ratio = jnp.maximum(n_ratio_active, 1)
+
+        E_mean_vis     = jnp.sum(E_masked) / denom
+        Fx_mean_vis    = jnp.sum(Fx_masked) / denom
+        Fy_mean_vis    = jnp.sum(Fy_masked) / denom
+        Fz_mean_vis    = jnp.sum(Fz_masked) / denom
+        Fmag_mean_vis  = jnp.sum(Fmag_masked) / denom
+        ratio_mean_vis = jnp.sum(ratio_masked) / denom_ratio
+
+        any_active = jnp.any(mask)
+        any_ratio_active = jnp.any(mask_ratio)
 
         jax.debug.print(
-            """
-            [{label}] ax={ax}
-            shape = {shape}
+        """
+        [{label}] ax={ax}
+        shape = {shape}
+        n_active = {n_active}
+        n_ratio_active = {n_ratio_active}
+        any_active = {any_active}
+        any_ratio_active = {any_ratio_active}
 
-            E:
-            {label} mean={E_mean} {label} E min={E_min} max={E_max}
-            any nan? {E_nan}
-            any inf? {E_inf}
-            any nonfinite? {E_bad}
+        E on active cells:
+        mean={E_mean} min={E_min} max={E_max}
+        any nan? {E_nan}
+        any inf? {E_inf}
+        any nonfinite? {E_bad}
 
-            Fx:
-            {label} mean={Fx_mean} {label} Fx min={Fx_min} max={Fx_max}
-            Fy:
-            {label} mean={Fy_mean} {label} Fy min={Fy_min} max={Fy_max}
-            Fz:
-            {label} mean={Fz_mean} {label} Fz min={Fz_min} max={Fz_max}
+        Fx on active cells:
+        mean={Fx_mean} min={Fx_min} max={Fx_max}
 
-            |F|:
-            mean={F_mean} min={F_min} max={F_max}
-            any nan? {F_nan}
-            any inf? {F_inf}
-            any nonfinite? {F_bad}
+        Fy on active cells:
+        mean={Fy_mean} min={Fy_min} max={Fy_max}
 
-            |F|/(E^2):
-            mean={r_mean} min={r_min} max={r_max}
-            any > 1 ? {r_gt1}
-            tableau {ratio}
-            """,
-            label=label,
-            ax=ax,
-            shape=sol.shape,
+        Fz on active cells:
+        mean={Fz_mean} min={Fz_min} max={Fz_max}
 
-            E_mean=jnp.mean(E),
-            E_min=jnp.min(E),
-            E_max=jnp.max(E),
-            E_nan=jnp.any(jnp.isnan(E)),
-            E_inf=jnp.any(jnp.isinf(E)),
-            E_bad=jnp.any(~jnp.isfinite(E)),
+        |F| on active cells:
+        mean={F_mean} min={F_min} max={F_max}
+        any nan? {F_nan}
+        any inf? {F_inf}
+        any nonfinite? {F_bad}
 
-            Fx_mean=jnp.mean(Fx),
-            Fx_min=jnp.min(Fx),
-            Fx_max=jnp.max(Fx),
+        |F|/(E^2) on cells where E > eps:
+        mean={r_mean} min={r_min} max={r_max}
+        any > 1 ? {r_gt1}
 
-            Fy_mean=jnp.mean(Fy),
-            Fy_min=jnp.min(Fy),
-            Fy_max=jnp.max(Fy),
+        ratio slice:
+        {ratio_slice}
+        """,
+        label=label,
+        ax=ax,
+        shape=sol.shape,
+        n_active=n_active,
+        n_ratio_active=n_ratio_active,
+        any_active=any_active,
+        any_ratio_active=any_ratio_active,
 
-            Fz_mean=jnp.mean(Fz),
-            Fz_min=jnp.min(Fz),
-            Fz_max=jnp.max(Fz),
+        E_mean=E_mean_vis,
+        E_min=jnp.where(any_active, E_min_vis, 0.0),
+        E_max=jnp.where(any_active, E_max_vis, 0.0),
+        E_nan=jnp.any(jnp.isnan(jnp.where(mask, E, jnp.nan))),
+        E_inf=jnp.any(jnp.isinf(jnp.where(mask, E, 0.0))),
+        E_bad=jnp.any(~jnp.isfinite(jnp.where(mask, E, 0.0))),
 
-            F_mean=jnp.mean(Fmag),
-            F_min=jnp.min(Fmag),
-            F_max=jnp.max(Fmag),
-            F_nan=jnp.any(jnp.isnan(Fmag)),
-            F_inf=jnp.any(jnp.isinf(Fmag)),
-            F_bad=jnp.any(~jnp.isfinite(Fmag)),
+        Fx_mean=Fx_mean_vis,
+        Fx_min=jnp.where(any_active, Fx_min_vis, 0.0),
+        Fx_max=jnp.where(any_active, Fx_max_vis, 0.0),
 
-            r_mean=jnp.mean(ratio),
-            r_min=jnp.min(ratio),
-            r_max=jnp.max(ratio),
-            r_gt1=jnp.any(ratio > 1.0 + 1e-6),
-            ratio=ratio[0:20,40:60,50],
-            ordered=True,
-        )
+        Fy_mean=Fy_mean_vis,
+        Fy_min=jnp.where(any_active, Fy_min_vis, 0.0),
+        Fy_max=jnp.where(any_active, Fy_max_vis, 0.0),
+
+        Fz_mean=Fz_mean_vis,
+        Fz_min=jnp.where(any_active, Fz_min_vis, 0.0),
+        Fz_max=jnp.where(any_active, Fz_max_vis, 0.0),
+
+        F_mean=Fmag_mean_vis,
+        F_min=jnp.where(any_active, Fmag_min_vis, 0.0),
+        F_max=jnp.where(any_active, Fmag_max_vis, 0.0),
+        F_nan=jnp.any(jnp.isnan(jnp.where(mask, Fmag, jnp.nan))),
+        F_inf=jnp.any(jnp.isinf(jnp.where(mask, Fmag, 0.0))),
+        F_bad=jnp.any(~jnp.isfinite(jnp.where(mask, Fmag, 0.0))),
+
+        r_mean=ratio_mean_vis,
+        r_min=jnp.where(any_ratio_active, ratio_min_vis, 0.0),
+        r_max=jnp.where(any_ratio_active, ratio_max_vis, 0.0),
+        r_gt1=jnp.any(jnp.where(mask_ratio, ratio > 1.0 + 1e-6, False)),
+
+        ratio_slice=jnp.where(mask_ratio[0:20, 40:60, 50], ratio[0:20, 40:60, 50], 0.0),
+        ordered=True,
+    )
     # def force(self, i, sol, params, dt):
     #     if self.one_injection:
     #         inject_now = jnp.equal(i, 0)
@@ -887,7 +941,7 @@ class StellarRadiationForce:
 
             Fmag = jnp.sqrt(sol[1]**2 + sol[2]**2 + sol[3]**2)
             E_safe = jnp.where(sol[0] > 0, sol[0], 1e-30)
-            ratio_cell = Fmag / E_safe
+            ratio_cell = Fmag / E_safe**2
             ratio_cell_c = ratio_cell / self.light_speed
 
             jax.debug.print("max |F|/E (cell) = {}", jnp.max(ratio_cell))
@@ -904,7 +958,7 @@ class StellarRadiationForce:
 
             # ── Vérification c² sur le faisceau uniquement ───────────────────────
             # Masque des cellules actives (E_gamma > seuil)
-            mask_active = sol[0] > 1e-30
+            mask_active = sol[0] > self.eq.eps
 
             E_active = jnp.where(mask_active, sol[0], 0.0)
             Fmag = jnp.sqrt(sol[1]**2 + sol[2]**2 + sol[3]**2)
@@ -933,8 +987,8 @@ class StellarRadiationForce:
             jax.debug.print("\n=== Vérification c² sur tout le domaine ===")
             jax.debug.print("E_sum(tout) = {}", E_sum_tot)
             jax.debug.print("|F|_sum(tout) = {}", F_sum_tot)
-            jax.debug.print("|F|/E(tout) = {}", ratio_tot)
-            jax.debug.print("|F|/E / c²(tout) = {}", c_2_tot)
+            jax.debug.print("|F|/E**2(tout) = {}", ratio_tot)
+            jax.debug.print("|F|/E**2 / c²(tout) = {}", c_2_tot)
             jax.debug.print("|F|/E = c² ? tout = {}", jnp.isclose(ratio_tot, self.light_speed**2))
 
             # Affiche aussi le nombre de cellules actives
