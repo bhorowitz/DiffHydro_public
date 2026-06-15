@@ -45,6 +45,7 @@ class EquationManager:
     mass_ids: int = field(init=False)
     vel_ids: tuple[int, int, int] = field(init=False)
     n_active: int = field(init=False)
+    normalization: bool = True
     # energy_ids: int = field(init=False)
     def __post_init__(self):
         self.debug = bool(self.debug)
@@ -72,6 +73,7 @@ class EquationManager:
         self.R = 1.0
         self.cp = self.gamma / (self.gamma - 1.0) * self.R
         self.light_speed = float(self.light_speed)
+        self.normalization = True
         if self.light_speed <= 0.0:
             raise ValueError("light_speed must be > 0.")
         
@@ -187,7 +189,39 @@ class EquationManager:
         """See base class. """
         E_gamma_safe = jnp.maximum(E_gamma, self.eps)
         return jnp.full_like(E_gamma_safe, self.light_speed)
+    
+    def _normalize_radiative_conservatives(self, conservatives):
+        cons = conservatives
 
+        cons_a = cons[self.active_slice]
+
+        E_gamma = jnp.maximum(cons_a[self.mass_ids], self.eps)
+        E_gamma_safe = jnp.maximum(E_gamma, self.eps)
+
+        mom_x, mom_y, mom_z = (cons_a[i] for i in self.vel_ids)
+
+        # Ici les variables conservatives stockent déjà les composantes "flux-like"
+        # que tu veux renormaliser.
+        F_gamma_x = mom_x
+        F_gamma_y = mom_y
+        F_gamma_z = mom_z
+
+        F_norm = jnp.sqrt(F_gamma_x**2 + F_gamma_y**2 + F_gamma_z**2)
+        F_norm_safe = jnp.maximum(F_norm, self.eps)
+
+        # Norme cible imposée par ta convention interne
+        F_target = (self.light_speed ** 2) * (E_gamma_safe ** 2)
+
+        F_gamma_x_norm = F_gamma_x / F_norm_safe * F_target
+        F_gamma_y_norm = F_gamma_y / F_norm_safe * F_target
+        F_gamma_z_norm = F_gamma_z / F_norm_safe * F_target
+
+        cons_a = cons_a.at[self.vel_ids[0]].set(F_gamma_x_norm)
+        cons_a = cons_a.at[self.vel_ids[1]].set(F_gamma_y_norm)
+        cons_a = cons_a.at[self.vel_ids[2]].set(F_gamma_z_norm)
+
+        cons = cons.at[self.active_slice].set(cons_a)
+        return cons
     # def _eddington_factor(self, reduced_flux: Array) -> Array:
     #     f = jnp.clip(reduced_flux, 0.0, 1.0 - 1e-6)
     #     return (3.0 + 4.0 * f * f) / (5.0 + 2.0 * jnp.sqrt(4.0 - 3.0 * f * f))
@@ -330,7 +364,8 @@ class EquationManager:
         F_i(U) = [F_i, c^2 P_{i,x}, c^2 P_{i,y}, c^2 P_{i,z}]
         """
         del primitives
-
+        if self.normalization:
+            conservatives = self._normalize_radiative_conservatives(conservatives)
         # Cohérence d'unités: on part des variables conservatives.
         # Hypothèse conservative active: [E_gamma, E_gamma*F_x, E_gamma*F_y, E_gamma*F_z].
         cons_a = conservatives[self.active_slice]
@@ -368,10 +403,10 @@ class EquationManager:
             mask = flux_a[0] != 0
             n_nonzero = jnp.sum(mask)
 
-            
+            E_gamma_safe =  E_gamma_safe > 1e-12
             ratio_FE = jnp.sqrt(F_gamma_x**2 + F_gamma_y**2 + F_gamma_z**2) / E_gamma_safe**2
-            jax.debug.print("F_gamma / E_gamma dans eqmana no cond min: {}", jnp.min(ratio_FE))
-            jax.debug.print("F_gamma / E_gamma dans eqmana no cond max: {}", jnp.max(ratio_FE))
+            jax.debug.print("F_gamma / E_gamma**2 dans eqmana no cond min: {}", jnp.min(ratio_FE))
+            jax.debug.print("F_gamma / E_gamma**2 dans eqmana no cond max: {}", jnp.max(ratio_FE))
             # if jnp.max(ratio_FE) != 4 :
             #     jax.debug.print("flux_a[0] min/max/mean: {} {} {}", jnp.min(flux_a[0]), jnp.max(flux_a[0]), jnp.mean(flux_a[0]))
             #     jax.debug.print("flux_a[0] nonzero count: {}", n_nonzero)
@@ -387,7 +422,7 @@ class EquationManager:
             #                     jnp.min(c2 * P[axis, 2]), jnp.max(c2 * P[axis, 2]), jnp.mean(c2 * P[axis, 2]))
             #     jax.debug.print("F_gamma / E_gamma dans eqmana min: {}", jnp.min(ratio_FE))
             #     jax.debug.print("F_gamma / E_gamma dans eqmana max: {}", jnp.max(ratio_FE))
-            ratio_FE = jnp.sqrt(F_gamma_x**2 + F_gamma_y**2 + F_gamma_z**2) / E_gamma_safe
+            ratio_FE = jnp.sqrt(F_gamma_x**2 + F_gamma_y**2 + F_gamma_z**2) / E_gamma_safe**2
             pred = jnp.max(ratio_FE) != 4
 
             def true_branch(_):
@@ -403,8 +438,8 @@ class EquationManager:
                                 jnp.min(c2 * P[axis, 1]), jnp.max(c2 * P[axis, 1]), jnp.mean(c2 * P[axis, 1]))
                 jax.debug.print("c2*P[axis,2] min/max/mean: {} {} {}", 
                                 jnp.min(c2 * P[axis, 2]), jnp.max(c2 * P[axis, 2]), jnp.mean(c2 * P[axis, 2]))
-                jax.debug.print("F_gamma / E_gamma dans eqmana min: {}", jnp.min(ratio_FE))
-                jax.debug.print("F_gamma / E_gamma dans eqmana max: {}", jnp.max(ratio_FE))
+                jax.debug.print("F_gamma / E_gamma**2 dans eqmana min: {}", jnp.min(ratio_FE))
+                jax.debug.print("F_gamma / E_gamma**2 dans eqmana max: {}", jnp.max(ratio_FE))
                 return 0
 
             def false_branch(_):
@@ -414,9 +449,11 @@ class EquationManager:
         if conservatives.shape[0] > self.n_active:
             # Passive block transporté de manière upwind dans ConvectiveFlux
             return jnp.concatenate([flux_a, conservatives[self.passive_slice]], axis=0)
-
+        if self.normalization:
+            conservatives = self._normalize_radiative_conservatives(conservatives)
         return flux_a
-    
+   
+
     def get_energy_grid(self, primitives: Array) -> Array:
         """
         Retourne E sur toute la grille.
