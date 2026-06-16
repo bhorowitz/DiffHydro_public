@@ -1,0 +1,35 @@
+{
+  "backend": "gpu",
+  "devices": [
+    "cuda:0"
+  ],
+  "cuda_visible_devices": "2",
+  "mesh_size": 16,
+  "geometry": "beam_x",
+  "rt_solver": "hll-local",
+  "periodic_flux_divergence": false,
+  "light_speed": 2.0,
+  "stromgren_rate": 10.0,
+  "beam_length_cells": 1,
+  "beam_reduced_flux": 0.999,
+  "beam_momentum_scaling": "physical",
+  "injection_momentum": true,
+  "star_position": [
+    4,
+    8,
+    8
+  ],
+  "t_final": 1.249998927116394,
+  "n_steps": 750,
+  "dt_min": 0.0016666667070239782,
+  "dt_max": 0.0016666667070239782,
+  "E_sum": 12.50003433227539,
+  "E_max": 4.377963066101074,
+  "Fx_sum": 24.958303451538086,
+  "Fx_max": 8.747170448303223,
+  "Fy_abs_max": 0.0031718702521175146,
+  "Fz_abs_max": 0.003171870717778802,
+  "m1_ratio_max": 0.9990001916885376,
+  "m1_ratio_gt_reduced_flux": true,
+  "m1_ratio_gt_one": false
+}
