@@ -262,8 +262,8 @@ class LaxFriedrichs_Radiative_transfer(RiemannSolver):
         fx_L, fy_L, fz_L = (primitives_L[i] for i in self.equation_manager.vel_ids)
         fx_R, fy_R, fz_R = (primitives_R[i] for i in self.equation_manager.vel_ids)
 
-        F_norm_L = Eg_L * jnp.sqrt(fx_L * fx_L + fy_L * fy_L + fz_L * fz_L)
-        F_norm_R = Eg_R * jnp.sqrt(fx_R * fx_R + fy_R * fy_R + fz_R * fz_R)
+        F_norm_L = jnp.sqrt(fx_L * fx_L + fy_L * fy_L + fz_L * fz_L)
+        F_norm_R = jnp.sqrt(fx_R * fx_R + fy_R * fy_R + fz_R * fz_R)
  
         f_L = F_norm_L / (self.c * Eg_L)
         f_R = F_norm_R / (self.c * Eg_R)
@@ -380,9 +380,7 @@ class LaxFriedrichs_Radiative_transfer(RiemannSolver):
         # Flux physiques gauche / droite
         # -------------------------
         fluxes_L = self.equation_manager.get_fluxes_xi(primitives_L, conservatives_L, axis)
-        fluxes_L = jnp.maximum(fluxes_L, 1e-12 )
         fluxes_R = self.equation_manager.get_fluxes_xi(primitives_R, conservatives_R, axis)
-        fluxes_R = jnp.maximum(fluxes_R, 1e-12 )
         celerity = self.equation_manager.light_speed
 
         # -------------------------
@@ -419,6 +417,71 @@ class LaxFriedrichs_Radiative_transfer(RiemannSolver):
                             ordered=True,
                         )
         # jax.debug.print("c^2 test apres: {dtype}", dtype=self.c_square)
+        return fluxes_xi, None, None
+
+
+class HLL_Radiative_transfer_Local(RiemannSolver):
+    """
+    Experimental HLLE solver for M1 radiation moments.
+
+    State convention is physical moments [E, Fx, Fy, Fz].  The wave bounds use
+    an M1-local estimate in the face-normal direction:
+        lambda ~= F_i/E +/- c * sqrt(P_ii/E)
+    clipped to the physical light cone. This is intentionally less diffusive
+    transversely for a strongly beamed field than Rusanov with global +/-c.
+    """
+
+    def __init__(self, equation_manager, signal_speed=None, **kwargs) -> None:
+        super().__init__(equation_manager, signal_speed)
+        self.eq = equation_manager
+        self.E_id = equation_manager.mass_ids
+        self.F_ids = equation_manager.vel_ids
+        self.c = float(equation_manager.light_speed)
+        self.eps = float(equation_manager.eps)
+
+    def _state_speeds(self, primitives, axis):
+        E = jnp.maximum(primitives[self.E_id], self.eps)
+        F_vec = jnp.stack([primitives[i] for i in self.F_ids], axis=0)
+        P = self.eq._radiation_pressure_tensor(E, F_vec)
+        normal_flux_over_E = primitives[self.F_ids[axis]] / E
+        pressure_speed = self.c * jnp.sqrt(
+            jnp.clip(P[axis, axis] / E, 0.0, 1.0)
+        )
+        lam_minus = jnp.clip(normal_flux_over_E - pressure_speed, -self.c, self.c)
+        lam_plus = jnp.clip(normal_flux_over_E + pressure_speed, -self.c, self.c)
+        return lam_minus, lam_plus
+
+    def _solve_riemann_problem_xi_single_phase(
+            self,
+            primitives_L,
+            primitives_R,
+            conservatives_L,
+            conservatives_R,
+            axis: int,
+            **kwargs
+            ) -> Tuple[Array, Array, Array]:
+        F_L = self.eq.get_fluxes_xi(primitives_L, conservatives_L, axis)
+        F_R = self.eq.get_fluxes_xi(primitives_R, conservatives_R, axis)
+
+        lamL_minus, lamL_plus = self._state_speeds(primitives_L, axis)
+        lamR_minus, lamR_plus = self._state_speeds(primitives_R, axis)
+
+        S_L = jnp.minimum(jnp.minimum(lamL_minus, lamR_minus), 0.0)
+        S_R = jnp.maximum(jnp.maximum(lamL_plus, lamR_plus), 0.0)
+
+        denom = S_R - S_L
+        denom_safe = jnp.where(jnp.abs(denom) < self.eps, 1.0, denom)
+        F_hll = (
+            S_R * F_L
+            - S_L * F_R
+            + S_L * S_R * (conservatives_R - conservatives_L)
+        ) / denom_safe
+
+        fluxes_xi = jnp.where(
+            S_L >= 0.0,
+            F_L,
+            jnp.where(S_R <= 0.0, F_R, F_hll),
+        )
         return fluxes_xi, None, None
         
 class HLLC(RiemannSolver):

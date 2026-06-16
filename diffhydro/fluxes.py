@@ -639,7 +639,11 @@ class ConvectiveFlux_Radiative_transfer:
         mask = sol[0] > eq.eps
         mask_ratio = E > eq.eps
 
-        ratio = jnp.where(mask_ratio, Fmag / jnp.maximum(E**2, 1e-30), 0.0)
+        ratio = jnp.where(
+            mask_ratio,
+            Fmag / jnp.maximum(eq.light_speed * E, 1e-30),
+            0.0,
+        )
 
         n_active = jnp.sum(mask)
         n_ratio_active = jnp.sum(mask_ratio)
@@ -708,7 +712,7 @@ class ConvectiveFlux_Radiative_transfer:
         any inf? {F_inf}
         any nonfinite? {F_bad}
 
-        |F|/(E^2) on cells where E > eps:
+        |F|/(c E) on cells where E > eps:
         mean={r_mean} min={r_min} max={r_max}
         any > 1 ? {r_gt1}
 
@@ -789,15 +793,6 @@ class ConvectiveFlux_Radiative_transfer:
         # conservative_xi_L = jnp.roll(sol, shift=1, axis=ax)
         # conservative_xi_R = sol
 
-        F_norme = jnp.sqrt(sol[1]**2 + sol[2]**2 + sol[3]**2)
-        F_x_normalize = sol[1]/F_norme*eq.light_speed**2*sol[0]**2
-        F_y_normalize = sol[2]/F_norme*eq.light_speed**2*sol[0]**2
-        F_z_normalize = sol[3]/F_norme*eq.light_speed**2*sol[0]**2
-        sol = sol.at[1].set(F_x_normalize)
-        sol = sol.at[2].set(F_y_normalize)
-        sol = sol.at[3].set(F_z_normalize)
-        # positivity fix (full state)
-        self._debug_grid_stats(sol, eq, "GRID AFTER NORMALISATION", ax)
         if self.positivity:
             conservative_xi_L, primitives_xi_L, count_L = self.compute_positivity_preserving_interpolation(
                 primitives=primitives,
@@ -878,13 +873,6 @@ class ConvectiveFlux_Radiative_transfer:
             F = jnp.concatenate([F, F_passive], axis=0)
             print("caca conservative")
         # DEBUG: flux retourné sur toute la grille après Riemann
-        F_norme = jnp.sqrt(sol[1]**2 + sol[2]**2 + sol[3]**2)
-        F_x_normalize = sol[1]/F_norme*eq.light_speed**2*sol[0]**2
-        F_y_normalize = sol[2]/F_norme*eq.light_speed**2*sol[0]**2
-        F_z_normalize = sol[3]/F_norme*eq.light_speed**2*sol[0]**2
-        sol = sol.at[1].set(F_x_normalize)
-        sol = sol.at[2].set(F_y_normalize)
-        sol = sol.at[3].set(F_z_normalize)
         self._debug_grid_stats(F, eq, "GRID AFTER RIEMANN", ax)
         jax.debug.print('min dans flux de E apres{}', jnp.min(primitives[0]))
         return F

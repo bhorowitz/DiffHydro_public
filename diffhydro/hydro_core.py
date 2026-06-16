@@ -139,7 +139,8 @@ class hydro:
                 snapshot_dir: str = "snapshots",
                 snapshot_prefix: str = "fields",
                 track_time: bool = True,
-                debug_fixed_dt: float | None = None):
+                debug_fixed_dt: float | None = None,
+                periodic_flux_divergence: bool = True):
         # Paramètres fixes d'une simulation (plutôt statiques vis-à-vis de l'optimisation).
    #     self.init_dt = init_dt # tiny starting timestep to smooth out anything too sharp
         self.splitting_schemes = splitting_schemes #strang splitting for x,y,z sweeps
@@ -174,6 +175,7 @@ class hydro:
         # Temps physique cumule de la simulation.
         self.sim_time: float = 0.0
         self.track_time: bool = track_time
+        self.periodic_flux_divergence = periodic_flux_divergence
         self.snapshot_every: int | None = snapshot_every
         self.snapshot_dir: str = snapshot_dir
         self.snapshot_prefix: str = snapshot_prefix
@@ -690,7 +692,15 @@ class hydro:
             fu = self.flux(sol_b, ax, params)
 
             # STEP 4: divergence des flux (forme conservative) avec roll halo-aware.
-            rhs = rhs - (fu - self.roll_with_halo(fu, 1, ax)) / self.dx_o #eq 39 qrticle
+            if self.periodic_flux_divergence:
+                flux_left = self.roll_with_halo(fu, 1, ax)
+            else:
+                flux_left = jnp.roll(fu, 1, axis=ax)
+                zero_face = jnp.zeros_like(jax.lax.slice_in_dim(fu, 0, 1, axis=ax))
+                flux_left = jax.lax.dynamic_update_slice_in_dim(
+                    flux_left, zero_face, 0, axis=ax
+                )
+            rhs = rhs - (fu - flux_left) / self.dx_o #eq 39 qrticle
 
         # Neutralise dB/dt ici quand CT gère explicitement le champ magnétique.
         if getattr(self, "ct", False):
