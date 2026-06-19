@@ -85,6 +85,7 @@ class StellarRadiationForce:
         beam_length_cells=8,  # nb de cellules du faisceau
         beam_sigma=3.0,       # étalement gaussien
         beam_reduced_flux=0.95,  # |F|/(c*E) max
+        beam_momentum_scaling="physical",
         
     ):
         self.escape_fraction = escape_fraction
@@ -105,6 +106,7 @@ class StellarRadiationForce:
         self.beam_sign        = beam_sign
         self.beam_length_cells= beam_length_cells
         self.beam_reduced_flux= beam_reduced_flux
+        self.beam_momentum_scaling = beam_momentum_scaling
         self.sol = None
         self.eq = eq
 
@@ -130,7 +132,11 @@ class StellarRadiationForce:
         mask = sol[0] > eq.eps
         mask_ratio = E > eq.eps
 
-        ratio = jnp.where(mask_ratio, Fmag / jnp.maximum(E**2, 1e-30), 0.0)
+        ratio = jnp.where(
+            mask_ratio,
+            Fmag / jnp.maximum(self.light_speed * E, 1e-30),
+            0.0,
+        )
 
         n_active = jnp.sum(mask)
         n_ratio_active = jnp.sum(mask_ratio)
@@ -199,7 +205,7 @@ class StellarRadiationForce:
         any inf? {F_inf}
         any nonfinite? {F_bad}
 
-        |F|/(E^2) on cells where E > eps:
+        |F|/(c E) on cells where E > eps:
         mean={r_mean} min={r_min} max={r_max}
         any > 1 ? {r_gt1}
 
@@ -585,8 +591,12 @@ class StellarRadiationForce:
             weights = jnp.where(valid, weights, 0.0)
             weights = weights / (jnp.sum(weights) + 1e-30)
 
-            # même échelle que ton _inject_momentum_x_3d
-            fx_inj = source**2 * (self.light_speed ** (2)) * weights
+            if self.beam_momentum_scaling == "legacy_c2_source2":
+                fx_inj = source**2 * (self.light_speed ** 2) * weights
+            elif self.beam_momentum_scaling == "physical":
+                fx_inj = self.beam_sign * self.beam_reduced_flux * self.light_speed * source * weights
+            else:
+                raise ValueError(f"Unknown beam_momentum_scaling: {self.beam_momentum_scaling}")
             if self.debug:
                 jax.debug.print("Injecting momentum beam at x=[{}, {}], y={}, z={}", xi[0], xi[-1], yi[0], zi[0])
                 jax.debug.print("Momentum source: {}, weights sum: {}", source, jnp.sum(weights))
@@ -684,7 +694,12 @@ class StellarRadiationForce:
             di2, dj2 = jnp.meshgrid(offsets, offsets, indexing="ij")
             xi, yi, zi, valid = _clip_indices_2d(x0, y0, z0, di2, dj2)
             _, _, weights2 = _normalized_weights_2d(valid)
-            fx_inj = source**2 * (self.light_speed ** (2)) * weights2
+            if self.beam_momentum_scaling == "legacy_c2_source2":
+                fx_inj = source**2 * (self.light_speed ** 2) * weights2
+            elif self.beam_momentum_scaling == "physical":
+                fx_inj = self.beam_sign * self.beam_reduced_flux * self.light_speed * source * weights2
+            else:
+                raise ValueError(f"Unknown beam_momentum_scaling: {self.beam_momentum_scaling}")
             sol = sol.at[1, xi, yi, zi].add(fx_inj)
             sol = sol.at[2, xi, yi, zi].add(jnp.zeros_like(0))
             sol = sol.at[3, xi, yi, zi].add(jnp.zeros_like(0))
@@ -714,7 +729,12 @@ class StellarRadiationForce:
             xi, yi, zi, valid = _clip_indices_3d(x0, y0, z0, di3, dj3, dk3)
 
             _, _, _, weights3 = _normalized_weights_3d(valid)
-            fx_inj = source**2 * (self.light_speed ** (2)) * weights3
+            if self.beam_momentum_scaling == "legacy_c2_source2":
+                fx_inj = source**2 * (self.light_speed ** 2) * weights3
+            elif self.beam_momentum_scaling == "physical":
+                fx_inj = self.beam_sign * self.beam_reduced_flux * self.light_speed * source * weights3
+            else:
+                raise ValueError(f"Unknown beam_momentum_scaling: {self.beam_momentum_scaling}")
 
             sol = sol.at[1, xi, yi, zi].add(fx_inj)
             sol = sol.at[2, xi, yi, zi].add(jnp.zeros_like(fx_inj))
@@ -745,7 +765,7 @@ class StellarRadiationForce:
                     elif self.injection_geometry == "3D":
                         sol = _inject_energy_3d(sol, x0, y0, z0, per_star_source[s])
                     elif self.injection_geometry == "beam_x":
-                        sol = jnp.abs(_inject_energy_beam_x(sol, x0, y0, z0, per_star_source[s]))
+                        sol = _inject_energy_beam_x(sol, x0, y0, z0, per_star_source[s])
                     else:
                         raise ValueError(f"Unknown injection_geometry: {self.injection_geometry}")
 
@@ -789,8 +809,8 @@ class StellarRadiationForce:
                     else:
                         raise ValueError(f"Unknown injection_geometry: {self.injection_geometry}")
             
-        # Clip M1 pour éviter |F| > f_max c E
-        # sol = _clip_to_m1_cone(sol)
+        # Safety limiter only: keep |F| <= f_max c E without forcing equality.
+        sol = _clip_to_m1_cone(sol)
             
         # ── Debug ─────────────────────────────────────────────────────────────
         if self.debug:
@@ -941,8 +961,8 @@ class StellarRadiationForce:
 
             Fmag = jnp.sqrt(sol[1]**2 + sol[2]**2 + sol[3]**2)
             E_safe = jnp.where(sol[0] > 0, sol[0], 1e-30)
-            ratio_cell = Fmag / E_safe**2
-            ratio_cell_c = ratio_cell / self.light_speed
+            ratio_cell = Fmag / E_safe
+            ratio_cell_c = Fmag / (self.light_speed * E_safe)
 
             jax.debug.print("max |F|/E (cell) = {}", jnp.max(ratio_cell))
             jax.debug.print("max |F|/(c E) (cell) = {}", jnp.max(ratio_cell_c))
@@ -987,8 +1007,8 @@ class StellarRadiationForce:
             jax.debug.print("\n=== Vérification c² sur tout le domaine ===")
             jax.debug.print("E_sum(tout) = {}", E_sum_tot)
             jax.debug.print("|F|_sum(tout) = {}", F_sum_tot)
-            jax.debug.print("|F|/E**2(tout) = {}", ratio_tot)
-            jax.debug.print("|F|/E**2 / c²(tout) = {}", c_2_tot)
+            jax.debug.print("|F|/E(tout) = {}", ratio_tot)
+            jax.debug.print("|F|/E / c²(tout) = {}", c_2_tot)
             jax.debug.print("|F|/E = c² ? tout = {}", jnp.isclose(ratio_tot, self.light_speed**2))
 
             # Affiche aussi le nombre de cellules actives
