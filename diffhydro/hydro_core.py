@@ -558,7 +558,7 @@ class hydro:
         sh_arr = NamedSharding(self.mesh, self.FIELD_XYZ)
         # Place l'etat initial sur devices avec ce sharding.
         fields0 = jax.device_put(input_fields, sh_arr)
-        print("caca evolve")
+        # print("caca evolve")
         # Etat initial de la boucle: temps = 0, compteur de pas = 0.
         t0 = jnp.array(0.0, dtype=fields0.dtype)
         step0 = jnp.array(0, dtype=jnp.int32)
@@ -692,16 +692,18 @@ class hydro:
             fu = self.flux(sol_b, ax, params)
 
             # STEP 4: divergence des flux (forme conservative) avec roll halo-aware.
-            if self.periodic_flux_divergence:
-                flux_left = self.roll_with_halo(fu, 1, ax)
-            else:
-                flux_left = jnp.roll(fu, 1, axis=ax)
-                zero_face = jnp.zeros_like(jax.lax.slice_in_dim(fu, 0, 1, axis=ax))
-                flux_left = jax.lax.dynamic_update_slice_in_dim(
-                    flux_left, zero_face, 0, axis=ax
-                )
-            rhs = rhs - (fu - flux_left) / self.dx_o #eq 39 qrticle
-
+            
+            #add by GPT no use to fix the momentum injection. the injection function without.
+            # if self.periodic_flux_divergence:
+            #     flux_left = self.roll_with_halo(fu, 1, ax)
+            # else:
+            #     flux_left = jnp.roll(fu, 1, axis=ax)
+            #     zero_face = jnp.zeros_like(jax.lax.slice_in_dim(fu, 0, 1, axis=ax))
+            #     flux_left = jax.lax.dynamic_update_slice_in_dim(
+            #         flux_left, zero_face, 0, axis=ax
+            #     )
+            # rhs = rhs - (fu - flux_left) / self.dx_o #eq 39 qrticle
+            rhs = rhs - (fu - self.roll_with_halo(fu, 1, ax)) / self.dx_o #eq 39 qrticle
         # Neutralise dB/dt ici quand CT gère explicitement le champ magnétique.
         if getattr(self, "ct", False):
             if sol.shape[0] > self.iBx:
@@ -847,8 +849,8 @@ class hydro:
         elif name in ("RK2", "HEUN", "MIDPOINT"):
             # --- RK2 (Heun) ---
             # RK2 stage 1.
-            print("caca rk2")
-            jax.debug.print("E min dans Rk2 stage 1: {}", jnp.min(sol[0]))
+            # print("caca rk2")
+            # jax.debug.print("E min dans Rk2 stage 1: {}", jnp.min(sol[0]))
             k1 = self.rhs_unsplit(sol, params); u1 = sol + dt * k1
             u1 = self._apply_ct_on_state(u1, params, dt)
 

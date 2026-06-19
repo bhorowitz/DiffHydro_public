@@ -68,7 +68,7 @@ class EquationManager:
         self.equation_type = "SINGLE-PHASE"#equation_information.equation_type
         self.thermal_conductivity_model = "SUTHERLAND"
         self.sutherland_parameters = [0.1, 1.0, 1.0]
-        self.cfl = 0.01 #original value 0.4
+        self.cfl = 0.4 #original value 0.4 , value when debugging 0.01
         # self.mesh_shape = list(self.mesh_shape)
         self.R = 1.0
         self.cp = self.gamma / (self.gamma - 1.0) * self.R
@@ -337,6 +337,7 @@ class EquationManager:
         del primitives
         if self.normalization:
             conservatives = self._normalize_radiative_conservatives(conservatives)
+            print("caca")
         # Conservative active variables are physical moments:
         # [E_gamma, F_gamma_x, F_gamma_y, F_gamma_z].
         cons_a = conservatives[self.active_slice]

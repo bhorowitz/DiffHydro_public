@@ -120,12 +120,12 @@ class EquationManager:
 
     def get_sound_speed(self, p, rho):
         rho_safe = jnp.maximum(rho, self.eps)
-        print("caca")
+        # print("caca")
         if self.isothermal:
-            print("return get_sound_speed (isothermal):", jnp.full_like(rho_safe, self.isothermal_sound_speed))
+            # print("return get_sound_speed (isothermal):", jnp.full_like(rho_safe, self.isothermal_sound_speed))
             return jnp.full_like(rho_safe, self.isothermal_sound_speed)
         p_safe = jnp.maximum(p, self.eps)
-        print("return get_sound_speed:", jnp.sqrt(self.gamma * p_safe / rho_safe))
+        # print("return get_sound_speed:", jnp.sqrt(self.gamma * p_safe / rho_safe))
         return jnp.sqrt(self.gamma * p_safe / rho_safe)
 
     # ---------------------------
