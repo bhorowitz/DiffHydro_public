@@ -7,5 +7,10 @@ FIELD_DIMS = {
     "vz": "velocity",
     "p": "pressure",
     "Etot": "energy_density",
+    # Radiative transfer fields
+    "E_gamma": "energy_density",
+    "Fx_gamma": "radiation_flux",
+    "Fy_gamma": "radiation_flux",
+    "Fz_gamma": "radiation_flux",
 }
 

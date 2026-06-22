@@ -48,6 +48,7 @@ class UnitParser:
         "kg/m^3": (1.0e-3, "density"),
         "dyne/cm^2": (1.0, "pressure"),
         "erg/cm^3": (1.0, "energy_density"),
+        "erg/s/cm^2": (1.0, "radiation_flux"),
         "K": (1.0, "temperature"),
     }
 
@@ -59,6 +60,7 @@ class UnitParser:
         "density": "g/cm^3",
         "pressure": "dyne/cm^2",
         "energy_density": "erg/cm^3",
+        "radiation_flux": "erg/s/cm^2",
         "temperature": "K",
     }
 

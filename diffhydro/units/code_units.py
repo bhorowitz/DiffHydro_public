@@ -40,6 +40,10 @@ class CodeUnits:
     def Temp_cgs(self) -> float:
         return self.mu * self.mH_cgs * (self.V_cgs**2) / self.kB_cgs
 
+    @property
+    def RadFlux_cgs(self) -> float:
+        return self.P_cgs * self.V_cgs
+
     def scale(self, dim: str) -> float:
         scales = {
             "length": self.L_cgs,
@@ -50,6 +54,7 @@ class CodeUnits:
             "pressure": self.P_cgs,
             "energy_density": self.Eden_cgs,
             "temperature": self.Temp_cgs,
+            "radiation_flux": self.RadFlux_cgs,
         }
         try:
             return scales[dim]

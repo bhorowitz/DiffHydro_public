@@ -118,7 +118,7 @@ class StellarRadiationForce:
         return age_factor * Z_factor
 
     def timestep(self, sol):
-        print("timestepblast")
+        # print("timestepblast")
         return 1e30
     
     def debug_grid_stats(self, sol, eq, label, ax):
@@ -506,7 +506,8 @@ class StellarRadiationForce:
     def force(self, i, sol, params, dt):
         if "star_masses" not in params or params["star_masses"] is None:
             return sol, params
-        self.debug_grid_stats(sol, self.eq, "sol before injection", 0)
+        if self.debug:
+            self.debug_grid_stats(sol, self.eq, "sol before injection", 0)
         star_masses        = jnp.asarray(params["star_masses"])
         star_ages_old      = jnp.asarray(params["star_ages"])
         star_ages_new      = star_ages_old + dt
@@ -568,7 +569,8 @@ class StellarRadiationForce:
             weights = jnp.exp(- (s_float**2) / (2.0 * float(sigma)**2))
             weights = jnp.where(valid, weights, 0.0)
             weights = weights / (jnp.sum(weights) + 1e-30)
-            self.debug_grid_stats(sol, self.eq, "dans sol energy injection beam", 0)
+            if self.debug:
+                self.debug_grid_stats(sol, self.eq, "dans sol energy injection beam", 0)
             return sol.at[0, xi, yi, zi].add(source * weights)
 
         def _inject_momentum_beam_x(sol, x0, y0, z0, source):
@@ -592,7 +594,7 @@ class StellarRadiationForce:
             weights = weights / (jnp.sum(weights) + 1e-30)
 
             if self.beam_momentum_scaling == "legacy_c2_source2":
-                fx_inj = source**2 * (self.light_speed ** 2) * weights
+                fx_inj = source * (self.light_speed**2 ) * weights
             elif self.beam_momentum_scaling == "physical":
                 fx_inj = self.beam_sign * self.beam_reduced_flux * self.light_speed * source * weights
             else:
@@ -677,11 +679,13 @@ class StellarRadiationForce:
             return di3, dj3, dk3, weights3
 
         def _inject_energy_2d(sol, x0, y0, z0, source):
-            self.debug_grid_stats(sol, self.eq, "before clip sol energy injection 2D", 0)
+            if self.debug: 
+                self.debug_grid_stats(sol, self.eq, "before clip sol energy injection 2D", 0)
             di2, dj2 = jnp.meshgrid(offsets, offsets, indexing="ij")
             xi, yi, zi, valid = _clip_indices_2d(x0, y0, z0, di2, dj2)
             _, _, weights2 = _normalized_weights_2d(valid)
-            self.debug_grid_stats(sol, self.eq, "sol energy injection 2D", 0)
+            if self.debug: 
+                self.debug_grid_stats(sol, self.eq, "sol energy injection 2D", 0)
             return sol.at[0, xi, yi, zi].add(source * weights2)
 
         def _inject_energy_3d(sol, x0, y0, z0, source):
@@ -695,7 +699,7 @@ class StellarRadiationForce:
             xi, yi, zi, valid = _clip_indices_2d(x0, y0, z0, di2, dj2)
             _, _, weights2 = _normalized_weights_2d(valid)
             if self.beam_momentum_scaling == "legacy_c2_source2":
-                fx_inj = source**2 * (self.light_speed ** 2) * weights2
+                fx_inj = source * (self.light_speed ** 2) * weights2
             elif self.beam_momentum_scaling == "physical":
                 fx_inj = self.beam_sign * self.beam_reduced_flux * self.light_speed * source * weights2
             else:
@@ -730,7 +734,7 @@ class StellarRadiationForce:
 
             _, _, _, weights3 = _normalized_weights_3d(valid)
             if self.beam_momentum_scaling == "legacy_c2_source2":
-                fx_inj = source**2 * (self.light_speed ** 2) * weights3
+                fx_inj = source * (self.light_speed ** 2) * weights3
             elif self.beam_momentum_scaling == "physical":
                 fx_inj = self.beam_sign * self.beam_reduced_flux * self.light_speed * source * weights3
             else:
@@ -805,7 +809,8 @@ class StellarRadiationForce:
                         sol = _inject_momentum_x_3d(sol, x0, y0, z0, per_star_source[s])
                     elif self.injection_geometry == "beam_x":
                         wheight_2D_debug,sol = _inject_momentum_beam_x(sol, x0, y0, z0, per_star_source[s])
-                        self.debug_grid_stats(sol, self.eq, "after clip sol momentum injection beam", 0)
+                        if self.debug: 
+                            self.debug_grid_stats(sol, self.eq, "after clip sol momentum injection beam", 0)
                     else:
                         raise ValueError(f"Unknown injection_geometry: {self.injection_geometry}")
             
@@ -1022,8 +1027,8 @@ class StellarRadiationForce:
                                         Fy=sol[2],
                                         Fz=sol[3],
                                     )
-        
-        self.debug_grid_stats(sol, self.eq, "fin sol energy injection 2D", 0)
+        if self.debug:
+            self.debug_grid_stats(sol, self.eq, "fin sol energy injection 2D", 0)
         params_out              = dict(params)
         params_out["star_ages"] = star_ages_new
         self.sol = sol

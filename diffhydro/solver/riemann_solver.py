@@ -302,77 +302,77 @@ class LaxFriedrichs_Radiative_transfer(RiemannSolver):
         fL_near_overflow = jnp.any(jnp.abs(f_L) >= 0.9 * max_float)
         fR_near_overflow = jnp.any(jnp.abs(f_R) >= 0.9 * max_float)
         # f_over_E_ratio = self.velocity_ids[0]/self.mass_ids 
-        jax.debug.print(
-            """
-            [LF_M1 BEFORE] axis={axis}
-            E_L(mean)={EgL_mean}
-            E_R(mean)={EgR_mean}
-            |F|_L(mean)={FnormL_mean}
-            |F|_R(mean)={FnormR_mean}
-            f_L(mean)={fL_mean}
-            f_R(mean)={fR_mean}
-            f_L max={fL_max}
-            f_R max={fR_max}
-            f_L in [0,1]? {fL_ok}
-            f_R in [0,1]? {fR_ok}
+        # jax.debug.print(
+        #     """
+        #     [LF_M1 BEFORE] axis={axis}
+        #     E_L(mean)={EgL_mean}
+        #     E_R(mean)={EgR_mean}
+        #     |F|_L(mean)={FnormL_mean}
+        #     |F|_R(mean)={FnormR_mean}
+        #     f_L(mean)={fL_mean}
+        #     f_R(mean)={fR_mean}
+        #     f_L max={fL_max}
+        #     f_R max={fR_max}
+        #     f_L in [0,1]? {fL_ok}
+        #     f_R in [0,1]? {fR_ok}
             
-            dtype={dtype}
-            float_max={float_max}
+        #     dtype={dtype}
+        #     float_max={float_max}
 
-            E_L: nan={EgL_nan} inf={EgL_inf} nonfinite={EgL_nonfinite} near_overflow={EgL_near_overflow}
-            E_R: nan={EgR_nan} inf={EgR_inf} nonfinite={EgR_nonfinite} near_overflow={EgR_near_overflow}
-            |F|_L: nan={FL_nan} inf={FL_inf} nonfinite={FL_nonfinite} near_overflow={FL_near_overflow}
-            |F|_R: nan={FR_nan} inf={FR_inf} nonfinite={FR_nonfinite} near_overflow={FR_near_overflow}
-            f_L: nan={fL_nan} inf={fL_inf} nonfinite={fL_nonfinite} near_overflow={fL_near_overflow}
-            f_R: nan={fR_nan} inf={fR_inf} nonfinite={fR_nonfinite} near_overflow={fR_near_overflow}
-            """,
-            axis=axis,
-            EgL_mean=jnp.mean(Eg_L),
-            EgR_mean=jnp.mean(Eg_R),
-            FnormL_mean=jnp.mean(F_norm_L),
-            FnormR_mean=jnp.mean(F_norm_R),
-            fL_mean=jnp.mean(f_L),
-            fR_mean=jnp.mean(f_R),
-            fL_max=jnp.max(f_L),
-            fR_max=jnp.max(f_R),
-            fL_ok=jnp.all(f_L <= 1.0 + 1e-6),
-            fR_ok=jnp.all(f_R <= 1.0 + 1e-6),
+        #     E_L: nan={EgL_nan} inf={EgL_inf} nonfinite={EgL_nonfinite} near_overflow={EgL_near_overflow}
+        #     E_R: nan={EgR_nan} inf={EgR_inf} nonfinite={EgR_nonfinite} near_overflow={EgR_near_overflow}
+        #     |F|_L: nan={FL_nan} inf={FL_inf} nonfinite={FL_nonfinite} near_overflow={FL_near_overflow}
+        #     |F|_R: nan={FR_nan} inf={FR_inf} nonfinite={FR_nonfinite} near_overflow={FR_near_overflow}
+        #     f_L: nan={fL_nan} inf={fL_inf} nonfinite={fL_nonfinite} near_overflow={fL_near_overflow}
+        #     f_R: nan={fR_nan} inf={fR_inf} nonfinite={fR_nonfinite} near_overflow={fR_near_overflow}
+        #     """,
+        #     axis=axis,
+        #     EgL_mean=jnp.mean(Eg_L),
+        #     EgR_mean=jnp.mean(Eg_R),
+        #     FnormL_mean=jnp.mean(F_norm_L),
+        #     FnormR_mean=jnp.mean(F_norm_R),
+        #     fL_mean=jnp.mean(f_L),
+        #     fR_mean=jnp.mean(f_R),
+        #     fL_max=jnp.max(f_L),
+        #     fR_max=jnp.max(f_R),
+        #     fL_ok=jnp.all(f_L <= 1.0 + 1e-6),
+        #     fR_ok=jnp.all(f_R <= 1.0 + 1e-6),
 
-            dtype=dtype_EgL,
-            float_max=max_float,
+        #     dtype=dtype_EgL,
+        #     float_max=max_float,
 
-            EgL_nan=EgL_nan,
-            EgL_inf=EgL_inf,
-            EgL_nonfinite=EgL_nonfinite,
-            EgL_near_overflow=EgL_near_overflow,
+        #     EgL_nan=EgL_nan,
+        #     EgL_inf=EgL_inf,
+        #     EgL_nonfinite=EgL_nonfinite,
+        #     EgL_near_overflow=EgL_near_overflow,
 
-            EgR_nan=EgR_nan,
-            EgR_inf=EgR_inf,
-            EgR_nonfinite=EgR_nonfinite,
-            EgR_near_overflow=EgR_near_overflow,
+        #     EgR_nan=EgR_nan,
+        #     EgR_inf=EgR_inf,
+        #     EgR_nonfinite=EgR_nonfinite,
+        #     EgR_near_overflow=EgR_near_overflow,
 
-            FL_nan=FL_nan,
-            FL_inf=FL_inf,
-            FL_nonfinite=FL_nonfinite,
-            FL_near_overflow=FL_near_overflow,
+        #     FL_nan=FL_nan,
+        #     FL_inf=FL_inf,
+        #     FL_nonfinite=FL_nonfinite,
+        #     FL_near_overflow=FL_near_overflow,
 
-            FR_nan=FR_nan,
-            FR_inf=FR_inf,
-            FR_nonfinite=FR_nonfinite,
-            FR_near_overflow=FR_near_overflow,
+        #     FR_nan=FR_nan,
+        #     FR_inf=FR_inf,
+        #     FR_nonfinite=FR_nonfinite,
+        #     FR_near_overflow=FR_near_overflow,
 
-            fL_nan=fL_nan,
-            fL_inf=fL_inf,
-            fL_nonfinite=fL_nonfinite,
-            fL_near_overflow=fL_near_overflow,
+        #     fL_nan=fL_nan,
+        #     fL_inf=fL_inf,
+        #     fL_nonfinite=fL_nonfinite,
+        #     fL_near_overflow=fL_near_overflow,
 
-            fR_nan=fR_nan,
-            fR_inf=fR_inf,
-            fR_nonfinite=fR_nonfinite,
-            fR_near_overflow=fR_near_overflow,
+        #     fR_nan=fR_nan,
+        #     fR_inf=fR_inf,
+        #     fR_nonfinite=fR_nonfinite,
+        #     fR_near_overflow=fR_near_overflow,
             
-            ordered=True,
-        )
+        #     ordered=True,
+        # )
         
         # jax.debug.print("sol = {}", self.stellar_force.sol, ordered=True)
         # jax.debug.print("|F|/E {f_over_E_ratio}", f_over_E_ratio=f_over_E_ratio)
@@ -395,27 +395,27 @@ class LaxFriedrichs_Radiative_transfer(RiemannSolver):
         E_out = jnp.maximum(conservatives_R[self.E_id], self.eps)
         f_out = F_out_norm / (self.c * E_out)
 
-        jax.debug.print(
-                            """
-                [LF_M1 AFTER] axis={axis}
-                |F|_out(mean)={Fout_mean}
-                |F|_out(max)={Fout_max}
-                E_out(mean)={Eout_mean}
-                E_out(min)={Eout_min}
-                f_out(mean)={fout_mean}
-                f_out(max)={fout_max}
-                f_out constraint (f<=1)? {fout_ok}
-                """,
-                            axis=axis,
-                            Fout_mean=jnp.mean(F_out_norm),
-                            Fout_max=jnp.max(F_out_norm),
-                            Eout_mean=jnp.mean(E_out),
-                            Eout_min=jnp.min(E_out),
-                            fout_mean=jnp.mean(f_out),
-                            fout_max=jnp.max(f_out),
-                            fout_ok=jnp.all(f_out <= 1.0 + 1e-6),
-                            ordered=True,
-                        )
+        # jax.debug.print(
+        #                     """
+        #         [LF_M1 AFTER] axis={axis}
+        #         |F|_out(mean)={Fout_mean}
+        #         |F|_out(max)={Fout_max}
+        #         E_out(mean)={Eout_mean}
+        #         E_out(min)={Eout_min}
+        #         f_out(mean)={fout_mean}
+        #         f_out(max)={fout_max}
+        #         f_out constraint (f<=1)? {fout_ok}
+        #         """,
+        #                     axis=axis,
+        #                     Fout_mean=jnp.mean(F_out_norm),
+        #                     Fout_max=jnp.max(F_out_norm),
+        #                     Eout_mean=jnp.mean(E_out),
+        #                     Eout_min=jnp.min(E_out),
+        #                     fout_mean=jnp.mean(f_out),
+        #                     fout_max=jnp.max(f_out),
+        #                     fout_ok=jnp.all(f_out <= 1.0 + 1e-6),
+        #                     ordered=True,
+        #                 )
         # jax.debug.print("c^2 test apres: {dtype}", dtype=self.c_square)
         return fluxes_xi, None, None
 

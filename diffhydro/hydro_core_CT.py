@@ -48,7 +48,7 @@ class hydro:
         self.integrator = INTEGRATOR_DICT[integrator]  # callable
         self._integrator_name = integrator
         self.use_ct = use_ct
-        print("using CT?", use_ct)
+        # print("using CT?", use_ct)
 
         # indices expected by EquationManagerMHD; leave generic
         self.iBx, self.iBy, self.iBz = 4, 5, 6  # if Euler run, these rows may not exist
