@@ -104,7 +104,7 @@ class ConvectiveFlux:
         F_act, _, _ = self.solver.solve_riemann_problem_xi(
             prim_L_act, prim_R_act,
             cons_L_act, cons_R_act, ax-1
-        ) # _ signifie ignore les veleurs retourner, et ax-1 change l indexation de la base on calcule ici les problemes a l interface avec godunov
+        ) # _ means ignore the returned values, and ax-1 changes the indexing base we calculate here the problems at the interface with godunov
 
         F = F_act
 
@@ -135,7 +135,7 @@ class ConvectiveFlux:
         else:
             passive_start = eq.n_active
 
-        if conservative_xi_L.shape[0] > passive_start: #calcule des flux passif c est a dire des grandeurs qui n ont pas d influence sur la dynamique et qui sont transportees par le flux de masse
+        if conservative_xi_L.shape[0] > passive_start: # calculation of passive fluxes that is to say quantities that have no effect on dynamics and are transported by mass flux
             # mass flux from active solver (row 0 always rho*u_n)
             mass_flux = F_act[eq.mass_ids]  # shape (...)
 
@@ -764,7 +764,7 @@ class ConvectiveFlux_Radiative_transfer:
     def flux(self, sol, ax, params, flux):
         eq = self.eq_manage
         
-        # DEBUG: grille complète avant reconstruction / Riemann
+        # DEBUG: full grid before reconstruction / Riemann
         
         self._debug_grid_stats(sol, eq, "GRID BEFORE RIEMANN", ax)
 
@@ -865,7 +865,7 @@ class ConvectiveFlux_Radiative_transfer:
             passive_start = eq.n_active
             # print("caca boucle passive start no glm")
 
-        if conservative_xi_L.shape[0] > passive_start:  # calcule des flux passifs
+        if conservative_xi_L.shape[0] > passive_start:  # calculation of passive fluxes
             # mass flux from active solver (row 0 always rho*u_n)
             mass_flux = F_act[eq.mass_ids]  # shape (...)
 
@@ -880,7 +880,7 @@ class ConvectiveFlux_Radiative_transfer:
             F_passive = mass_flux[jnp.newaxis, ...] * passive_face
             F = jnp.concatenate([F, F_passive], axis=0)
             # print("caca conservative")
-        # DEBUG: flux retourné sur toute la grille après Riemann
+        # DEBUG: flux returned on the entire grid after Riemann
         self._debug_grid_stats(F, eq, "GRID AFTER RIEMANN", ax)
         # jax.debug.print('min dans flux de E apres{}', jnp.min(primitives[0]))
         return F

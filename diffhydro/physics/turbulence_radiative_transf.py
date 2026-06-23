@@ -70,7 +70,7 @@ def init_turbulent_velocity(eq, Lbox, rho0, p0,
 
     # Passive densities: each one = rho0 (independent tracers)
     rhos_passive = jnp.stack([rho] * eq.n_dens, axis=0)  # (n_dens, nx, ny, nz) 
-    #seul truc qui differe de turbulence.py et le rhos_passive, le reste est identique (sauf que rho0 est la densité physique et pas la densité totale)
+    # Only thing that differs from turbulence.py is rhos_passive, the rest is identical (except rho0 is the physical density not the total density)
 
     # Sound speed uses the physical density rho (= rho0)
     cs = jnp.sqrt(eq.gamma * p / rho)

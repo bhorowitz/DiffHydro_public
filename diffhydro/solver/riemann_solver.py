@@ -11,7 +11,7 @@ from diffhydro.physics.radiative_transfer import StellarRadiationForce
 
 #adapted from jaxfluids, added more magnetic-solvers, need to reorganize sometime...
 
-class RiemannSolver(ABC): #class global sur tous ce programme 
+class RiemannSolver(ABC): # global class for this entire program 
     """Abstract base class for Riemann solvers.
 
     RiemannSolver has two fundamental attributes: a material manager and a signal speed.
@@ -191,7 +191,7 @@ class LaxFriedrichs_safe(RiemannSolver):
 
         return fluxes_xi, None, None
     
-class LaxFriedrichs(RiemannSolver):#calculateur de derivees
+class LaxFriedrichs(RiemannSolver): # derivative calculator
 
     def __init__(
             self,
@@ -254,7 +254,7 @@ class LaxFriedrichs_Radiative_transfer(RiemannSolver):
             ) -> Tuple[Array, Array, Array]:
         # jax.debug.print("c^2 test avant: {dtype}", dtype=self.c_square)
         # -------------------------
-        # États gauche / droite
+        # Left / right states
         # -------------------------
         Eg_L = jnp.maximum(primitives_L[self.E_id], self.eps)
         Eg_R = jnp.maximum(primitives_R[self.E_id], self.eps)
@@ -384,7 +384,7 @@ class LaxFriedrichs_Radiative_transfer(RiemannSolver):
         celerity = self.equation_manager.light_speed
 
         # -------------------------
-        # Flux de Lax-Friedrichs
+        # Lax-Friedrichs flux
         # -------------------------
         fluxes_xi = 0.5 * (fluxes_L + fluxes_R) - 0.5 * celerity * (conservatives_R - conservatives_L)
 
@@ -888,7 +888,7 @@ class HLL_radiative_transfer_chat(RiemannSolver):
     """
 
     def __init__(self, equation_manager, **kwargs):
-        # signal_speed n'est plus utilisé, on passe None
+        # signal_speed is no longer used, we pass None
         super().__init__(equation_manager, signal_speed=None)
         self.eqm = equation_manager
         self.c   = float(equation_manager.light_speed)
@@ -915,7 +915,7 @@ class HLL_radiative_transfer_chat(RiemannSolver):
         return lam_minus, lam_plus
 
     # ---------------------------
-    # Riemann 1D le long de axis
+    # 1D Riemann along axis
     # ---------------------------
     def _solve_riemann_problem_xi_single_phase(
             self,
@@ -926,7 +926,7 @@ class HLL_radiative_transfer_chat(RiemannSolver):
             axis: int,
             **kwargs):
 
-        # 1) Flux physiques radiatifs (M1 déjà géré par EquationManager)
+        # 1) Physical radiative fluxes (M1 already handled by EquationManager)
         F_L = self.eqm.get_fluxes_xi(primitives_L, conservatives_L, axis)
         F_R = self.eqm.get_fluxes_xi(primitives_R, conservatives_R, axis)
 
@@ -937,8 +937,8 @@ class HLL_radiative_transfer_chat(RiemannSolver):
         Eg_L_safe = jnp.maximum(Eg_L, self.eps)
         Eg_R_safe = jnp.maximum(Eg_R, self.eps)
 
-        # 3) Vecteurs de flux radiatif F = (Fx,Fy,Fz) côté L/R,
-        #    à partir des primitives (où F_gamma_x/y/z sont déjà des flux physiques)
+        # 3) Radiative flux vectors F = (Fx,Fy,Fz) on L/R side,
+        #    from the primitives (where F_gamma_x/y/z are already physical fluxes)
         Fx_L = primitives_L[self.F_ids[0]]
         Fy_L = primitives_L[self.F_ids[1]]
         Fz_L = primitives_L[self.F_ids[2]]
@@ -953,13 +953,13 @@ class HLL_radiative_transfer_chat(RiemannSolver):
         F_norm_L = jnp.sqrt(jnp.sum(F_vec_L * F_vec_L, axis=0))
         F_norm_R = jnp.sqrt(jnp.sum(F_vec_R * F_vec_R, axis=0))
 
-        # 4) Flux réduit f = |F| / (c E)
+        # 4) Reduced flux f = |F| / (c E)
         f_L = F_norm_L / (self.c * Eg_L_safe)
         f_R = F_norm_R / (self.c * Eg_R_safe)
 
 
 
-        # 5) Valeurs propres M1 pour chaque côté
+        # 5) M1 eigenvalues for each side
         lamL_minus, lamL_plus = self._eigen_speeds_M1(f_L)
         lamR_minus, lamR_plus = self._eigen_speeds_M1(f_R)
 
@@ -981,7 +981,7 @@ class HLL_radiative_transfer_chat(RiemannSolver):
             + S_L * S_R * (conservatives_R - conservatives_L)
         ) / denom_safe
 
-        # 8) Sélection piècewise (HLL classique)
+        # 8) Piecewise selection (classic HLL)
         fluxes_xi = jnp.where(
             S_L >= 0.0,
             F_L,   # toutes les ondes vers la droite

@@ -8,11 +8,11 @@
 import os, sys
 sys.path.append("../../")
 
-# GPU config — DOIT être avant import jax
+# GPU config — MUST be before import jax
 os.environ['CUDA_DEVICE_ORDER']              = 'PCI_BUS_ID'
 os.environ['CUDA_VISIBLE_DEVICES']           = '0'
-os.environ['XLA_PYTHON_CLIENT_PREALLOCATE']  = 'false'   # ← clé manquante
-# os.environ['XLA_PYTHON_CLIENT_MEM_FRACTION'] = '0.7'     # limite à 70% VRAM
+os.environ['XLA_PYTHON_CLIENT_PREALLOCATE']  = 'false'   # ← missing key
+# os.environ['XLA_PYTHON_CLIENT_MEM_FRACTION'] = '0.7'     # limit to 70% VRAM
 # os.environ['XLA_PYTHON_CLIENT_ALLOCATOR']    = 'platform'
 os.environ['XLA_FLAGS'] = '--xla_gpu_fft_plan_cache_capacity=0'
 

@@ -110,7 +110,7 @@ def load_snapshot(hydrosim, step_i, snapshot_dir=None):
     
     # Load all shards into a dictionary indexed by (x, y, z)
     shards = {}
-    # Utiliser le snapshot_prefix de hydrosim s'il existe, sinon défaut à "fields"
+    # Use snapshot_prefix from hydrosim if it exists, otherwise default to "fields"
     prefix = getattr(hydrosim, 'snapshot_prefix', 'fields')
     for x in range(nx):
         for y in range(ny):
