@@ -57,7 +57,7 @@ def remat(fn):
 
 
 def save_snapshot_np(path, arr_host):
-    # Crée le dossier parent si besoin avant d'écrire le fichier .npy.
+    # Creates the parent folder if needed before writing the .npy file.
     os.makedirs(os.path.dirname(path), exist_ok=True)
     # Convertit explicitement vers NumPy host puis sauvegarde.
     onp.save(path, onp.asarray(arr_host))
@@ -141,34 +141,34 @@ class hydro:
                 track_time: bool = True,
                 debug_fixed_dt: float | None = None,
                 periodic_flux_divergence: bool = True):
-        # Paramètres fixes d'une simulation (plutôt statiques vis-à-vis de l'optimisation).
+        # Fixed simulation parameters (rather static with respect to optimization).
    #     self.init_dt = init_dt # tiny starting timestep to smooth out anything too sharp
         self.splitting_schemes = splitting_schemes #strang splitting for x,y,z sweeps
         self.max_dt = max_dt
         self.debug_fixed_dt = debug_fixed_dt
         self.boundary = None
-        # Nombre d'itérations globales (chaque super-step applique un schéma de sweep complet).
+        # Number of global iterations (each super-step applies a complete sweep scheme).
         self.n_super_step = n_super_step
         # Liste d'objets responsables des flux numeriques.
         self.fluxes = fluxes
         # Liste d'objets responsables des termes sources / forces.
         self.forces = forces
-        # Pas spatial de référence (supposé uniforme ici).
+        # Reference spatial step (assumed uniform here).
         self.dx_o = 1.0
         self.use_mol = use_mol
-        # Sélectionne la fonction d'intégration temporelle via son nom.
+        # Selects the time integration function by name.
         self.integrator = INTEGRATOR_DICT[integrator]  # callable
         self._integrator_name = integrator
         self.use_ct = use_ct
-        # Index des composantes magnétiques dans le tenseur d'état.
+        # Index of magnetic components in the state tensor.
         self.iBx, self.iBy, self.iBz = 4, 5, 6  # if Euler run, these rows may not exist
 
         self.pmesh_shape = pmesh_shape #parallelism
         
-        # Construit le maillage logique de devices pour la parallélisation spatiale.
+        # Builds the logical mesh of devices for spatial parallelization.
         devices = mesh_utils.create_device_mesh(self.pmesh_shape)
         self.mesh =  Mesh(devices, ('x', 'y','z'))
-        # Le champ est shardé uniquement sur les axes spatiaux (pas sur l'axe des variables).
+        # The field is sharded only on spatial axes (not on the variables axis).
         self.FIELD_XYZ = P(None, 'x', 'y','z')
         
         # --- NEW runtime state ---
@@ -185,7 +185,7 @@ class hydro:
         self.state_dtype = jnp.float32
         
         # Make snapshot dir on host 0 (safe if it already exists)
-        # Evite les creations de dossier concurrentes sur tous les hosts.
+        # Avoids concurrent folder creations on all hosts.
         if self.snapshot_every is not None and jax.process_index() == 0:
             os.makedirs(self.snapshot_dir, exist_ok=True)
 
@@ -197,7 +197,7 @@ class hydro:
                 mesh=self.mesh,
                 pmesh_shape=self.pmesh_shape,
                 field_spec=self.FIELD_XYZ,
-                # Fournit la primitive de décalage halo-aware pour les échanges inter-devices.
+                # Provides the halo-aware shift primitive for inter-device exchanges.
                 roll_fn=self.roll_with_halo
             )
         elif isinstance(boundary, type):
@@ -211,7 +211,7 @@ class hydro:
             # boundary is already an instance
             self.boundary = boundary
             # Inject mesh info if not already present
-            # Si l'instance expose ces attributs, on les synchronise avec l'objet hydro.
+            # If the instance exposes these attributes, synchronize them with the hydro object.
             if hasattr(self.boundary, 'mesh'):
                 self.boundary.mesh = self.mesh
                 self.boundary.pmesh_shape = self.pmesh_shape
@@ -219,58 +219,58 @@ class hydro:
     
                 
     def evolve_with_callbacks(self, input_fields, params):
-        # Décrit comment le tenseur de champs est réparti sur la mesh.
+        # Describes how the field tensor is distributed over the mesh.
         sh_arr = NamedSharding(self.mesh, self.FIELD_XYZ)
-        # Envoie l'état initial sur devices avec le sharding défini.
+        # Sends the initial state to devices with the defined sharding.
         fields0 = jax.device_put(input_fields, sh_arr)
         # Temps initial scalaire device-side.
         t0 = jnp.array(0.0, dtype=fields0.dtype)
-        # Historique des dt alloué à taille fixe (shape statique pour JAX).
+        # History of dt allocated to fixed size (static shape for JAX).
         dt_hist0 = jnp.zeros((self.n_super_step,), dtype=fields0.dtype)
         
-        # Compatibilite avec ancien champ "snapshots" si snapshot_every est absent.
+        # Compatibility with old "snapshots" field if snapshot_every is absent.
         snapshot_every = (self.snapshot_every if getattr(self, "snapshot_every", None) is not None
                           else (int(getattr(self, "snapshots", 0)) if getattr(self, "snapshots", 0) else 0))
-        # Normalise en entier Python (0 = desactive).
+        # Normalizes to Python integer (0 = disabled).
         snapshot_every = int(snapshot_every) if snapshot_every else 0
 
-        # Captures locales pour callback host (plus simple et explicite).
+        # Local captures for host callback (simpler and more explicit).
         snapshot_dir = self.snapshot_dir
         mesh_shape = self.mesh.shape
 
         # Save shard with device index
         def _save_shard_np_cb(step_i, x_idx, y_idx, z_idx, arr_host):
             import os, numpy as onp
-            # Recompose l'index linéaire du device à partir de ses coordonnées de mesh.
+            # Recomposes the linear device index from its mesh coordinates.
             linear_idx = int(x_idx) * (mesh_shape['y'] * mesh_shape['z']) + \
                          int(y_idx) * mesh_shape['z'] + int(z_idx)
-            # Crée le dossier de snapshots puis écrit le shard local.
+            # Creates the snapshots folder then writes the local shard.
             os.makedirs(snapshot_dir or ".", exist_ok=True)
             path = os.path.join(snapshot_dir, f"{self.snapshot_prefix}_step_{int(step_i):06d}_device_{linear_idx}.npy")
             onp.save(path, onp.asarray(arr_host))
 
         def _one_step(fields, params, i, t_scalar):
-            # Avance d'un pas adaptatif et récupère aussi le dt utilisé.
+            # Advances by an adaptive step and also retrieves the dt used.
             (fields_out, params_out), dt = self.hydrostep_adapt(i, (fields, params), t_scalar)
             return fields_out, params_out, dt
 
         def run_loop(fields, params, t, dt_hist):
             def body(i, carry):
                 fields, params, t, dt_hist = carry
-                # Exécute un pas hydro puis accumule le temps simulé.
+                # Executes a hydro step then accumulates the simulated time.
                 fields, params, dt = _one_step(fields, params, i, t)
                 t = t + dt
-                # Sauvegarde le dt du pas i pour diagnostics / post-traitement.
+                # Saves the dt of step i for diagnostics / post-processing.
                 dt_hist = dt_hist.at[i].set(dt)  # <- record per-step dt
 
                 if snapshot_every > 0:
                     def _do_snapshot(_):
-                        # Lance une fonction locale par shard pour récupérer les index de mesh.
+                        # Launches a local function per shard to retrieve mesh indices.
                         def save_local_shard(local_fields):
                             x_idx = lax.axis_index('x')
                             y_idx = lax.axis_index('y')
                             z_idx = lax.axis_index('z')
-                            # Callback host: sérialise le shard avec coordonnées de device.
+                            # Host callback: serializes the shard with device coordinates.
                             io_callback(_save_shard_np_cb, None, 
                                        i, x_idx, y_idx, z_idx, local_fields)
                             return ()
@@ -284,15 +284,15 @@ class hydro:
                         )(fields)
                         return ()
 
-                    # Déclenche snapshot uniquement sur les pas multiples de snapshot_every.
+                    # Triggers snapshot only on multiples of snapshot_every.
                     lax.cond((i % snapshot_every) == 0, _do_snapshot, lambda _: (), operand=None)
 
                 return (fields, params, t, dt_hist)
 
-            # Boucle XLA statique sur n_super_step iterations.
+            # Static XLA loop over n_super_step iterations.
             return lax.fori_loop(0, self.n_super_step, body, (fields, params, t, dt_hist0))
 
-        # Compile la boucle complète en pjit pour exécution distribuée efficace.
+        # Compiles the complete loop in pjit for efficient distributed execution.
         evolve_pjit = pjit(
             run_loop,
             in_shardings=(sh_arr, None, None, None),
@@ -304,7 +304,7 @@ class hydro:
         with self.mesh:
             fields_f, params_f, t_f, dt_hist = evolve_pjit(fields0, params, t0, dt_hist0)
 
-        # Rapatrie le temps final en float Python pour l'état objet.
+        # Brings back the final time as Python float for the state object.
         self.sim_time = float(t_f)
         return fields_f, params_f, dt_hist
                 
@@ -317,7 +317,7 @@ class hydro:
         if self.pmesh_shape[axis_idx] == 1:
             return jnp.roll(array, shift, axis=axis)
 
-        # Selection de l'axe logique et du nombre de devices concernes.
+        # Selection of the logical axis and the number of concerned devices.
         axis_name = ('x', 'y', 'z')[axis_idx]
         n_devices = self.pmesh_shape[axis_idx]
 
@@ -325,7 +325,7 @@ class hydro:
         def _exchange_halos(local_array):
             # Build permutation for communication
             if shift == 1:
-                # Permutation cyclique avant (envoi vers voisin +1).
+                # Forward cyclic permutation (send to neighbor +1).
                 perm = [(i, (i + 1) % n_devices) for i in range(n_devices)]
                 # Get last slice to send forward
                 boundary = jax.lax.slice_in_dim(local_array, -1, None, axis=axis)
@@ -334,7 +334,7 @@ class hydro:
                 interior = jax.lax.slice_in_dim(local_array, 0, -1, axis=axis)
                 return jnp.concatenate([received, interior], axis=axis)
             elif shift == -1:
-                # Permutation cyclique arriere (envoi vers voisin -1).
+                # Backward cyclic permutation (send to neighbor -1).
                 perm = [(i, (i - 1) % n_devices) for i in range(n_devices)]
                 # Get first slice to send backward
                 boundary = jax.lax.slice_in_dim(local_array, 0, 1, axis=axis)
@@ -357,27 +357,27 @@ class hydro:
     @jax.jit
     def timestep(self,fields):
         dt = []
-        # Contraintes CFL / physiques provenant des flux (advection, diffusion, ...).
+        # CFL constraints / physical constraints from fluxes (advection, diffusion, ...).
         for flux in self.fluxes:
             dt.append(flux.timestep(fields))
-        # Contraintes additionnelles provenant des termes sources (forces).
+        # Additional constraints from source terms (forces).
         for force in self.forces:
             dt.append(force.timestep(fields))
-        # On retient le dt global le plus restrictif.
+        # We select the most restrictive global dt.
         return jnp.min(jnp.array(dt))
     
     def flux(self,sol,ax,params):
-        # Accumulateur de flux total (même shape que l'état).
+        # Total flux accumulator (same shape as the state).
         total_flux = jnp.zeros(sol.shape)
         for flux in self.fluxes: 
             #note it is ordered, to allow a flux_correction depending on calculated fluxes
             #make sure your order is correct for that though!
-            # Chaque flux peut dependre du cumul deja calcule (corrections successives).
+            # Each flux can depend on the cumulative value already calculated (successive corrections).
             total_flux += flux.flux(sol,ax,params,total_flux)
         return total_flux
     
-    def forcing(self,i,sol,params,dt): #all axis independant? 
-        # Applique chaque force séquentiellement en propageant champs + paramètres mis à jour.
+    def forcing(self,i,sol,params,dt): #all axis independant?
+        # Applies each force sequentially by propagating updated fields + parameters.
         for force in self.forces:
             sol,params = force.force(i, sol, params, dt)  # each returns UPDATED fields
         return sol,params
@@ -389,30 +389,30 @@ class hydro:
         fu1 = self.flux(sol, ax, params) 
         rhs_cons = (fu1 - self.roll_with_halo(fu1, 1, ax))  # WITH HALO EXCHANGE
 
-        # État intermédiaire à demi-pas.
+        # Intermediate state at half-step.
         u1 = sol - rhs_cons * dt / (2.0 * self.dx_o)
 
-        # Stage 2 RK2: recalcule des flux sur l'état intermédiaire.
+        # Stage 2 RK2: recalculates fluxes on the intermediate state.
         fu = self.flux(u1, ax, params)  # Note: should this be u1 instead of sol?
         rhs_cons = (fu - self.roll_with_halo(fu, 1, ax))    # WITH HALO EXCHANGE
 
-        # Mise à jour finale conservative sur un pas complet.
+        # Final conservative update over one complete step.
         sol = sol - (rhs_cons) * dt / self.dx_o
         return sol
 
     @partial(remat)
     def sweep_stack(self,state,dt,i):
         sol,params = state
-        # Parcourt des differents ordres de sweep (Strang/cycliques).
+        # Traversal of different sweep orders (Strang/cyclic).
         for scheme in self.splitting_schemes:
-            # Parcourt des axes dans l'ordre courant.
+            # Traversal of axes in the current order.
             for nn,ax in enumerate(scheme):
-                # Applique les bords avant de calculer les flux sur l'axe.
+                # Apply boundaries before computing fluxes on the axis.
                 sol = self.boundary.impose(sol,ax)
-                # Integre une fraction du dt total associee au schema actif.
+                # Integrates a fraction of the total dt associated with the active scheme.
                 sol = self.split_solve_step(sol,dt/(len(self.splitting_schemes)),int(ax),params)                 
                 # experimental
-                # Projection simple pour eviter des valeurs negatives sur certaines variables.
+                # Simple projection to avoid negative values on certain variables.
                 sol = sol.at[0].set(jnp.abs(sol[0]))
                 sol = sol.at[-1].set(jnp.abs(sol[-1]))
     
@@ -423,7 +423,7 @@ class hydro:
     def hydrostep_adapt(self, i, state, current_time):
         fields, params = state
         fields = fields.at[0].set(jnp.maximum(fields[0], 0.0))
-        # Calcule un dt local admissible puis le borne par max_dt.
+        # Calculates an admissible local dt then bounds it by max_dt.
         ttt = self.timestep(fields)
         ttt = jnp.minimum(self.max_dt, ttt)
         if self.debug_fixed_dt is not None: #debug option by the chat
@@ -432,7 +432,7 @@ class hydro:
             jax.debug.print("hydro_core: debug_fixed_dt active, dt = {}", dt)
         else:
             dt = ttt
-        # Applique un pas hydro avec le dt sélectionné.
+        # Applies a hydro step with the selected dt.
         fields, params = self._hydrostep(i, (fields, params), dt)
         # return both the new state and the dt so host can accumulate time
         return (fields, params), dt
@@ -442,15 +442,15 @@ class hydro:
     def _hydrostep(self, i, state, dt):
         # split forcing outside of core hydro loop
         fields, params = state
-        # Strang splitting des forces: demi-pas avant l'hydrodynamique.
+        # Strang splitting of forces: half-step before hydrodynamics.
         fields, params = self.forcing(i, fields, params, dt/2)
-        # Partie mise à jour hydrodynamique principale.
+        # Main hydrodynamic update part.
         if self.use_mol and self.use_ct:
             #jax.debug.print("use ct")
-            # Méthode des lignes + constrained transport.
+            # Method of lines + constrained transport.
             fields = self.mol_solve_step_ct(fields, dt, params)  # <<< unsplit (MOL + CT-on-state)
         elif self.use_mol:
-            # Méthode des lignes sans CT.
+            # Method of lines without CT.
             fields = self.mol_solve_step(fields, dt, params)  # <<< unsplit (MOL + CT-on-state)
 
         else:
@@ -460,7 +460,7 @@ class hydro:
         # Quick sanity check after the hydro update (before final forcing)
         _check_finite("sol after hydro", fields)
 
-        # Demi-pas final des forces (ferme le splitting symétrique).
+        # Final half-step of forces (closes the symmetric splitting).
         fields, params = self.forcing(i, fields, params, dt/2)
         return (fields, params)
 
@@ -602,7 +602,7 @@ class hydro:
                     dt_hist,
                 )
 
-                # Incremente le compteur de pas.
+                # Increments the step counter.
                 step_new = step + jnp.array(1, dtype=step.dtype)
                 return (fields_new, params_new, t_new, dt_hist_new, step_new)
 
@@ -613,7 +613,7 @@ class hydro:
             )
             return fields_f, params_f, t_f, dt_hist_f, step_f
 
-        # Compile la boucle while en version distribuee.
+        # Compiles the while loop in distributed version.
         evolve_pjit = pjit(
             run_loop,
             in_shardings=(sh_arr, None, None, None, None, None, None),
@@ -626,17 +626,17 @@ class hydro:
                 fields0, params, t0, dt_hist0, step0, t_target, max_steps
             )
 
-        # Met a jour le temps final cote objet Python.
+        # Updates the final time on the Python object side.
         self.sim_time = float(t_f)
         return fields_f, params_f, t_f, dt_hist, n_steps
 
     def evolve(self, input_fields, params):
-        # 1) Décrit la distribution spatiale du tenseur sur la mesh.
+        # 1) Describes the spatial distribution of the tensor on the mesh.
         sh_arr = NamedSharding(self.mesh, self.FIELD_XYZ)
-        # 2) Convertit/copie l'état initial vers les devices shardés.
+        # 2) Converts/copies the initial state to sharded devices.
         fields = jax.device_put(input_fields.astype(self.state_dtype), sh_arr)
 
-        # 3) Déclare un pas de temps unitaire (appelé dans la boucle JAX).
+        # 3) Declares a unit time step (called in the JAX loop).
         def _one_step(fields, params, i):
             (fields_out, params_out),_t = self.hydrostep_adapt(i, (fields, params),0)
             return fields_out.astype(input_fields.dtype), params_out
@@ -645,7 +645,7 @@ class hydro:
         checkpointed_step = remat(_one_step)
 
         
-        # 4) Compile ce pas en version distribuée pjit.
+        # 4) Compiles this step in distributed pjit version.
         pjit_step = pjit(
             checkpointed_step,
             in_shardings=(sh_arr, None, None),
@@ -661,7 +661,7 @@ class hydro:
             fields, params = pjit_step(fields, params, i)
             return (fields, params)
         
-        # 6) Execute n_super_step iterations sur l'etat shardé.
+        # 6) Execute n_super_step iterations on the sharded state.
         fields, params = lax.fori_loop(
             0, self.n_super_step, body, (fields, params)
         )
@@ -673,14 +673,14 @@ class hydro:
         """
         Unsplit RHS computation with proper halo exchanges via boundary class.
         """
-        # Terme source conservative dU/dt initialisé à zéro.
+        # Conservative source term dU/dt initialized to zero.
         rhs = jnp.zeros_like(sol)
 
         # Loop over spatial axes
         for ax in range(1, sol.ndim):
             if sol.shape[ax] <= 1:
                 continue
-            # STEP 1: impose les bords et synchronise les halos nécessaires.
+            # STEP 1: imposes boundaries and synchronizes necessary halos.
             sol_b = self.boundary.impose(sol, ax)
 
             # STEP 2: pour stencil large, assure une largeur de halo suffisante.
@@ -688,7 +688,7 @@ class hydro:
             # For TENO5 (needs ±2 cells), call 2-3 times to be safe
             sol_b = self.boundary.impose(sol_b, ax, width=3)
 
-            # STEP 3: calcule les flux numériques sur cet axe.
+            # STEP 3: calculates numerical fluxes on this axis.
             fu = self.flux(sol_b, ax, params)
 
             # STEP 4: divergence des flux (forme conservative) avec roll halo-aware.
@@ -704,7 +704,7 @@ class hydro:
             #     )
             # rhs = rhs - (fu - flux_left) / self.dx_o #eq 39 qrticle
             rhs = rhs - (fu - self.roll_with_halo(fu, 1, ax)) / self.dx_o #eq 39 qrticle
-        # Neutralise dB/dt ici quand CT gère explicitement le champ magnétique.
+        # Neutralizes dB/dt here when CT explicitly manages the magnetic field.
         if getattr(self, "ct", False):
             if sol.shape[0] > self.iBx:
                 rhs = rhs.at[self.iBx].set(0.0)
@@ -715,7 +715,7 @@ class hydro:
         return rhs
     
     def mol_solve_step(self, sol, dt, params):
-        # Intégration temporelle standard du RHS unsplit (sans CT explicite).
+        # Standard time integration of unsplit RHS (without explicit CT).
         return self.integrator(self.rhs_unsplit, sol, dt, params)  
     
     
@@ -735,7 +735,7 @@ class hydro:
             Number of steps between checkpoints. Higher = less memory, more recomputation.
             Typical values: 5-20 depending on your memory budget.
         """
-        # Prepare sharding + copie de l'etat initial.
+        # Prepare sharding + copy of the initial state.
         sh_arr = NamedSharding(self.mesh, self.FIELD_XYZ)
         fields = jax.device_put(input_fields.astype(self.state_dtype), sh_arr)
 
@@ -779,7 +779,7 @@ class hydro:
 
         fields, params = lax.fori_loop(0, n_blocks, body, (fields, params))
 
-        # Gere la fin de boucle si le nombre de pas n'est pas un multiple exact.
+        # Manages the end of loop if the number of steps is not an exact multiple.
         remainder = self.n_super_step % checkpoint_every
         if remainder > 0:
             start_i = n_blocks * checkpoint_every
@@ -790,7 +790,7 @@ class hydro:
                 fields, params = _single_step(fields, params, i)
                 return (fields, params)
 
-            # Compile un mini-boucle finale pour les pas restants.
+            # Compiles a mini-loop for the remaining steps.
             pjit_final = pjit(
                 lambda f, p: lax.fori_loop(0, remainder, final_substep, (f, p)),
                 in_shardings=(sh_arr, None),
@@ -808,7 +808,7 @@ class hydro:
         Usage:
             hydro.evolve = hydro.evolve_memory_efficient.__get__(hydro, type(hydro))
         """
-        # Attache dynamiquement la methode sur la classe cible.
+        # Dynamically attaches the method on the target class.
         hydro_class.evolve_memory_efficient = evolve_memory_efficient
         return hydro_class
 
@@ -823,13 +823,13 @@ class hydro:
         
         Hopefully I figure out a nicer way to do this, but easy to code up...
         """
-        # Normalise le nom de l'integrateur pour les comparaisons de branche.
+        # Normalizes the integrator name for branch comparisons.
         name = self._integrator_name.upper()
 
         if name in ("SSPRK3", "RK3", "SSP3"):
             # --- SSPRK(3,3) ---
             # stage 1
-            # Stage 1: derivee puis prediction explicite.
+            # Stage 1: derivative then explicit prediction.
             k1 = self.rhs_unsplit(sol, params); u1 = sol + dt * k1
             u1 = self._apply_ct_on_state(u1, params, dt)
 
@@ -840,7 +840,7 @@ class hydro:
             u2 = self._apply_ct_on_state(u2, params, 0.25 * dt)
 
             # stage 3
-            # Stage 3: fermeture SSPRK3 puis CT sur contribution finale.
+            # Stage 3: closure SSPRK3 then CT on final contribution.
             k3 = self.rhs_unsplit(u2, params); u3 = (1.0/3.0) * sol + (2.0/3.0) * (u2 + dt * k3)
             # Effective increment is (2/3)*dt on the last convex part; apply CT with that weight
             u3 = self._apply_ct_on_state(u3, params, (2.0/3.0) * dt)
@@ -870,7 +870,7 @@ class hydro:
 
         else:
             # Unknown integrator: apply CT once
-            # Cas integrateur inconnu: meme strategie fallback robuste.
+            # Case unknown integrator: same robust fallback strategy.
             u = self.integrator(self.rhs_unsplit, sol, dt, params)
             u = self._apply_ct_on_state(u, params, dt)
             return u
@@ -889,7 +889,7 @@ class hydro:
         if sol.shape[0] <= self.iBy:
             return sol
     
-        # Flux directionnels nécessaires à la reconstruction de l'EMF Ez.
+        # Directional fluxes necessary for the reconstruction of EMF Ez.
         Fx = self.flux(sol, 1, params)  # axis=1 means x
         Fy = self.flux(sol, 2, params)  # axis=2 means y
     
@@ -920,7 +920,7 @@ class hydro:
         dBx = 0.5 * (dbx_face + jnp.roll(dbx_face, 1, axis=0))  # average x-faces -> centers
         dBy = 0.5 * (dby_face + jnp.roll(dby_face, 1, axis=1))  # average y-faces -> centers
     
-        # Injecte la correction CT dans les composantes magnétiques centrées cellule.
+        # Injects the CT correction into cell-centered magnetic components.
         sol = sol.at[self.iBx].add(dt * dBx)
         sol = sol.at[self.iBy].add(dt * dBy)
         return sol
@@ -935,13 +935,13 @@ class hydro:
         
         not properlly parallelized for multi-gpu, probably will work in forward at least
         """
-        # If no magnetic rows_present, nothing to do
-        # Si les composantes magnetiques n'existent pas, sortir sans effet.
+        # If no magnetic rows present, nothing to do
+        # If the magnetic components do not exist, exit without effect.
         if sol.shape[0] <= self.iBy:
             return sol
 
         # 1) Per-axis fluxes on the UPDATED state
-        # Flux par direction sur l'etat deja mis a jour.
+        # Flux per direction on the already updated state.
         Fx = self.flux(sol, 1, params)  # (vars, x, y[, z])
         Fy = self.flux(sol, 2, params)
         Fz = self.flux(sol, 3, params) if sol.ndim >= 4 else None

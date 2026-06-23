@@ -79,11 +79,11 @@ class StellarRadiationForce:
         eq=None,
         debug=False,
         one_injection=False,
-        # --- nouveaux paramètres beam ---
+        # --- new beam parameters ---
         beam_axis=0,          # 0=x, 1=y, 2=z
-        beam_sign=+1,         # +1 ou -1
-        beam_length_cells=8,  # nb de cellules du faisceau
-        beam_sigma=3.0,       # étalement gaussien
+        beam_sign=+1,         # +1 or -1
+        beam_length_cells=8,  # number of beam cells
+        beam_sigma=3.0,       # Gaussian spreading
         beam_reduced_flux=0.95,  # |F|/(c*E) max
         beam_momentum_scaling="physical",
         
@@ -306,7 +306,7 @@ class StellarRadiationForce:
     #         inject_now      = jnp.equal(i, 0)
     #         per_star_source = jnp.where(inject_now, per_star_source, 0.0)
 
-    #     # ── Injection de photons (désactivée si momentum_only=True) ──────────
+    #     # ── Photon injection (disabled if momentum_only=True) ──────────
     #     if self.momentum_only == False:
     #         if "star_positions" not in params or params["star_positions"] is None:
     #             sol = sol.at[0,
@@ -325,7 +325,7 @@ class StellarRadiationForce:
     #             if not self.gaussian_star:
     #                 sol = sol.at[0, ix, iy, iz].add(per_star_source)
     #             else:
-    #                 sigma = max(1,round(self.mesh_shape[0] // 100))  #ajouter des rounds pour des cas comme 199 ou 150 
+    #                 sigma = max(1,round(self.mesh_shape[0] // 100))  # add rounds for cases like 199 or 150 
     #                 # offsets = jnp.arange(
     #                 #     -round(5 * self.mesh_shape[0] // 100),
     #                 #      round(5 * self.mesh_shape[0] // 100) + 1
@@ -350,7 +350,7 @@ class StellarRadiationForce:
     #                             per_star_source[s] * weights3)
                             
     #                 # ── Injection de momentum ─────────────────────────────────────────────
-    #                 # ── Injection de momentum orientée +x ────────────────────────────────
+    #                 # ── Momentum injection oriented +x ────────────────────────────────
     #                 # if self.injection_momentum:
     #                 #     for s in range(star_positions.shape[0]):
     #                 #         if self.injection_geometry == "2D":
@@ -480,7 +480,7 @@ class StellarRadiationForce:
     #             jnp.sqrt(sol[1]**2 + sol[2]**2 + sol[3]**2) /
     #             jnp.where(sol[0] > 0, sol[0] * self.light_speed, 1e-30)))
     #         Fy = sol[1] 
-    #         Fx = sol[2]  # ou l'index correspondant à Fx dans ta convention
+    #         Fx = sol[2]  # or the index corresponding to Fx in your convention
     #         Fz = sol[3]  # idem
     #         jax.debug.print("sum Fy =", jnp.sum(Fy))
     #         jax.debug.print("sum |Fx| =", jnp.sum(jnp.abs(Fx)))
@@ -547,7 +547,7 @@ class StellarRadiationForce:
         sigma = max(1, round(self.mesh_shape[0] // 100))
         offsets = jnp.arange(-3 * sigma, 3 * sigma + 1)
 
-        # Longueur du faisceau en nombre de cellules (côté +x)
+        # Beam length in number of cells (on the +x side)
         beam_len = int(self.beam_length_cells)
 
         def _inject_energy_beam_x(sol, x0, y0, z0, source):
@@ -745,7 +745,7 @@ class StellarRadiationForce:
             sol = sol.at[3, xi, yi, zi].add(jnp.zeros_like(fx_inj))
             return sol
 
-        # ── Injection de photons (inchangée dans l'esprit) ──────────────────────
+        # ── Photon injection (unchanged in spirit) ──────────────────────
         if self.momentum_only == False:
             if not self.gaussian_star:
                 for s in range(star_positions.shape[0]):
@@ -773,7 +773,7 @@ class StellarRadiationForce:
                     else:
                         raise ValueError(f"Unknown injection_geometry: {self.injection_geometry}")
 
-        # ── Injection de momentum en x activée si injection_momentum=True ────────
+        # ── Momentum injection in x enabled if injection_momentum=True ────────
         if self.injection_momentum:
             if not self.gaussian_star:
                 for s in range(star_positions.shape[0]):
@@ -981,8 +981,8 @@ class StellarRadiationForce:
             jax.debug.print("sum E_gamma = {}", jnp.sum(sol[0]))
             jax.debug.print("sum |F| = {}", jnp.sum(jnp.sqrt(sol[1]**2 + sol[2]**2 + sol[3]**2)))
 
-            # ── Vérification c² sur le faisceau uniquement ───────────────────────
-            # Masque des cellules actives (E_gamma > seuil)
+            # ── Verification of c² on the beam only ───────────────────────
+            # Mask of active cells (E_gamma > threshold)
             mask_active = sol[0] > self.eq.eps
 
             E_active = jnp.where(mask_active, sol[0], 0.0)
@@ -992,11 +992,11 @@ class StellarRadiationForce:
             E_sum_active = jnp.sum(E_active)
             F_sum_active = jnp.sum(F_active)
 
-            # Ratio |F| / E sur le faisceau
+            # Ratio |F| / E on the beam
             ratio_active = F_sum_active / (E_sum_active + 1e-30)
             c_2_active = ratio_active / self.light_speed**2
 
-            # Ratio global (sur tout le domaine) pour comparaison
+            # Global ratio (over the entire domain) for comparison
             E_sum_tot = jnp.sum(sol[0])
             F_sum_tot = jnp.sum(Fmag)
             ratio_tot = F_sum_tot / (E_sum_tot + 1e-30)
@@ -1016,7 +1016,7 @@ class StellarRadiationForce:
             jax.debug.print("|F|/E / c²(tout) = {}", c_2_tot)
             jax.debug.print("|F|/E = c² ? tout = {}", jnp.isclose(ratio_tot, self.light_speed**2))
 
-            # Affiche aussi le nombre de cellules actives
+            # Also displays the number of active cells
             n_active = jnp.sum(mask_active.astype(jnp.int32))
             jax.debug.print("\nNombre de cellules actives (E > 1e-30) = {}", n_active)
 

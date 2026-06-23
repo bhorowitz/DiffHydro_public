@@ -153,7 +153,7 @@ class EquationManager:
     # ---------------------------
     @property
     def active_slice(self):
-        return slice(0, self.n_active) #modifier ici pour choisir quoi utiliser probablement 4 
+        return slice(0, self.n_active) # modify here to choose what to use probably 4 
     
     @property
     def passive_slice(self):
@@ -168,12 +168,12 @@ class EquationManager:
     #         return self.get_isothermal_pressure(E_gamma)
     #     return (self.gamma - 1.0) * jnp.maximum(e, self.eps) * jnp.maximum(E_gamma, self.eps)
     
-    def get_signal_speed(self, primitives, axis): #probablement a changer pour c of speed
+    def get_signal_speed(self, primitives, axis): # probably should be changed to speed of light
         # p = primitives[self.energy_ids]
         E_gamma = primitives[self.mass_ids]
         return self.get_speed_of_sound(E_gamma)
     
-    def get_speed_of_sound(self, E_gamma: Array) -> Array: # self, p: Array,probablement a changer pour retourne speed of light
+    def get_speed_of_sound(self, E_gamma: Array) -> Array: # probably should be changed to return speed of light
         """See base class. """
         E_gamma_safe = jnp.maximum(E_gamma, self.eps)
         return jnp.full_like(E_gamma_safe, self.light_speed)
@@ -326,7 +326,7 @@ class EquationManager:
     #         # p_safe = self.get_isothermal_pressure(E_gamma_safe)
     #     return energy_thermique + #p_safe / ((self.gamma - 1.0) * E_gamma_safe + self.eps)
 
-    def get_fluxes_xi(self, primitives, conservatives, axis: int): ##ATTENTION AU UNITE POUR ETRE CONSISTANT AVEC GET PRIMITIVE AND CONSERVATIVE 
+    def get_fluxes_xi(self, primitives, conservatives, axis: int): ## WARNING ABOUT UNITS TO BE CONSISTENT WITH GET PRIMITIVE AND CONSERVATIVE 
         """
         RT moments (M1 closure), direction axis in {0,1,2}.
         State:
@@ -418,7 +418,7 @@ class EquationManager:
 
             jax.lax.cond(pred, true_branch, false_branch, operand=None)
         if conservatives.shape[0] > self.n_active:
-            # Passive block transporté de manière upwind dans ConvectiveFlux
+            # Passive block transported in an upwind manner in ConvectiveFlux
             return jnp.concatenate([flux_a, conservatives[self.passive_slice]], axis=0)
         return flux_a
    
