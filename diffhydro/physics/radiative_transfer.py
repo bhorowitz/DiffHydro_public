@@ -502,12 +502,165 @@ class StellarRadiationForce:
     #     params_out               = dict(params)
     #     params_out["star_ages"]  = star_ages_new
     #     return sol, params_out
+        # ─────────────── Helpers d'indices / poids ───────────────
+
+    def _clip_indices_2d(self, x0, y0, z0, di2, dj2):
+        xi = x0 + di2
+        yi = y0 + dj2
+        zi = jnp.full(di2.shape, z0, dtype=jnp.int32)
+        valid = (
+            (xi >= 0) & (xi < self.mesh_shape[0]) &
+            (yi >= 0) & (yi < self.mesh_shape[1]) &
+            (zi >= 0) & (zi < self.mesh_shape[2])
+        )
+        return xi, yi, zi, valid
+
+    def _clip_indices_3d(self, x0, y0, z0, di3, dj3, dk3):
+        xi = x0 + di3
+        yi = y0 + dj3
+        zi = z0 + dk3
+        valid = (
+            (xi >= 0) & (xi < self.mesh_shape[0]) &
+            (yi >= 0) & (yi < self.mesh_shape[1]) &
+            (zi >= 0) & (zi < self.mesh_shape[2])
+        )
+        return xi, yi, zi, valid
+
+    def _normalized_weights_2d(self, offsets, sigma, valid):
+        di2, dj2 = jnp.meshgrid(offsets, offsets, indexing="ij")
+        weights2 = jnp.exp(-(di2**2 + dj2**2) / (2 * sigma**2))
+        weights2 = jnp.where(valid, weights2, 0.0)
+        weights2 = weights2 / (jnp.sum(weights2) + 1e-30)
+        return di2, dj2, weights2
+
+    def _normalized_weights_3d(self, offsets, sigma, valid):
+        di3, dj3, dk3 = jnp.meshgrid(offsets, offsets, offsets, indexing="ij")
+        weights3 = jnp.exp(-(di3**2 + dj3**2 + dk3**2) / (2 * sigma**2))
+        weights3 = jnp.where(valid, weights3, 0.0)
+        weights3 = weights3 / (jnp.sum(weights3) + 1e-30)
+        return di3, dj3, dk3, weights3
+
+    def _beam_momentum_factor(self, source, weights):
+        if self.beam_momentum_scaling == "legacy_c2_source2":
+            return source * (self.light_speed ** 2) * weights
+        elif self.beam_momentum_scaling == "physical":
+            return self.beam_sign * self.beam_reduced_flux * self.light_speed * source * weights
+        else:
+            raise ValueError(f"Unknown beam_momentum_scaling: {self.beam_momentum_scaling}")
+
+    # ─────────────── Injection énergie ───────────────
+
+    def _inject_energy_beam_x(self, sol, x0, y0, z0, source, sigma, beam_len):
+        s = jnp.arange(0, beam_len, dtype=jnp.int32)
+        xi = x0 + s
+        yi = jnp.full_like(xi, y0)
+        zi = jnp.full_like(xi, z0)
+        valid = (
+            (xi >= 0) & (xi < self.mesh_shape[0]) &
+            (yi >= 0) & (yi < self.mesh_shape[1]) &
+            (zi >= 0) & (zi < self.mesh_shape[2])
+        )
+        s_float = s.astype(jnp.float32)
+        weights = jnp.exp(- (s_float**2) / (2.0 * float(sigma)**2))
+        weights = jnp.where(valid, weights, 0.0)
+        weights = weights / (jnp.sum(weights) + 1e-30)
+        if self.debug:
+            self.debug_grid_stats(sol, self.eq, "dans sol energy injection beam", 0)
+        return sol.at[0, xi, yi, zi].add(source * weights)
+
+    def _inject_energy_2d(self, sol, x0, y0, z0, source, offsets, sigma):
+        if self.debug:
+            self.debug_grid_stats(sol, self.eq, "before clip sol energy injection 2D", 0)
+        di2, dj2 = jnp.meshgrid(offsets, offsets, indexing="ij")
+        xi, yi, zi, valid = self._clip_indices_2d(x0, y0, z0, di2, dj2)
+        _, _, weights2 = self._normalized_weights_2d(offsets, sigma, valid)
+        if self.debug:
+            self.debug_grid_stats(sol, self.eq, "sol energy injection 2D", 0)
+        return sol.at[0, xi, yi, zi].add(source * weights2)
+
+    def _inject_energy_3d(self, sol, x0, y0, z0, source, offsets, sigma):
+        di3, dj3, dk3 = jnp.meshgrid(offsets, offsets, offsets, indexing="ij")
+        xi, yi, zi, valid = self._clip_indices_3d(x0, y0, z0, di3, dj3, dk3)
+        _, _, _, weights3 = self._normalized_weights_3d(offsets, sigma, valid)
+        return sol.at[0, xi, yi, zi].add(source * weights3)
+
+    # ─────────────── Injection momentum ───────────────
+
+    def _inject_momentum_beam_x(self, sol, x0, y0, z0, source, sigma, beam_len):
+        s = jnp.arange(0, beam_len, dtype=jnp.int32)
+        xi = x0 + s
+        yi = jnp.full_like(xi, y0)
+        zi = jnp.full_like(xi, z0)
+        valid = (
+            (xi >= 0) & (xi < self.mesh_shape[0]) &
+            (yi >= 0) & (yi < self.mesh_shape[1]) &
+            (zi >= 0) & (zi < self.mesh_shape[2])
+        )
+        s_float = s.astype(jnp.float32)
+        weights = jnp.exp(- (s_float**2) / (2.0 * float(sigma)**2))
+        weights = jnp.where(valid, weights, 0.0)
+        weights = weights / (jnp.sum(weights) + 1e-30)
+        fx_inj = self._beam_momentum_factor(source, weights)
+        if self.debug:
+            jax.debug.print("Injecting momentum beam at x=[{}, {}], y={}, z={}", xi[0], xi[-1], yi[0], zi[0])
+            jax.debug.print("Momentum source: {}, weights sum: {}", source, jnp.sum(weights))
+            jax.debug.print("Fx injection profile: {}", fx_inj)
+            jax.debug.print("test c^2: {}", fx_inj / (source**2 + 1e-30) / weights)
+            jax.debug.print("Sol[1] after injection: {}", sol[1, xi, yi, zi])
+            jax.debug.print("max E = {}", jnp.max(sol[0]))
+            jax.debug.print("any nan E = {}", jnp.any(jnp.isnan(sol[0])))
+            jax.debug.print("any inf E = {}", jnp.any(jnp.isinf(sol[0])))
+        sol = sol.at[1, xi, yi, zi].add(fx_inj)
+        sol = sol.at[2, xi, yi, zi].add(jnp.zeros_like(0))
+        sol = sol.at[3, xi, yi, zi].add(jnp.zeros_like(0))
+        return weights, sol
+
+    def _inject_momentum_x_2d(self, sol, x0, y0, z0, source, offsets, sigma):
+        di2, dj2 = jnp.meshgrid(offsets, offsets, indexing="ij")
+        xi, yi, zi, valid = self._clip_indices_2d(x0, y0, z0, di2, dj2)
+        _, _, weights2 = self._normalized_weights_2d(offsets, sigma, valid)
+        fx_inj = self._beam_momentum_factor(source, weights2)
+        sol = sol.at[1, xi, yi, zi].add(fx_inj)
+        sol = sol.at[2, xi, yi, zi].add(jnp.zeros_like(0))
+        sol = sol.at[3, xi, yi, zi].add(jnp.zeros_like(0))
+        if self.debug:
+            E = sol[0, xi, yi, zi]
+            jax.debug.print("Injecting momentum 2D at x=[{}, {}], y={}, z={}", xi[0, 0], xi[-1, -1], y0, z0)
+            jax.debug.print("Momentum source: {}, weights sum: {}", source, jnp.sum(weights2))
+            jax.debug.print("test c^2: {}", fx_inj / (source**2 + 1e-30) / weights2)
+            jax.debug.print("max E = {}", jnp.max(E))
+            jax.debug.print("any nan E = {}", jnp.any(jnp.isnan(E)))
+            jax.debug.print("any inf E = {}", jnp.any(jnp.isinf(E)))
+        return weights2, sol
+
+    def _inject_momentum_x_3d(self, sol, x0, y0, z0, source, offsets, sigma):
+        di3, dj3, dk3 = jnp.meshgrid(offsets, offsets, offsets, indexing="ij")
+        xi, yi, zi, valid = self._clip_indices_3d(x0, y0, z0, di3, dj3, dk3)
+        _, _, _, weights3 = self._normalized_weights_3d(offsets, sigma, valid)
+        fx_inj = self._beam_momentum_factor(source, weights3)
+        sol = sol.at[1, xi, yi, zi].add(fx_inj)
+        sol = sol.at[2, xi, yi, zi].add(jnp.zeros_like(fx_inj))
+        sol = sol.at[3, xi, yi, zi].add(jnp.zeros_like(fx_inj))
+        return sol
+
+    def _clip_to_m1_cone(self, sol):
+        c = self.light_speed
+        E  = sol[0]
+        Fx = sol[1]; Fy = sol[2]; Fz = sol[3]
+        Fnorm = jnp.sqrt(Fx**2 + Fy**2 + Fz**2 + 1e-30)
+        Fmax  = self.beam_reduced_flux * c * E
+        scale = jnp.minimum(1.0, Fmax / (Fnorm + 1e-30))
+        sol = sol.at[1].set(Fx * scale)
+        sol = sol.at[2].set(Fy * scale)
+        sol = sol.at[3].set(Fz * scale)
+        return sol
 
     def force(self, i, sol, params, dt):
         if "star_masses" not in params or params["star_masses"] is None:
             return sol, params
         if self.debug:
             self.debug_grid_stats(sol, self.eq, "sol before injection", 0)
+
         star_masses        = jnp.asarray(params["star_masses"])
         star_ages_old      = jnp.asarray(params["star_ages"])
         star_ages_new      = star_ages_old + dt
@@ -544,214 +697,15 @@ class StellarRadiationForce:
         iy = star_positions[:, 1]
         iz = star_positions[:, 2]
 
-        sigma = max(1, round(self.mesh_shape[0] // 100))
-        offsets = jnp.arange(-3 * sigma, 3 * sigma + 1)
-
-        # Beam length in number of cells (on the +x side)
+        sigma    = max(1, round(self.mesh_shape[0] // 100))
+        offsets  = jnp.arange(-3 * sigma, 3 * sigma + 1)
         beam_len = int(self.beam_length_cells)
 
-        def _inject_energy_beam_x(sol, x0, y0, z0, source):
-            """
-            Dépose l'énergie Egamma le long de +x dans un petit faisceau 1D.
-            """
-            s = jnp.arange(0, beam_len, dtype=jnp.int32)
-            xi = x0 + s
-            yi = jnp.full_like(xi, y0)
-            zi = jnp.full_like(xi, z0)
-
-            valid = (
-                (xi >= 0) & (xi < self.mesh_shape[0]) &
-                (yi >= 0) & (yi < self.mesh_shape[1]) &
-                (zi >= 0) & (zi < self.mesh_shape[2])
-            )
-
-            s_float = s.astype(jnp.float32)
-            weights = jnp.exp(- (s_float**2) / (2.0 * float(sigma)**2))
-            weights = jnp.where(valid, weights, 0.0)
-            weights = weights / (jnp.sum(weights) + 1e-30)
-            if self.debug:
-                self.debug_grid_stats(sol, self.eq, "dans sol energy injection beam", 0)
-            return sol.at[0, xi, yi, zi].add(source * weights)
-
-        def _inject_momentum_beam_x(sol, x0, y0, z0, source):
-            """
-            Injecte seulement Fx (>0) le long de +x, en suivant le même faisceau 1D.
-            """
-            s = jnp.arange(0, beam_len, dtype=jnp.int32)
-            xi = x0 + s
-            yi = jnp.full_like(xi, y0)
-            zi = jnp.full_like(xi, z0)
-
-            valid = (
-                (xi >= 0) & (xi < self.mesh_shape[0]) &
-                (yi >= 0) & (yi < self.mesh_shape[1]) &
-                (zi >= 0) & (zi < self.mesh_shape[2])
-            )
-
-            s_float = s.astype(jnp.float32) #conversion type
-            weights = jnp.exp(- (s_float**2) / (2.0 * float(sigma)**2))
-            weights = jnp.where(valid, weights, 0.0)
-            weights = weights / (jnp.sum(weights) + 1e-30)
-
-            if self.beam_momentum_scaling == "legacy_c2_source2":
-                fx_inj = source * (self.light_speed**2 ) * weights
-            elif self.beam_momentum_scaling == "physical":
-                fx_inj = self.beam_sign * self.beam_reduced_flux * self.light_speed * source * weights
-            else:
-                raise ValueError(f"Unknown beam_momentum_scaling: {self.beam_momentum_scaling}")
-            if self.debug:
-                jax.debug.print("Injecting momentum beam at x=[{}, {}], y={}, z={}", xi[0], xi[-1], yi[0], zi[0])
-                jax.debug.print("Momentum source: {}, weights sum: {}", source, jnp.sum(weights))
-                jax.debug.print("Fx injection profile: {}", fx_inj)
-                jax.debug.print("Fy injection profile: {} (should be 0)", jnp.zeros_like(fx_inj))
-                jax.debug.print("Fz injection profile: {} (should be 0)", jnp.zeros_like(fx_inj))
-                jax.debug.print("test c^2: {}",fx_inj / (source**2 + 1e-30)/weights)
-                jax.debug.print("Sol[1] after injection: {}", sol[1, xi, yi, zi])
-                jax.debug.print("Sol[2] after injection: {} (should be 0)", sol[2, xi, yi, zi])
-                jax.debug.print("Sol[3] after injection: {} (should be 0)", sol[3, xi, yi, zi])
-                jax.debug.print("max E = {}", jnp.max(sol[0]))
-                jax.debug.print("max |F| = {}", jnp.max(jnp.abs(sol[1])))
-                jax.debug.print("min E = {}", jnp.min(sol[0]))
-                jax.debug.print("min |F| = {}", jnp.min(jnp.abs(sol[1])))
-                jax.debug.print("any nan E = {}", jnp.any(jnp.isnan(sol[0])))
-                jax.debug.print("any inf E = {}", jnp.any(jnp.isinf(sol[0])))
-                # _check_float_status("F_gamma before injection", fx_inj)
-
-            sol = sol.at[1, xi, yi, zi].add(fx_inj)            # F_x
-            sol = sol.at[2, xi, yi, zi].add(jnp.zeros_like(0)) # F_y
-            sol = sol.at[3, xi, yi, zi].add(jnp.zeros_like(0)) # F_z
-            return weights,sol
-
-        def _clip_to_m1_cone(sol):
-            """
-            Force partout |F| <= beam_reduced_flux * c * E pour stabilité M1.
-            """
-            c = self.light_speed
-            E  = sol[0]
-            Fx = sol[1]; Fy = sol[2]; Fz = sol[3]
-
-            Fnorm = jnp.sqrt(Fx**2 + Fy**2 + Fz**2 + 1e-30)
-            Fmax  = self.beam_reduced_flux * c * E
-            scale = jnp.minimum(1.0, Fmax / (Fnorm + 1e-30))
-
-            sol = sol.at[1].set(Fx * scale)
-            sol = sol.at[2].set(Fy * scale)
-            sol = sol.at[3].set(Fz * scale)
-            return sol
-
-
-        def _clip_indices_2d(x0, y0, z0, di2, dj2):
-            xi = jnp.full(di2.shape, x0, dtype=jnp.int32)
-            yi = y0 + di2
-            zi = z0 + dj2
-
-            valid = (
-                (xi >= 0) & (xi < self.mesh_shape[0]) &
-                (yi >= 0) & (yi < self.mesh_shape[1]) &
-                (zi >= 0) & (zi < self.mesh_shape[2])
-            )
-            return xi, yi, zi, valid
-
-        def _clip_indices_3d(x0, y0, z0, di3, dj3, dk3):
-            xi = x0 + di3
-            yi = y0 + dj3
-            zi = z0 + dk3
-
-            valid = (
-                (xi >= 0) & (xi < self.mesh_shape[0]) &
-                (yi >= 0) & (yi < self.mesh_shape[1]) &
-                (zi >= 0) & (zi < self.mesh_shape[2])
-            )
-            return xi, yi, zi, valid
-
-        def _normalized_weights_2d(valid):
-            di2, dj2 = jnp.meshgrid(offsets, offsets, indexing="ij")
-            weights2 = jnp.exp(-(di2**2 + dj2**2) / (2 * sigma**2))
-            weights2 = jnp.where(valid, weights2, 0.0)
-            weights2 = weights2 / (jnp.sum(weights2) + 1e-30)
-            return di2, dj2, weights2
-
-        def _normalized_weights_3d(valid):
-            di3, dj3, dk3 = jnp.meshgrid(offsets, offsets, offsets, indexing="ij")
-            weights3 = jnp.exp(-(di3**2 + dj3**2 + dk3**2) / (2 * sigma**2))
-            weights3 = jnp.where(valid, weights3, 0.0)
-            weights3 = weights3 / (jnp.sum(weights3) + 1e-30)
-            return di3, dj3, dk3, weights3
-
-        def _inject_energy_2d(sol, x0, y0, z0, source):
-            if self.debug: 
-                self.debug_grid_stats(sol, self.eq, "before clip sol energy injection 2D", 0)
-            di2, dj2 = jnp.meshgrid(offsets, offsets, indexing="ij")
-            xi, yi, zi, valid = _clip_indices_2d(x0, y0, z0, di2, dj2)
-            _, _, weights2 = _normalized_weights_2d(valid)
-            if self.debug: 
-                self.debug_grid_stats(sol, self.eq, "sol energy injection 2D", 0)
-            return sol.at[0, xi, yi, zi].add(source * weights2)
-
-        def _inject_energy_3d(sol, x0, y0, z0, source):
-            di3, dj3, dk3 = jnp.meshgrid(offsets, offsets, offsets, indexing="ij")
-            xi, yi, zi, valid = _clip_indices_3d(x0, y0, z0, di3, dj3, dk3)
-            _, _, _, weights3 = _normalized_weights_3d(valid)
-            return sol.at[0, xi, yi, zi].add(source * weights3)
-
-        def _inject_momentum_x_2d(sol, x0, y0, z0, source):
-            di2, dj2 = jnp.meshgrid(offsets, offsets, indexing="ij")
-            xi, yi, zi, valid = _clip_indices_2d(x0, y0, z0, di2, dj2)
-            _, _, weights2 = _normalized_weights_2d(valid)
-            if self.beam_momentum_scaling == "legacy_c2_source2":
-                fx_inj = source * (self.light_speed ** 2) * weights2
-            elif self.beam_momentum_scaling == "physical":
-                fx_inj = self.beam_sign * self.beam_reduced_flux * self.light_speed * source * weights2
-            else:
-                raise ValueError(f"Unknown beam_momentum_scaling: {self.beam_momentum_scaling}")
-            sol = sol.at[1, xi, yi, zi].add(fx_inj)
-            sol = sol.at[2, xi, yi, zi].add(jnp.zeros_like(0))
-            sol = sol.at[3, xi, yi, zi].add(jnp.zeros_like(0))
-            if self.debug:
-                E = sol[0, xi, yi, zi]
-                Fx = sol[1, xi, yi, zi]
-                jax.debug.print("Injecting momentum beam at x=[{}, {}], y={}, z={}", xi[0], xi[-1], yi[0], zi[0])
-                jax.debug.print("Momentum source: {}, weights sum: {}", source, jnp.sum(weights2))
-                jax.debug.print("Fx injection profile: {}", fx_inj)
-                jax.debug.print("Fy injection profile: {} (should be 0)", jnp.zeros_like(fx_inj))
-                jax.debug.print("Fz injection profile: {} (should be 0)", jnp.zeros_like(fx_inj))
-                jax.debug.print("test c^2: {}",fx_inj / (source**2 + 1e-30)/weights2)
-                jax.debug.print("Sol[1] after injection: {}", sol[1, xi, yi, zi])
-                jax.debug.print("Sol[2] after injection: {} (should be 0)", sol[2, xi, yi, zi])
-                jax.debug.print("Sol[3] after injection: {} (should be 0)", sol[3, xi, yi, zi])
-                jax.debug.print("max E = {}", jnp.max(E))
-                jax.debug.print("max |F| = {}", jnp.max(jnp.abs(Fx)))
-                jax.debug.print("min E = {}", jnp.min(E))
-                jax.debug.print("min |F| = {}", jnp.min(jnp.abs(Fx)))
-                jax.debug.print("any nan E = {}", jnp.any(jnp.isnan(E)))
-                jax.debug.print("any inf E = {}", jnp.any(jnp.isinf(E))) 
-                # _check_float_status("F_gamma before injection", fx_inj)
-            return weights2,sol
-
-        def _inject_momentum_x_3d(sol, x0, y0, z0, source):
-            di3, dj3, dk3 = jnp.meshgrid(offsets, offsets, offsets, indexing="ij")
-            xi, yi, zi, valid = _clip_indices_3d(x0, y0, z0, di3, dj3, dk3)
-
-            _, _, _, weights3 = _normalized_weights_3d(valid)
-            if self.beam_momentum_scaling == "legacy_c2_source2":
-                fx_inj = source * (self.light_speed ** 2) * weights3
-            elif self.beam_momentum_scaling == "physical":
-                fx_inj = self.beam_sign * self.beam_reduced_flux * self.light_speed * source * weights3
-            else:
-                raise ValueError(f"Unknown beam_momentum_scaling: {self.beam_momentum_scaling}")
-
-            sol = sol.at[1, xi, yi, zi].add(fx_inj)
-            sol = sol.at[2, xi, yi, zi].add(jnp.zeros_like(fx_inj))
-            sol = sol.at[3, xi, yi, zi].add(jnp.zeros_like(fx_inj))
-            return sol
-
-        # ── Photon injection (unchanged in spirit) ──────────────────────
+        # ── Photon injection ──
         if self.momentum_only == False:
             if not self.gaussian_star:
                 for s in range(star_positions.shape[0]):
-                    x0 = ix[s]
-                    y0 = iy[s]
-                    z0 = iz[s]
+                    x0, y0, z0 = ix[s], iy[s], iz[s]
                     if (
                         (0 <= x0 < self.mesh_shape[0]) and
                         (0 <= y0 < self.mesh_shape[1]) and
@@ -760,26 +714,21 @@ class StellarRadiationForce:
                         sol = sol.at[0, x0, y0, z0].add(per_star_source[s])
             else:
                 for s in range(star_positions.shape[0]):
-                    x0 = ix[s]
-                    y0 = iy[s]
-                    z0 = iz[s]
-
+                    x0, y0, z0 = ix[s], iy[s], iz[s]
                     if self.injection_geometry == "2D":
-                        sol = _inject_energy_2d(sol, x0, y0, z0, per_star_source[s])
+                        sol = self._inject_energy_2d(sol, x0, y0, z0, per_star_source[s], offsets, sigma)
                     elif self.injection_geometry == "3D":
-                        sol = _inject_energy_3d(sol, x0, y0, z0, per_star_source[s])
+                        sol = self._inject_energy_3d(sol, x0, y0, z0, per_star_source[s], offsets, sigma)
                     elif self.injection_geometry == "beam_x":
-                        sol = _inject_energy_beam_x(sol, x0, y0, z0, per_star_source[s])
+                        sol = self._inject_energy_beam_x(sol, x0, y0, z0, per_star_source[s], sigma, beam_len)
                     else:
                         raise ValueError(f"Unknown injection_geometry: {self.injection_geometry}")
 
-        # ── Momentum injection in x enabled if injection_momentum=True ────────
+        # ── Momentum injection ──
         if self.injection_momentum:
             if not self.gaussian_star:
                 for s in range(star_positions.shape[0]):
-                    x0 = ix[s]
-                    y0 = iy[s]
-                    z0 = iz[s]
+                    x0, y0, z0 = ix[s], iy[s], iz[s]
                     if (
                         (0 <= x0 < self.mesh_shape[0]) and
                         (0 <= y0 < self.mesh_shape[1]) and
@@ -791,248 +740,37 @@ class StellarRadiationForce:
                         sol = sol.at[3, x0, y0, z0].add(0.0)
             else:
                 for s in range(star_positions.shape[0]):
-                    x0 = ix[s]
-                    y0 = iy[s]
-                    z0 = iz[s]
-
+                    x0, y0, z0 = ix[s], iy[s], iz[s]
                     if self.injection_geometry == "2D":
-                        wheight_2D_debug,sol = _inject_momentum_x_2d(sol, x0, y0, z0, per_star_source[s])
+                        wdbg, sol = self._inject_momentum_x_2d(sol, x0, y0, z0, per_star_source[s], offsets, sigma)
                         if self.debug:
                             bad_E = jnp.any(~jnp.isfinite(sol[0]))
                             bad_F = jnp.any(~jnp.isfinite(sol[1:]))
                             jax.debug.print(
                                 "NaN/Inf after injection? Egamma={E_bad}, Fgamma={F_bad}",
-                                E_bad=bad_E,
-                                F_bad=bad_F,)
-                            jax.debug.print("sum weight = 1? {}", wheight_2D_debug.sum())
+                                E_bad=bad_E, F_bad=bad_F,
+                            )
+                            jax.debug.print("sum weight = 1? {}", wdbg.sum())
                     elif self.injection_geometry == "3D":
-                        sol = _inject_momentum_x_3d(sol, x0, y0, z0, per_star_source[s])
+                        sol = self._inject_momentum_x_3d(sol, x0, y0, z0, per_star_source[s], offsets, sigma)
                     elif self.injection_geometry == "beam_x":
-                        wheight_2D_debug,sol = _inject_momentum_beam_x(sol, x0, y0, z0, per_star_source[s])
-                        if self.debug: 
+                        wdbg, sol = self._inject_momentum_beam_x(sol, x0, y0, z0, per_star_source[s], sigma, beam_len)
+                        if self.debug:
                             self.debug_grid_stats(sol, self.eq, "after clip sol momentum injection beam", 0)
                     else:
                         raise ValueError(f"Unknown injection_geometry: {self.injection_geometry}")
-            
-        # Safety limiter only: keep |F| <= f_max c E without forcing equality.
-        sol = _clip_to_m1_cone(sol)
-            
-        # ── Debug ─────────────────────────────────────────────────────────────
+
+        # Safety limiter
+        sol = self._clip_to_m1_cone(sol)
+
         if self.debug:
-            jax.debug.print(
-                "After clip: f_max = {}",
-                jnp.max(
-                    jnp.sqrt(sol[1]**2 + sol[2]**2 + sol[3]**2)
-                    / jnp.where(sol[0] > 0, sol[0] * self.light_speed, 1e-30)
-                ),
-            )
-            z_idx        = self.mesh_shape[2] // 2
-            z_slice      = sol[0, :, :, z_idx]
-            nonzero_count = jnp.count_nonzero(z_slice)
-            coords_xy    = jnp.argwhere(z_slice != 0, size=z_slice.size, fill_value=-1)
-            x_idx        = coords_xy[:, 0]
-            y_idx        = coords_xy[:, 1]
-            valid        = x_idx >= 0
-            vals         = jnp.where(valid, z_slice[x_idx, y_idx], 0.0)
+            self._debug_after_clip(sol, i)   # <-- voir note ci-dessous
 
-            log_threshold   = -17
-            log_abs_vals    = jnp.where(valid, jnp.log(vals + 1e-300), jnp.inf)
-            below_log_mask  = valid & (log_abs_vals < log_threshold)
-            n_below_log     = jnp.count_nonzero(below_log_mask)
-            x_below_min     = jnp.min(jnp.where(below_log_mask, x_idx, 1000))
-            x_below_max     = jnp.max(jnp.where(below_log_mask, x_idx, -1))
-            y_below_min     = jnp.min(jnp.where(below_log_mask, y_idx, 1000))
-            y_below_max     = jnp.max(jnp.where(below_log_mask, y_idx, -1))
-            x_below_size    = jnp.maximum(x_below_max - x_below_min + 1, 0)
-            y_below_size    = jnp.maximum(y_below_max - y_below_min + 1, 0)
-
-            x_min  = jnp.min(jnp.where(valid, x_idx, 1000))
-            x_max  = jnp.max(jnp.where(valid, x_idx, -1))
-            y_min  = jnp.min(jnp.where(valid, y_idx, 1000))
-            y_max  = jnp.max(jnp.where(valid, y_idx, -1))
-            x_size = jnp.maximum(x_max - x_min + 1, 0)
-            y_size = jnp.maximum(y_max - y_min + 1, 0)
-
-            slice_coord = self.mesh_shape[0] // 2
-            line_x = sol[0, :, slice_coord, z_idx]
-            line_y = sol[0, slice_coord, :, z_idx]
-            line_z = sol[0, slice_coord, slice_coord, :]
-
-            jax.debug.print("Line x at y=50, z=50: {line}", line=line_x)
-            jax.debug.print("Line y at x=50, z=50: {line}", line=line_y)
-            jax.debug.print("Line z at x=50, y=50: {line}", line=line_z)
-
-            log_threshold = -11
-            log_x = jnp.argwhere(jnp.log10(line_x + 1e-300) < log_threshold, size=line_x.size, fill_value=-1)[:, 0]
-            log_y = jnp.argwhere(jnp.log10(line_y + 1e-300) < log_threshold, size=line_y.size, fill_value=-1)[:, 0]
-            log_z = jnp.argwhere(jnp.log10(line_z + 1e-300) < log_threshold, size=line_z.size, fill_value=-1)[:, 0]
-
-            non_zero_x = jnp.argwhere(line_x != 0, size=line_x.size, fill_value=-1)[:, 0]
-            non_zero_y = jnp.argwhere(line_y != 0, size=line_y.size, fill_value=-1)[:, 0]
-            non_zero_z = jnp.argwhere(line_z != 0, size=line_z.size, fill_value=-1)[:, 0]
-
-            jax.debug.print("Non-zero x for y=50, z=50: {x}", x=non_zero_x)
-            jax.debug.print("Non-zero y for x=50, z=50: {y}", y=non_zero_y)
-            jax.debug.print("Non-zero z for x=50, y=50: {z}", z=non_zero_z)
-            jax.debug.print("Log x for y=50, z=50: {x}", x=log_x)
-            jax.debug.print("Log y for x=50, z=50: {y}", y=log_y)
-            jax.debug.print("Log z for x=50, y=50: {z}", z=log_z)
-            jax.debug.print("\n=== Timestep {} === Non-zero on [0,:,:,{}] ===", i, z_idx)
-            jax.debug.print("Non-zero count: {}", nonzero_count)
-            jax.debug.print(
-                "X range: [{}, {}] (size: {})",
-                x_min.astype(jnp.int32),
-                x_max.astype(jnp.int32),
-                x_size.astype(jnp.int32),
-            )
-            jax.debug.print(
-                "Y range: [{}, {}] (size: {})",
-                y_min.astype(jnp.int32),
-                y_max.astype(jnp.int32),
-                y_size.astype(jnp.int32),
-            )
-            jax.debug.print("Count log(|value|) < threshold: {}", n_below_log)
-            jax.debug.print(
-                "X where log < threshold: [{}, {}] (size: {})",
-                x_below_min.astype(jnp.int32),
-                x_below_max.astype(jnp.int32),
-                x_below_size.astype(jnp.int32),
-            )
-            jax.debug.print(
-                "Y where log < threshold: [{}, {}] (size: {})",
-                y_below_min.astype(jnp.int32),
-                y_below_max.astype(jnp.int32),
-                y_below_size.astype(jnp.int32),
-            )
-
-            xmid = self.mesh_shape[0] // 2
-            ymid = self.mesh_shape[1] // 2
-            zmid = self.mesh_shape[2] // 2
-            jax.debug.print("Midpoint coordinates: x={}, y={}, z={}, x0={}", xmid, ymid, zmid, x0)
-            # print("Midpoint coordinates: x={}, y={}, z={}, x0={}".format(xmid, ymid, zmid, x0))
-            Fx_line = sol[1, :, ymid, zmid]
-            jax.debug.print("Fx line: {}", Fx_line)
-            jax.debug.print("Fx line at y=50,z=50: {}", Fx_line)
-            jax.debug.print("sum Fx(x>x0) = {}", jnp.sum(Fx_line[xmid+1:]))
-            jax.debug.print("sum Fx(x<x0) = {}", jnp.sum(Fx_line[:xmid]))
-            x0 = 0
-            # print("Midpoint coordinates: x={}, y={}, z={}, x0={}".format(xmid, ymid, zmid, x0))
-            
-            jax.debug.print("Fx at injection point x=0: {}", Fx_line[x0])
-            jax.debug.print("sum Fx for x>0: {}", jnp.sum(Fx_line[x0+1:]))
-
-            jax.debug.print("E_gamma min = {}", jnp.min(sol[0]))
-            jax.debug.print("E_gamma max = {}", jnp.max(sol[0]))
-            jax.debug.print(
-                "|F| max = {}",
-                jnp.max(jnp.sqrt(sol[1]**2 + sol[2]**2 + sol[3]**2)),
-            )
-            jax.debug.print(
-                "f_max = {}",
-                jnp.max(
-                    jnp.sqrt(sol[1]**2 + sol[2]**2 + sol[3]**2)
-                    / jnp.where(sol[0] > 0, sol[0] * self.light_speed, 1e-30)
-                ),
-            )
-
-            Fy = sol[2]
-            Fx = sol[1]
-            Fz = sol[3]
-
-            jax.debug.print("sum Fy = {}", jnp.sum(Fy))
-            jax.debug.print("sum |Fx| = {}", jnp.sum(jnp.abs(Fx)))
-            jax.debug.print("sum |Fz| = {}", jnp.sum(jnp.abs(Fz)))
-
-            Fy_tot = jnp.sum(sol[2])
-            Fx_tot = jnp.sum(sol[1])
-            Fz_tot = jnp.sum(sol[3])
-
-            jax.debug.print("Fy max: {}", jnp.max(jnp.abs(Fy)))
-            jax.debug.print("Fx max: {}", jnp.max(jnp.abs(Fx)))
-            jax.debug.print("Fz max: {}", jnp.max(jnp.abs(Fz)))
-            jax.debug.print(
-                "Fy/Fx: {}",
-                jnp.max(jnp.abs(Fy)) / (jnp.max(jnp.abs(Fx)) + 1e-30),
-            )
-            jax.debug.print(
-                "Fy/Fz: {}",
-                jnp.max(jnp.abs(Fy)) / (jnp.max(jnp.abs(Fz)) + 1e-30),
-            )
-            angle_y = jnp.arctan2(jnp.sqrt(Fx_tot**2 + Fz_tot**2), Fy_tot)
-            jax.debug.print("angle vs y = {}", angle_y)
-
-            jax.debug.print("sum E_gamma = {}", jnp.sum(sol[0]))
-            jax.debug.print("sum |F| = {}", jnp.sum(jnp.sqrt(sol[1]**2 + sol[2]**2 + sol[3]**2)))
-
-            Fmag = jnp.sqrt(sol[1]**2 + sol[2]**2 + sol[3]**2)
-            E_safe = jnp.where(sol[0] > 0, sol[0], 1e-30)
-            ratio_cell = Fmag / E_safe
-            ratio_cell_c = Fmag / (self.light_speed * E_safe)
-
-            jax.debug.print("max |F|/E (cell) = {}", jnp.max(ratio_cell))
-            jax.debug.print("max |F|/(c E) (cell) = {}", jnp.max(ratio_cell_c))
-            jax.debug.print("any cell |F|/E > c? {}", jnp.any(ratio_cell > self.light_speed))
-            jax.debug.print(
-                "any cell |F|/E > beam_reduced_flux*c? {}",
-                jnp.any(ratio_cell > self.beam_reduced_flux * self.light_speed),
-            )
-            
-
-            jax.debug.print("sum E_gamma = {}", jnp.sum(sol[0]))
-            jax.debug.print("sum |F| = {}", jnp.sum(jnp.sqrt(sol[1]**2 + sol[2]**2 + sol[3]**2)))
-
-            # ── Verification of c² on the beam only ───────────────────────
-            # Mask of active cells (E_gamma > threshold)
-            mask_active = sol[0] > self.eq.eps
-
-            E_active = jnp.where(mask_active, sol[0], 0.0)
-            Fmag = jnp.sqrt(sol[1]**2 + sol[2]**2 + sol[3]**2)
-            F_active = jnp.where(mask_active, Fmag, 0.0)
-
-            E_sum_active = jnp.sum(E_active)
-            F_sum_active = jnp.sum(F_active)
-
-            # Ratio |F| / E on the beam
-            ratio_active = F_sum_active / (E_sum_active + 1e-30)
-            c_2_active = ratio_active / self.light_speed**2
-
-            # Global ratio (over the entire domain) for comparison
-            E_sum_tot = jnp.sum(sol[0])
-            F_sum_tot = jnp.sum(Fmag)
-            ratio_tot = F_sum_tot / (E_sum_tot + 1e-30)
-            c_2_tot = ratio_tot / self.light_speed**2
-
-            jax.debug.print("\n=== Vérification c² sur le faisceau ===")
-            jax.debug.print("E_sum(faisceau) = {}", E_sum_active)
-            jax.debug.print("|F|_sum(faisceau) = {}", F_sum_active)
-            jax.debug.print("|F|/E(faisceau) = {}", ratio_active)
-            jax.debug.print("|F|/E / c²(faisceau) = {}", c_2_active)
-            jax.debug.print("|F|/E = c² ? faisceau = {}", jnp.isclose(ratio_active, self.light_speed**2))
-
-            jax.debug.print("\n=== Vérification c² sur tout le domaine ===")
-            jax.debug.print("E_sum(tout) = {}", E_sum_tot)
-            jax.debug.print("|F|_sum(tout) = {}", F_sum_tot)
-            jax.debug.print("|F|/E(tout) = {}", ratio_tot)
-            jax.debug.print("|F|/E / c²(tout) = {}", c_2_tot)
-            jax.debug.print("|F|/E = c² ? tout = {}", jnp.isclose(ratio_tot, self.light_speed**2))
-
-            # Also displays the number of active cells
-            n_active = jnp.sum(mask_active.astype(jnp.int32))
-            jax.debug.print("\nNombre de cellules actives (E > 1e-30) = {}", n_active)
-
-            _check_all_float_variables(
-                                        sol=sol,
-                                        E_gamma=sol[0],
-                                        Fx=sol[1],
-                                        Fy=sol[2],
-                                        Fz=sol[3],
-                                    )
-        if self.debug:
-            self.debug_grid_stats(sol, self.eq, "fin sol energy injection 2D", 0)
         params_out              = dict(params)
         params_out["star_ages"] = star_ages_new
         self.sol = sol
         return sol, params_out
+
 
     def get_N_gamma(self, star_masses, star_ages_old, star_ages_new, star_metallicities, sol):
         emission_old  = self.get_stellar_emission(star_ages_old, star_metallicities)
