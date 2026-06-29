@@ -800,7 +800,7 @@ class ConvectiveFlux_Radiative_transfer:
         # sol = sol.at[2].set(F_y_normalize)
         # sol = sol.at[3].set(F_z_normalize)
         # positivity fix (full state)
-        self._debug_grid_stats(sol, eq, "GRID AFTER NORMALISATION", ax)
+        # self._debug_grid_stats(sol, eq, "GRID AFTER NORMALISATION", ax)
         if self.positivity:
             conservative_xi_L, primitives_xi_L, count_L = self.compute_positivity_preserving_interpolation(
                 primitives=primitives,
@@ -813,7 +813,7 @@ class ConvectiveFlux_Radiative_transfer:
                 j=1,
                 axis=ax)
           
-        self._debug_grid_stats(sol, eq, "PRIMITIVES LEFT AFTER RECON", ax)
+        # self._debug_grid_stats(sol, eq, "PRIMITIVES LEFT AFTER RECON", ax)
 
         ####### mettre un check soit enlever la reconstruction et aussi mettre un check ici 
         # -------------------------------

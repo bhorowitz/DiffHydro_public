@@ -235,11 +235,12 @@ class LaxFriedrichs_Radiative_transfer(RiemannSolver):
             ) -> None:
         super().__init__(equation_manager, signal_speed)
 
-        self.E_id = self.equation_manager.mass_ids
-        self.eps = self.equation_manager.eps
-        self.c = self.equation_manager.light_speed
+        self.equation_manager_RT = EquationManager_RT()
+        self.E_id = self.equation_manager_RT.mass_ids
+        self.eps = self.equation_manager_RT.eps
+        self.c = self.equation_manager_RT.light_speed
         self.c_square = self.c * self.c  # c^2 for radiation transport (from light_speed)
-        self.equation_manager_RT = EquationManager_RT() #for radiative transfer specific helpers, to avoid circular imports
+         #for radiative transfer specific helpers, to avoid circular imports
         self.velocity_ids_RT = self.equation_manager_RT.vel_ids #override in case of radiative transfer equation manager, to ensure we get the right velocity indices for the flux calculations
         self.mass_ids_RT = self.equation_manager_RT.mass_ids #override in case of radiative transfer equation manager, to ensure we get the right mass/energy indices for the flux calculations
         self.stellar_force = StellarRadiationForce()

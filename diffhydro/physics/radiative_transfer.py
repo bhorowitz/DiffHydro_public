@@ -534,6 +534,7 @@ class StellarRadiationForce:
         return di2, dj2, weights2
 
     def _normalized_weights_3d(self, offsets, sigma, valid):
+        offsets = offsets#*2.5
         di3, dj3, dk3 = jnp.meshgrid(offsets, offsets, offsets, indexing="ij")
         weights3 = jnp.exp(-(di3**2 + dj3**2 + dk3**2) / (2 * sigma**2))
         weights3 = jnp.where(valid, weights3, 0.0)
@@ -544,7 +545,7 @@ class StellarRadiationForce:
         if self.beam_momentum_scaling == "legacy_c2_source2":
             return source * (self.light_speed ** 2) * weights
         elif self.beam_momentum_scaling == "physical":
-            return self.beam_sign * self.beam_reduced_flux * self.light_speed * source * weights
+            return self.beam_reduced_flux * self.light_speed * source * weights
         else:
             raise ValueError(f"Unknown beam_momentum_scaling: {self.beam_momentum_scaling}")
 
@@ -639,7 +640,7 @@ class StellarRadiationForce:
         _, _, _, weights3 = self._normalized_weights_3d(offsets, sigma, valid)
         fx_inj = self._beam_momentum_factor(source, weights3)
         sol = sol.at[1, xi, yi, zi].add(fx_inj)
-        sol = sol.at[2, xi, yi, zi].add(jnp.zeros_like(fx_inj))
+        sol = sol.at[2, xi, yi, zi].add(jnp.zeros_like(fx_inj))#modify the geometry of the beam there
         sol = sol.at[3, xi, yi, zi].add(jnp.zeros_like(fx_inj))
         return sol
 
@@ -665,6 +666,7 @@ class StellarRadiationForce:
         star_ages_old      = jnp.asarray(params["star_ages"])
         star_ages_new      = star_ages_old + dt
         star_metallicities = jnp.asarray(params["star_metallicities"])
+        # beam_sign
 
         if self.injection_mode == "stromgren":
             per_star_source = self.get_N_gamma_stromgen_sphere() * dt
