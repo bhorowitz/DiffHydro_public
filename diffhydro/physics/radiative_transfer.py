@@ -85,7 +85,7 @@ class StellarRadiationForce:
         beam_length_cells=8,  # number of beam cells
         beam_sigma=3.0,       # Gaussian spreading
         beam_reduced_flux=0.95,  # |F|/(c*E) max
-        beam_momentum_scaling="physical",
+        beam_momentum_scaling="legacy_c2_source2",
         
     ):
         self.escape_fraction = escape_fraction
