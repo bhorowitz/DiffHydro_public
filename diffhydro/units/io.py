@@ -19,6 +19,7 @@ def build_unit_metadata(cu: CodeUnits) -> dict[str, Any]:
             "density": cu.rho_cgs,
             "pressure": cu.P_cgs,
             "energy_density": cu.Eden_cgs,
+            "radiation_flux": cu.RadFlux_cgs,
             "temperature": cu.Temp_cgs,
         },
         "thermo": {

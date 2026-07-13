@@ -114,3 +114,33 @@ def pressure_from_Trho(
     p_code = p_cgs / cu.P_cgs
     return p_code if np.asarray(p_code).ndim > 0 else float(p_code)
 
+
+def format_quantity(
+    value: Any,
+    dim: str,
+    cu: CodeUnits,
+    out_unit: str | None = None,
+    parser: UnitParser | None = None,
+    precision: int = 6,
+) -> str:
+    """Return a human-readable string for a code-unit quantity.
+
+    Scalars are formatted as ``value unit`` and arrays are rendered with
+    ``numpy.array2string`` followed by the unit. This is convenient in tests
+    when inspecting profiles such as 1/r^2 beams or anisotropic momentum dumps.
+    """
+    unit_parser = parser or UnitParser()
+    quantity = from_code(
+        value,
+        dim,
+        cu,
+        out_unit=out_unit or unit_parser.default_cgs_unit(dim),
+        parser=unit_parser,
+    )
+    arr = np.asarray(quantity.value)
+    if arr.ndim == 0:
+        value_text = f"{float(arr):.{precision}e}"
+    else:
+        value_text = np.array2string(arr, precision=precision, separator=", ")
+    return f"{value_text} {quantity.unit}"
+

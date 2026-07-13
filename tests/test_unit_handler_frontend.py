@@ -10,6 +10,7 @@ from diffhydro.units import (
     code_units_from_metadata,
     from_code,
     from_code_fields,
+    format_quantity,
     pressure_from_Trho,
     temperature_from_Prho,
     to_code,
@@ -88,6 +89,25 @@ def test_field_level_roundtrip():
     assert roundtrip["rho"].value == pytest.approx(1.0e-24)
     assert roundtrip["vx"].value == pytest.approx(10.0)
     assert roundtrip["p"].value == pytest.approx(1.0e-12)
+
+
+def test_format_quantity_and_radiative_alias():
+    cu = CodeUnits.from_config(
+        {"length": "1 kpc", "mass": "1 Msun", "velocity": "1 km/s"},
+        {"mu": 0.61},
+    )
+
+    text = format_quantity(1.0, "radiation_energy_density", cu)
+    assert text.endswith("erg/cm^3")
+
+    profile = format_quantity(
+        np.array([1.0, 2.0, 3.0]),
+        "radiation_flux",
+        cu,
+        out_unit="erg/s/cm^2",
+    )
+    assert "erg/s/cm^2" in profile
+    assert "[" in profile and "]" in profile
 
 
 def test_thermo_helpers_invert_each_other():

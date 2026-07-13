@@ -2,6 +2,7 @@ from .code_units import CodeUnits
 from .convert import (
     from_code,
     from_code_fields,
+    format_quantity,
     pressure_from_Trho,
     temperature_from_Prho,
     to_code,
@@ -20,6 +21,7 @@ __all__ = [
     "code_units_from_metadata",
     "from_code",
     "from_code_fields",
+    "format_quantity",
     "pressure_from_Trho",
     "temperature_from_Prho",
     "to_code",

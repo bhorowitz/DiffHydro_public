@@ -527,18 +527,19 @@ class ConductiveFlux:
 
 class ConvectiveFlux_Radiative_transfer:
     def __init__(self,
-                 EquationManager,
-                 Solver,
-                 Recon,
-                 positivity=True
-                 ):
+                EquationManager,
+                Solver,
+                Recon,
+                positivity=True,
+                dx=1,
+                ):
         self.eq_manage = EquationManager
         self.solver = Solver
         self.recon = Recon
 
         self.positivity = positivity
         self.positivity_stencil = recon.WENO1()
-        self.dx_o = 1
+        self.dx_o = dx
 
         try:  # 3d
             self.flux_shapes = (
@@ -812,7 +813,7 @@ class ConvectiveFlux_Radiative_transfer:
                 primitives_xi_j=primitives_xi_R,
                 j=1,
                 axis=ax)
-          
+        
         # self._debug_grid_stats(sol, eq, "PRIMITIVES LEFT AFTER RECON", ax)
 
         ####### mettre un check soit enlever la reconstruction et aussi mettre un check ici 

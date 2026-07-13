@@ -140,7 +140,8 @@ class hydro:
                 snapshot_prefix: str = "fields",
                 track_time: bool = True,
                 debug_fixed_dt: float | None = None,
-                periodic_flux_divergence: bool = True):
+                periodic_flux_divergence: bool = True,
+                dx=1.0):
         # Fixed simulation parameters (rather static with respect to optimization).
    #     self.init_dt = init_dt # tiny starting timestep to smooth out anything too sharp
         self.splitting_schemes = splitting_schemes #strang splitting for x,y,z sweeps
@@ -154,7 +155,7 @@ class hydro:
         # Liste d'objets responsables des termes sources / forces.
         self.forces = forces
         # Reference spatial step (assumed uniform here).
-        self.dx_o = 1.0
+        self.dx_o = dx
         self.use_mol = use_mol
         # Selects the time integration function by name.
         self.integrator = INTEGRATOR_DICT[integrator]  # callable

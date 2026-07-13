@@ -8,6 +8,7 @@ All methods currently return stub values.
 import jax
 import jax.numpy as jnp
 from ..utils.debug_checks import _check_finite,_check_all_float_variables
+from ..units import CodeUnits, UnitParser, from_code, to_code
 from diffhydro.equationmanager_radiative_transf_no_chat import EquationManager as EquationManager_RT
 
 class RadiativeTransfer:
@@ -71,7 +72,7 @@ class StellarRadiationForce:
         stellar_spectrum_func=None,
         dx=1.0,
         injection_mode="physical",
-        stromgren_rate=1e-7,
+        stromgren_rate=0,
         gaussian_star=True,
         injection_geometry="3D",
         injection_momentum=False,
@@ -86,6 +87,8 @@ class StellarRadiationForce:
         beam_sigma=3.0,       # Gaussian spreading
         beam_reduced_flux=0.95,  # |F|/(c*E) max
         beam_momentum_scaling="legacy_c2_source2",
+        cu=None,
+        parser=None,
         
     ):
         self.escape_fraction = escape_fraction
@@ -107,8 +110,31 @@ class StellarRadiationForce:
         self.beam_length_cells= beam_length_cells
         self.beam_reduced_flux= beam_reduced_flux
         self.beam_momentum_scaling = beam_momentum_scaling
+        self.cu = cu
+        self.parser = parser or UnitParser()
         self.sol = None
         self.eq = eq
+        self.debug_dt_sum_code = 0.0
+        self.debug_dt_sum_phys = 0.0
+        self.debug_step_count = 0
+
+    def set_code_units(self, cu: CodeUnits, parser: UnitParser | None = None):
+        """Configure the unit system used by the radiative source helpers."""
+        self.cu = cu
+        self.parser = parser or self.parser or UnitParser()
+
+    def convert_physical_to_code(self, value, dimension: str):
+        """Convert a physical quantity into code units using the configured CodeUnits."""
+        if self.cu is None:
+            raise ValueError("CodeUnits not configured.")
+        return to_code(value, dimension, self.cu, self.parser)
+
+    def convert_code_to_physical(self, value, dimension: str, out_unit: str | None = None):
+        """Convert a code-unit quantity back to a physical value wrapper."""
+        if self.cu is None:
+            raise ValueError("CodeUnits not configured.")
+        unit = out_unit or self.parser.default_cgs_unit(dimension)
+        return from_code(value, dimension, self.cu, unit, self.parser)
 
     def get_stellar_emission(self, star_age, star_metallicity):
         if self.stellar_spectrum_func is not None:
@@ -655,6 +681,63 @@ class StellarRadiationForce:
         sol = sol.at[2].set(Fy * scale)
         sol = sol.at[3].set(Fz * scale)
         return sol
+    
+    def _debug_stromgren_units_jax(self, dt, per_star_source):
+        rate_code = self.get_N_gamma_stromgen_sphere()
+
+        if self.cu is None:
+            jax.debug.print(
+                """
+                [stromgren debug]
+                dt_code = {dt_code}
+                rate_code = {rate_code}
+                per_star_source_code = {src_code}
+                """,
+                dt_code=dt,
+                rate_code=rate_code,
+                src_code=per_star_source,
+                ordered=True,
+            )
+            return
+
+        T_cgs = jnp.asarray(self.cu.T_cgs, dtype=dt.dtype)
+        photon_rate_cgs = jnp.asarray(self.cu.PhotonRate_cgs, dtype=dt.dtype)
+
+        dt_phys_s = dt * T_cgs
+        rate_phys = rate_code * photon_rate_cgs
+        injected_phys = rate_phys * dt_phys_s
+        sum_dt_phys = jnp.sum(dt_phys_s)
+
+        jax.debug.print(
+            """
+            [stromgren debug]
+            dt_code = {dt_code}
+            dt_code_brut = {dt_code_brut}
+            dt_phys_s = {dt_phys_s}
+
+            stromgren_injection_code = {rate_code}
+            stromgren_rate_code_brut = {rate_code_brut}
+            stromgren_rate_phys_ph_per_s = {rate_phys}
+
+            per_star_source_code = {src_code}
+            per_star_source_code_brut = {src_code_brut}
+            per_star_source_phys_photons = {src_phys}
+            evolve_dt = {sum_dt_phys}
+            """,
+            dt_code=dt,
+            dt_code_brut=dt,
+            dt_phys_s=dt_phys_s,
+            rate_code=rate_code,
+            rate_code_brut=photon_rate_cgs,
+            rate_phys=rate_phys,
+            src_code=per_star_source,
+            src_code_brut=photon_rate_cgs,
+            src_phys=injected_phys,
+            sum_dt_phys=sum_dt_phys,
+            ordered=True,
+        )
+
+
 
     def force(self, i, sol, params, dt):
         if "star_masses" not in params or params["star_masses"] is None:
@@ -670,10 +753,12 @@ class StellarRadiationForce:
 
         if self.injection_mode == "stromgren":
             per_star_source = self.get_N_gamma_stromgen_sphere() * dt
+            self._debug_stromgren_units_jax(dt, per_star_source)
         elif self.injection_mode == "physical":
             per_star_source = self.get_N_gamma(
                 star_masses, star_ages_old, star_ages_new, star_metallicities, sol
             ) * dt
+            
         else:
             raise ValueError(f"Unknown injection_mode: {self.injection_mode}")
 
@@ -705,15 +790,18 @@ class StellarRadiationForce:
 
         # ── Photon injection ──
         if self.momentum_only == False:
-            if not self.gaussian_star:
+            if self.gaussian_star == False:
                 for s in range(star_positions.shape[0]):
                     x0, y0, z0 = ix[s], iy[s], iz[s]
-                    if (
-                        (0 <= x0 < self.mesh_shape[0]) and
-                        (0 <= y0 < self.mesh_shape[1]) and
-                        (0 <= z0 < self.mesh_shape[2])
-                    ):
-                        sol = sol.at[0, x0, y0, z0].add(per_star_source[s])
+                    x_safe = jnp.clip(x0, 0, self.mesh_shape[0] - 1)
+                    y_safe = jnp.clip(y0, 0, self.mesh_shape[1] - 1)
+                    z_safe = jnp.clip(z0, 0, self.mesh_shape[2] - 1)
+
+                    in_bounds = (
+                        (0 <= x0) & (x0 < self.mesh_shape[0]) &
+                        (0 <= y0) & (y0 < self.mesh_shape[1]) &
+                        (0 <= z0) & (z0 < self.mesh_shape[2]))
+                    sol = sol.at[0, x_safe, y_safe, z_safe].add(jnp.where(in_bounds, per_star_source[s], 0.0))
             else:
                 for s in range(star_positions.shape[0]):
                     x0, y0, z0 = ix[s], iy[s], iz[s]
@@ -728,18 +816,18 @@ class StellarRadiationForce:
 
         # ── Momentum injection ──
         if self.injection_momentum:
-            if not self.gaussian_star:
+            if self.gaussian_star == False:
                 for s in range(star_positions.shape[0]):
                     x0, y0, z0 = ix[s], iy[s], iz[s]
-                    if (
-                        (0 <= x0 < self.mesh_shape[0]) and
-                        (0 <= y0 < self.mesh_shape[1]) and
-                        (0 <= z0 < self.mesh_shape[2])
-                    ):
-                        fx_inj = per_star_source[s] * (self.light_speed ** 2)
-                        sol = sol.at[1, x0, y0, z0].add(fx_inj)
-                        sol = sol.at[2, x0, y0, z0].add(0.0)
-                        sol = sol.at[3, x0, y0, z0].add(0.0)
+                    x_safe = jnp.clip(x0, 0, self.mesh_shape[0] - 1)
+                    y_safe = jnp.clip(y0, 0, self.mesh_shape[1] - 1)
+                    z_safe = jnp.clip(z0, 0, self.mesh_shape[2] - 1)
+
+                    in_bounds = (
+                        (0 <= x0) & (x0 < self.mesh_shape[0]) &
+                        (0 <= y0) & (y0 < self.mesh_shape[1]) &
+                        (0 <= z0) & (z0 < self.mesh_shape[2]))
+                    sol = sol.at[0, x_safe, y_safe, z_safe].add(jnp.where(in_bounds, per_star_source[s], 0.0))
             else:
                 for s in range(star_positions.shape[0]):
                     x0, y0, z0 = ix[s], iy[s], iz[s]
