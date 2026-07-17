@@ -93,6 +93,9 @@ def _parse_args() -> argparse.Namespace:
     p.add_argument("--cooling-model", choices=["legacy", "nyx_table"], default="nyx_table")
     p.add_argument("--cooling-stop-gradient", dest="cooling_stop_gradient", action="store_true", default=True)
     p.add_argument("--no-cooling-stop-gradient", dest="cooling_stop_gradient", action="store_false")
+    p.add_argument("--hydro-flux-stop-gradient", dest="hydro_flux_stop_gradient", action="store_true", default=False,
+                   help="Stop gradient through the Riemann solver (eliminates ~5-20 GiB backward memory at 128^3).")
+    p.add_argument("--gravity-stop-gradient-source", dest="gravity_stop_gradient_source", action="store_true", default=False)
     p.add_argument("--cooling-table", type=str, default="data/m-00.cie")
     p.add_argument("--heating-rate-per-h", type=float, default=1.0e-33)
     p.add_argument("--nyx-heating-scale", type=float, default=1.2)
@@ -408,6 +411,8 @@ def main() -> None:
         dm_kick_scale=args.dm_kick_scale,
         gas_kick_scale=args.gas_kick_scale,
         gas_kick_factor=args.gas_kick_factor,
+        hydro_flux_stop_gradient=bool(args.hydro_flux_stop_gradient),
+        gravity_stop_gradient_source=bool(args.gravity_stop_gradient_source),
         enable_cooling=bool(args.enable_cooling),
         cooling_model=str(args.cooling_model),
         cooling_stop_gradient=bool(args.cooling_stop_gradient),

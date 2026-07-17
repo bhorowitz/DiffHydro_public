@@ -58,15 +58,37 @@ class FullHydroConfig:
     hydro_steps: int = 128
     dtau_min: float = 2.0e-7
     dtau_max: float = 8.0e-2
+    # Optional solver/CFL cap on the a-schedule dtau (like cosmo_parallel's launcher):
+    # dtau <= solver_dt_safety * sim.timestep(U). 0 disables (pure a-schedule, default).
+    # Needed for dense cooling-collapse regions where the a-schedule dt violates CFL.
+    solver_dt_safety: float = 0.0
 
     solver: str = "hll"
+    # Hydro time integration: True = MOL/RK2 unsplit (default; all 3 axes reconstructed at once),
+    # False = dimensionally-split sweep (one axis at a time -> ~3x less peak memory, needed to fit
+    # 512^3 on 4x32GB). Split changes the operator-splitting but is a standard, valid scheme.
+    use_mol: bool = True
     state_floor: float = 2.0e-8
     pressure_floor: float = 2.0e-8
     hydro_temp_floor_k: float = 0.0
     force_eps: float = 1.0e-8
     checkpoint: bool = True
     checkpoint_every: int = 1
+    pmesh_shape: tuple[int, int, int] = (1, 1, 1)
     gravity_stop_gradient_source: bool = False
+    # Multi-GPU distributed gravity (jaxdecomp env). "jaxpm" = single-device (default);
+    # "jaxdecomp_fft" = sharded coupled PM gravity (needs field_sharding from make_meshes).
+    gravity_backend: str = "jaxpm"
+    jaxdecomp_halo_size: int = 32
+    gravity_grad_mode: str = "forward_only"  # forward_only | differentiable (diff-DM later)
+    # DM mass deposition for the distributed gravity: "relative" (jaxpm cic_paint_dx; needs
+    # lattice-ordered DM, e.g. white-noise/jaxpm-decomp ICs) or "absolute_local" (single-device
+    # CIC at absolute positions; order/clustering-agnostic, for external-IC bundles like CV0).
+    jaxdecomp_dm_paint_mode: str = "relative"
+    # Decoupled multi-resolution PM: run the distributed gravity FFT/painting at this resolution
+    # (= DM particle resolution) instead of the hydro mesh_n. 0 = coupled (grav == hydro). Lets a
+    # high-res hydro mesh (e.g. 512^3) use coarser DM gravity (e.g. 256^3) to fit memory.
+    jaxdecomp_grav_mesh_n: int = 0
     projection_stop_gradient_correction: bool = False
     cooling_update_stop_gradient: bool = False
     hydro_flux_stop_gradient: bool = False
@@ -237,6 +259,7 @@ def _build_hydrosim(
     forces,
     *,
     solver_name: str,
+    use_mol: bool = True,
     dx_o: float = 1.0,
     enable_vacuum_momentum_cap: bool = False,
     vacuum_momentum_rho_guard: float = 1.0e-7,
@@ -247,6 +270,7 @@ def _build_hydrosim(
     hydro_repair_pressure_floor: float = 1.0e-8,
     hydro_repair_max_kinetic_to_thermal_ratio: float = 1.0e6,
     hydro_flux_stop_gradient: bool = False,
+    pmesh_shape: tuple[int, int, int] = (1, 1, 1),
 ):
     ss = dh.signal_speed_Einfeldt
     sname = solver_name.lower()
@@ -278,8 +302,8 @@ def _build_hydrosim(
         max_dt=0.2,
         fluxes=[conv_flux],
         forces=list(forces),
-        use_mol=True,
-        pmesh_shape=(1, 1, 1),
+        use_mol=bool(use_mol),
+        pmesh_shape=tuple(int(v) for v in pmesh_shape),
     )
     sim.dx_o = float(dx_o)
     sim.enable_vacuum_momentum_cap = bool(enable_vacuum_momentum_cap)
@@ -680,6 +704,14 @@ class GrackleTabulatedCoolingForce:
             jnp.maximum(mu_eff, 1.0e-8) * self.mH_cgs * (self.gamma - 1.0)
         )
 
+        # Trainable cooling/heating: multipliers from feedback_hyper (default 1.0 =
+        # identity, so a fresh run reproduces the fixed-rate model exactly).
+        _hyper = params.get("feedback_hyper", {})
+        cool_scale = self.cooling_rate_scale * jnp.asarray(
+            _hyper.get("cooling_rate_mult", 1.0), dtype=jnp.float32)
+        heat_scale = self.heating_rate_scale * jnp.asarray(
+            _hyper.get("heating_rate_mult", 1.0), dtype=jnp.float32)
+
         def body(_, Et_cur):
             p_cgs_cur = (self.gamma - 1.0) * jnp.maximum(Et_cur, self.eps)
             temp_guess = self._temperature_from_mu(rho_cgs, p_cgs_cur, mu_eff)
@@ -693,9 +725,9 @@ class GrackleTabulatedCoolingForce:
                 cool_prim = jax.lax.stop_gradient(cool_prim)
                 cool_metal_solar = jax.lax.stop_gradient(cool_metal_solar)
             dotE = (
-                self.heating_rate_scale * heat_prim
-                - self.cooling_rate_scale * cool_prim
-                - self.cooling_rate_scale * self.metal_cooling_scale * z_ratio * cool_metal_solar
+                heat_scale * heat_prim
+                - cool_scale * cool_prim
+                - cool_scale * self.metal_cooling_scale * z_ratio * cool_metal_solar
             )
             dotE = jnp.nan_to_num(dotE, nan=0.0, posinf=0.0, neginf=0.0)
             Et_new = jnp.maximum(Et_cur + dotE * dt_sub, Et_floor)
@@ -874,7 +906,7 @@ def _build_cooling_force(eq, bg: LCDMBackground, cfg: FullHydroConfig):
     raise ValueError(f"Unsupported cooling model: {cfg.cooling_model}")
 
 
-def build_full_hydro_system(cfg: FullHydroConfig, cosmo_lpt: jc.Cosmology) -> FullHydroSystem:
+def build_full_hydro_system(cfg: FullHydroConfig, cosmo_lpt: jc.Cosmology, field_sharding=None) -> FullHydroSystem:
     if bool(cfg.enable_metal_source) and not bool(cfg.track_metallicity):
         raise ValueError("enable_metal_source requires track_metallicity=True")
 
@@ -913,17 +945,40 @@ def build_full_hydro_system(cfg: FullHydroConfig, cosmo_lpt: jc.Cosmology) -> Fu
     code_to_kelvin_temp = 1.0 / max(kelvin_to_code_temp, 1.0e-30)
 
     bg_force = BackgroundExpansionForce(bg, a_init=a_from_z(cfg.z_init))
-    grav_force = JaxPMCoupledGravityForce(
-        eq,
-        mesh_shape=(cfg.mesh_n, cfg.mesh_n, cfg.mesh_n),
-        subtract_mean=True,
-        use_jaxpm=True,
-        dm_drift_factor=bg.H0,
-        dm_kick_factor=1.0,
-        gas_kick_factor=(None if cfg.gas_kick_factor is None else float(cfg.gas_kick_factor)),
-        eps=float(cfg.force_eps),
-        stop_gradient_source=bool(cfg.gravity_stop_gradient_source),
-    )
+    if str(getattr(cfg, "gravity_backend", "jaxpm")) == "jaxdecomp_fft":
+        # Distributed multi-GPU coupled gravity (jaxdecomp env). field_sharding is
+        # built by the driver (cosmo_feedback.distributed.make_meshes) and passed in.
+        from cosmo_parallel.coupled_gravity_forces import CoupledJaxDecompFFTGravityForce
+        if field_sharding is None:
+            raise ValueError("gravity_backend='jaxdecomp_fft' requires field_sharding (pass from make_meshes)")
+        grav_force = CoupledJaxDecompFFTGravityForce(
+            eq,
+            mesh_shape=(cfg.mesh_n, cfg.mesh_n, cfg.mesh_n),
+            subtract_mean=True,
+            dm_drift_factor=bg.H0,
+            dm_kick_factor=1.0,
+            gas_kick_factor=(None if cfg.gas_kick_factor is None else float(cfg.gas_kick_factor)),
+            eps=float(cfg.force_eps),
+            sharding=field_sharding,
+            halo_size=int(getattr(cfg, "jaxdecomp_halo_size", 32)),
+            dm_pos_key="x",  # cosmo_feedback snapshot stores absolute DM positions under "x"
+            gravity_grad_mode=str(getattr(cfg, "gravity_grad_mode", "forward_only")),
+            dm_paint_mode=str(getattr(cfg, "jaxdecomp_dm_paint_mode", "relative")),
+            grav_mesh_shape=((lambda g: (g, g, g) if g and g != cfg.mesh_n else None)(
+                int(getattr(cfg, "jaxdecomp_grav_mesh_n", 0)))),
+        )
+    else:
+        grav_force = JaxPMCoupledGravityForce(
+            eq,
+            mesh_shape=(cfg.mesh_n, cfg.mesh_n, cfg.mesh_n),
+            subtract_mean=True,
+            use_jaxpm=True,
+            dm_drift_factor=bg.H0,
+            dm_kick_factor=1.0,
+            gas_kick_factor=(None if cfg.gas_kick_factor is None else float(cfg.gas_kick_factor)),
+            eps=float(cfg.force_eps),
+            stop_gradient_source=bool(cfg.gravity_stop_gradient_source),
+        )
 
     force_stack = [bg_force, grav_force]
     cooling_force = _build_cooling_force(eq, bg, cfg)
@@ -980,6 +1035,7 @@ def build_full_hydro_system(cfg: FullHydroConfig, cosmo_lpt: jc.Cosmology) -> Fu
         eq,
         force_stack,
         solver_name=cfg.solver,
+        use_mol=bool(getattr(cfg, "use_mol", True)),
         dx_o=1.0,
         enable_vacuum_momentum_cap=cfg.enable_vacuum_momentum_cap,
         vacuum_momentum_rho_guard=cfg.vacuum_momentum_rho_guard,
@@ -990,6 +1046,7 @@ def build_full_hydro_system(cfg: FullHydroConfig, cosmo_lpt: jc.Cosmology) -> Fu
         hydro_repair_pressure_floor=cfg.hydro_repair_pressure_floor,
         hydro_repair_max_kinetic_to_thermal_ratio=cfg.hydro_repair_max_kinetic_to_thermal_ratio,
         hydro_flux_stop_gradient=cfg.hydro_flux_stop_gradient,
+        pmesh_shape=cfg.pmesh_shape,
     )
     return FullHydroSystem(
         cosmo_lpt=cosmo_lpt,
@@ -1119,6 +1176,24 @@ def _run_hydro_scan(
 
     checkpoint_every = max(1, int(getattr(cfg, "checkpoint_every", 1)))
 
+    # Ensure the scan carry structure stays constant: advance_full_hydro_step adds
+    # diagnostic keys to params dynamically, so pre-initialize them here (applies to
+    # both the simple and the block-checkpoint scan branches below).
+    for k in [
+        "_raw_nonfinite_flag",
+        "_raw_nonfinite_U_count",
+        "_raw_nonpositive_rho_count",
+        "_raw_nonfinite_dm_x_count",
+        "_raw_nonfinite_dm_p_count",
+        "_raw_nonfinite_star_mass_count",
+        "_hydro_repair_count",
+    ]:
+        if k not in params0:
+            if k == "_raw_nonfinite_flag":
+                params0[k] = jnp.asarray(False, dtype=jnp.bool_)
+            else:
+                params0[k] = jnp.asarray(0, dtype=jnp.int32)
+
     if checkpoint_every <= 1:
         scan_step = jax.checkpoint(one_step) if cfg.checkpoint else one_step
         (Uf, paramsf), dt_hist = jax.lax.scan(
@@ -1141,23 +1216,6 @@ def _run_hydro_scan(
         block_inner_step = jax.checkpoint(inner_step) if cfg.checkpoint else inner_step
         carry_out, dt_block = jax.lax.scan(block_inner_step, carry_in, xs=None, length=block)
         return carry_out, dt_block
-
-    # Ensure carry structure remains constant across JAX scan iterations
-    # by pre-initializing keys that are added dynamically in the loop.
-    for k in [
-        "_raw_nonfinite_flag",
-        "_raw_nonfinite_U_count",
-        "_raw_nonpositive_rho_count",
-        "_raw_nonfinite_dm_x_count",
-        "_raw_nonfinite_dm_p_count",
-        "_raw_nonfinite_star_mass_count",
-        "_hydro_repair_count",
-    ]:
-        if k not in params0:
-            if k == "_raw_nonfinite_flag":
-                params0[k] = jnp.asarray(False, dtype=jnp.bool_)
-            else:
-                params0[k] = jnp.asarray(0, dtype=jnp.int32)
 
     carry_with_idx = ((U0, params0), jnp.asarray(0, dtype=jnp.int32))
     dt_parts = []
@@ -1277,8 +1335,18 @@ def advance_full_hydro_step(
 
     a_now = jnp.asarray(params["a"], dtype=jnp.float32)
     da_dtau = system.background.da_dtau(a_now)
-    dtau_raw = (a_target - a_now) / jnp.maximum(da_dtau * remaining, 1.0e-12)
-    dtau = jnp.clip(dtau_raw, float(cfg.dtau_min), float(cfg.dtau_max))
+    if float(getattr(cfg, "solver_dt_safety", 0.0)) > 0.0:
+        # Adaptive CFL-limited stepping (driver loops until a_target): step as large as
+        # the solver's stable dt allows, but never overshoot a_target. Dense cooling-
+        # collapse cells need local dt limiting that the pure a-schedule can't provide.
+        dtau_to_target = (a_target - a_now) / jnp.maximum(da_dtau, 1.0e-12)
+        dtau_cfl = jnp.asarray(float(cfg.solver_dt_safety), dtype=jnp.float32) * jnp.asarray(
+            system.sim.timestep(U), dtype=jnp.float32)
+        dtau = jnp.minimum(jnp.minimum(dtau_to_target, dtau_cfl), float(cfg.dtau_max))
+        dtau = jnp.maximum(dtau, float(cfg.dtau_min))
+    else:
+        dtau_raw = (a_target - a_now) / jnp.maximum(da_dtau * remaining, 1.0e-12)
+        dtau = jnp.clip(dtau_raw, float(cfg.dtau_min), float(cfg.dtau_max))
 
     U_new, params_new = system.sim._hydrostep(i, (U, params), dtau)
     nonfinite_counts = _nonfinite_state_counts(U_new, params_new)

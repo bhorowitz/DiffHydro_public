@@ -12,8 +12,24 @@ import sys
 from typing import Iterable
 
 import jax.numpy as jnp
-from jax import checkpoint, lax, vmap
+from jax import checkpoint, lax, nn, vmap
 from jax.scipy.special import erf
+
+
+def _smooth_floor(x, floor, width=None):
+    """C1 smooth lower bound: >= floor, equals softplus-relaxed max(x, floor).
+
+    smooth_floor(x, f) = f + w * softplus((x - f) / w). As w -> 0 it converges
+    to jnp.maximum(x, f); ds/dx is continuous (C1) unlike the hard floor.
+    """
+    x = jnp.asarray(x, dtype=jnp.float32)
+    f = jnp.asarray(floor, dtype=jnp.float32)
+    if width is None:
+        # Small positive width; use the floor magnitude when nonzero.
+        w = jnp.maximum(jnp.abs(f), jnp.float32(1.0e-30))
+    else:
+        w = jnp.asarray(width, dtype=jnp.float32)
+    return f + w * nn.softplus((x - f) / w)
 
 
 # Physical constants (CGS)
@@ -73,6 +89,7 @@ def build_nyx_eos_interpolator(
     logdelta_limits: tuple[float, float] = (-3.0, 4.0),
     logt_limits: tuple[float, float] = (0.0, 8.0),
     eos_search_paths: Iterable[Path] | None = None,
+    smooth_eos: bool = False,
 ):
     eos2 = _import_eos2(eos_search_paths)
     cp = eos2.CosmoParams(cosmo.h, cosmo.omega_m, cosmo.omega_b, cosmo.omega_lambda)
@@ -83,13 +100,25 @@ def build_nyx_eos_interpolator(
         logT_limits=tuple(logt_limits),
         grid_size=int(grid_size),
         store_log_nhi=False,
+        smooth_eos=bool(smooth_eos),
     )
 
 
-def compute_nhi_number_density(delta_b, temp_k, eos_interp):
-    """Compute neutral hydrogen number density [cm^-3] from (delta_b, T[K])."""
-    delta_b = jnp.maximum(jnp.asarray(delta_b, dtype=jnp.float32), 1.0e-8)
-    temp_k = jnp.maximum(jnp.asarray(temp_k, dtype=jnp.float32), 1.0)
+def compute_nhi_number_density(delta_b, temp_k, eos_interp, differentiable: bool = False):
+    """Compute neutral hydrogen number density [cm^-3] from (delta_b, T[K]).
+
+    When ``differentiable`` is False (default) the exact original hard-floor
+    behavior is preserved. When True, the hard floors are replaced by C1
+    softplus smooth-floors.
+    """
+    delta_b = jnp.asarray(delta_b, dtype=jnp.float32)
+    temp_k = jnp.asarray(temp_k, dtype=jnp.float32)
+    if differentiable:
+        delta_b = _smooth_floor(delta_b, 1.0e-8)
+        temp_k = _smooth_floor(temp_k, 1.0)
+    else:
+        delta_b = jnp.maximum(delta_b, 1.0e-8)
+        temp_k = jnp.maximum(temp_k, 1.0)
     return jnp.asarray(eos_interp.nhi_from_delta_T(delta_b, temp_k), dtype=jnp.float32)
 
 
@@ -149,8 +178,20 @@ def _tau_kernel_scatter(
     temp_array,
     num_pixels,
     num_integ_pixels: int = 20,
+    differentiable: bool = False,
 ):
-    """Piecewise-constant optical-depth assignment with Doppler broadening."""
+    """Piecewise-constant optical-depth assignment with Doppler broadening.
+
+    When ``differentiable`` is False (default) the exact original code path is
+    used: each absorber is snapped to an integer pixel center and painted onto a
+    fixed integer-offset window (discontinuous in v_los). When True, an
+    alternative fully C-infinity kernel paints every absorber onto the fixed
+    absolute pixel grid with no integer cast and no scatter-by-index, evaluating
+    the analytic erf profile for every (element, pixel) pair. LOS periodicity is
+    handled by wrapping the absorber center into [0, velocity_domain_cms) and
+    summing the two neighboring periodic images so Doppler wings near the box
+    boundary deposit on both ends.
+    """
     od_factor = jnp.asarray(od_factor, jnp.float32)
     absorber_mass_cgs = jnp.asarray(absorber_mass_cgs, jnp.float32)
     velocity_domain_cms = jnp.asarray(velocity_domain_cms, jnp.float32)
@@ -171,6 +212,34 @@ def _tau_kernel_scatter(
     vlc_l = element_dv * all_inds_f + vpara_array
     vlc_h = element_dv * (all_inds_f + jnp.float32(1.0)) + vpara_array
     vlc_m = element_dv * (all_inds_f + jnp.float32(0.5)) + vpara_array
+
+    if differentiable:
+        # Fixed absolute pixel grid over the full periodic LOS axis.
+        v_pix = pixel_dv * (jnp.arange(num_pixels, dtype=jnp.float32) + jnp.float32(0.5))  # [P]
+
+        # Wrap absorber center into [0, L); keep the element half-width around it
+        # so vlc_l/vlc_h stay consistent even when the element straddles the box
+        # boundary. jnp.mod has unit derivative a.e., and the periodic image sum
+        # below makes the total tau continuous across the wrap point.
+        vlc_m_w = jnp.mod(vlc_m, velocity_domain_cms)
+        half = jnp.float32(0.5) * element_dv
+        vlc_l_w = vlc_m_w - half
+        vlc_h_w = vlc_m_w + half
+
+        vd = v_doppler[:, None]  # [E, 1]
+        tau_local = jnp.zeros((num_elements, num_pixels), dtype=jnp.float32)
+        # Sum the three nearest periodic images (k in {-1, 0, +1}) so a Doppler
+        # wing near a boundary deposits on both ends. v_doppler << L here so
+        # three images fully capture the profile.
+        for k in (-1, 0, 1):
+            shift = jnp.float32(k) * velocity_domain_cms
+            dxl = (v_pix[None, :] - vlc_l_w[:, None] - shift) / vd  # [E, P]
+            dxh = (v_pix[None, :] - vlc_h_w[:, None] - shift) / vd
+            tau_local = tau_local + n_array[:, None] * (erf(dxl) - erf(dxh))
+
+        tau = (jnp.float32(0.5) * od_factor) * jnp.sum(tau_local, axis=0)  # [P]
+        return tau
+
     pix_lc = (vlc_m / pixel_dv).astype(jnp.int32)
 
     offsets = jnp.arange(-num_integ_pixels - 1, num_integ_pixels + 2, dtype=jnp.int32)
@@ -200,6 +269,7 @@ def tau_cube_from_nhi(
     num_integ_pixels: int = 20,
     skewer_batch_size: int | None = None,
     absorber_mass_cgs: float = float(M_H_CGS),
+    differentiable: bool = False,
 ):
     """Return tau cube with the same axis order as input arrays."""
     n_los = _move_axis_to_last(n_hi_cgs, axis_los)
@@ -228,6 +298,7 @@ def tau_cube_from_nhi(
             t_row,
             num_pixels,
             num_integ_pixels=num_integ_pixels,
+            differentiable=differentiable,
         )
 
     n_skewers = int(n_perp_x * n_perp_y)

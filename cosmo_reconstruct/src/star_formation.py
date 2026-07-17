@@ -14,12 +14,45 @@ try:
 except ImportError:  # pragma: no cover - depends on installed jaxpm version
     _jaxpm_cic_read = None
 
+# Distributed mode: jaxpm's painting differs by env (the jaxdecomp build wants
+# grid-shaped fields, not flat positions). When this is set, the SF painting uses
+# the pure-JAX flat-position kernels below (env-agnostic, differentiable) instead
+# of jaxpm. Toggled by the distributed driver; default off keeps single-GPU intact.
+_USE_LOCAL_CIC = False
+
+
+def use_local_cic(flag: bool = True) -> None:
+    global _USE_LOCAL_CIC
+    _USE_LOCAL_CIC = bool(flag)
+
+
+_CIC_OFFSETS = jnp.array(
+    [[0., 0., 0.], [1., 0., 0.], [0., 1., 0.], [0., 0., 1.],
+     [1., 1., 0.], [1., 0., 1.], [0., 1., 1.], [1., 1., 1.]], dtype=jnp.float32)[None, :, :]
+
+
+def _cic_paint_local(particle_scalar, particle_positions, mesh_shape):
+    """Pure-JAX trilinear CIC scatter (flat positions); matches jaxpm cic_paint math."""
+    mesh = jnp.zeros(tuple(int(s) for s in mesh_shape), dtype=jnp.float32)
+    pos = jnp.expand_dims(jnp.asarray(particle_positions, jnp.float32), 1)
+    neigh = jnp.floor(pos) + _CIC_OFFSETS
+    kernel = 1.0 - jnp.abs(pos - neigh)
+    kernel = kernel[..., 0] * kernel[..., 1] * kernel[..., 2]
+    kernel = kernel * jnp.expand_dims(jnp.asarray(particle_scalar, jnp.float32), -1)
+    neigh = jnp.mod(neigh.astype(jnp.int32), jnp.asarray(mesh.shape, jnp.int32))
+    dnums = jax.lax.ScatterDimensionNumbers(
+        update_window_dims=(), inserted_window_dims=(0, 1, 2),
+        scatter_dims_to_operand_dims=(0, 1, 2))
+    return jax.lax.scatter_add(mesh, neigh, kernel, dnums)
+
 
 def particle_to_grid_cic_paint(
     particle_scalar: jnp.ndarray,
     particle_positions: jnp.ndarray,
     mesh_shape: tuple[int, int, int],
 ) -> jnp.ndarray:
+    if _USE_LOCAL_CIC:
+        return _cic_paint_local(particle_scalar, particle_positions, mesh_shape)
     mesh = jnp.zeros(mesh_shape, dtype=jnp.float32)
     return cic_paint(mesh, particle_positions, weight=jnp.asarray(particle_scalar, dtype=jnp.float32))
 
@@ -98,9 +131,9 @@ def _fallback_cic_read(grid_field: jnp.ndarray, particle_positions: jnp.ndarray)
 
 
 def grid_to_particle_cic_readout(grid_field: jnp.ndarray, particle_positions: jnp.ndarray) -> jnp.ndarray:
-    if _jaxpm_cic_read is not None:
-        return jnp.asarray(_jaxpm_cic_read(jnp.asarray(grid_field, dtype=jnp.float32), particle_positions), dtype=jnp.float32)
-    return _fallback_cic_read(grid_field, particle_positions)
+    if _USE_LOCAL_CIC or _jaxpm_cic_read is None:
+        return _fallback_cic_read(grid_field, particle_positions)
+    return jnp.asarray(_jaxpm_cic_read(jnp.asarray(grid_field, dtype=jnp.float32), particle_positions), dtype=jnp.float32)
 
 
 def grid_to_particle_mass_increment(
@@ -204,6 +237,32 @@ def _finite_cotangent_sigmoid_bwd(y, g):
 finite_cotangent_sigmoid.defvjp(_finite_cotangent_sigmoid_fwd, _finite_cotangent_sigmoid_bwd)
 
 
+_COT_CLIP = 1.0e6
+
+
+@jax.custom_vjp
+def finite_cotangent_passthrough(x):
+    """Identity forward; backward sanitizes the cotangent (nan->0, clamp to +-1e6).
+
+    The hydro adjoint w.r.t. an injected per-cell energy field is singular in many
+    cells (NaN/huge), which poisons per-cell trainable weights (AGN net, CNN
+    feedback head). This is a no-op for finite, in-range cotangents (so the working
+    scalar-feedback path is unchanged) but zeros/bounds the pathological ones."""
+    return x
+
+
+def _fcp_fwd(x):
+    return x, None
+
+
+def _fcp_bwd(_, g):
+    g = jnp.nan_to_num(jnp.asarray(g, dtype=jnp.float32), nan=0.0, posinf=0.0, neginf=0.0)
+    return (jnp.clip(g, -_COT_CLIP, _COT_CLIP),)
+
+
+finite_cotangent_passthrough.defvjp(_fcp_fwd, _fcp_bwd)
+
+
 def smooth_sigmoid(x: jnp.ndarray, center: float | jnp.ndarray, width: float | jnp.ndarray) -> jnp.ndarray:
     width_safe = max(float(width), 1.0e-10)
     return finite_cotangent_sigmoid((x - jnp.asarray(center, dtype=jnp.float32)) / width_safe)
@@ -279,6 +338,9 @@ class StarFormationDiagnostics:
     feedback_stellar_wind_energy: jnp.ndarray
     feedback_total_energy: jnp.ndarray
     feedback_clip_scale: jnp.ndarray
+    # Optional CNN 2nd-head output (per-cell log feedback-energy modulation); None
+    # for a 1-channel CNN. Defaulted so existing keyword constructions are unaffected.
+    cnn_feedback_log_mod: "jnp.ndarray | None" = None
 
 
 def evaluate_star_formation_diagnostics(
@@ -302,6 +364,9 @@ def evaluate_star_formation_diagnostics(
     dtau: float,
     mode: str = "deterministic",
     rng_key: jax.Array | None = None,
+    sf_cnn_weights: dict | None = None,
+    sf_cnn_lambda: float | jnp.ndarray = 1.0,
+    cnn_extra_fields: tuple | None = None,
 ) -> tuple[StarFormationDiagnostics, jax.Array | None]:
     W = eq.get_primitives_from_conservatives(U_gas)
     rho = jnp.maximum(W[eq.mass_ids], getattr(eq, "eps", 1.0e-20))
@@ -331,6 +396,40 @@ def evaluate_star_formation_diagnostics(
     s_rho = smooth_sigmoid(density_field, density_threshold, density_width)
     s_temp = smooth_sigmoid(jnp.asarray(temperature_threshold_k, dtype=jnp.float32) - temp_k, 0.0, temperature_width_k)
     pi0 = jnp.clip(jnp.asarray(sf_pi0, dtype=jnp.float32) * s_rho * s_temp, 0.0, 1.0)
+
+    cnn_feedback_log_mod = None
+    if sf_cnn_weights is not None:
+        # Hybrid SF model: pi0 = sigmoid(lambda * logit(pi0_phys) + CNN(fields)).
+        # Zero-initialized CNN final layer + lambda=1 reproduces the physical model.
+        from cosmo_feedback.sf_cnn import apply_sf_cnn, build_cnn_inputs
+
+        metal_fraction, stellar_grid = cnn_extra_fields
+        # 5 input channels = time-dependent variant: append the scale factor.
+        cnn_in_ch = int(sf_cnn_weights["w0"].shape[1])
+        channels = build_cnn_inputs(
+            rho_phys, temp_k, metal_fraction, stellar_grid,
+            scale_factor=a if cnn_in_ch == 5 else None,
+        )
+        # remat: the roll-based conv would otherwise save 27 shifted activation
+        # copies per layer (~8 GB/step) as backward residuals
+        cnn_out = jax.checkpoint(apply_sf_cnn)(sf_cnn_weights, channels)
+        # 2-channel CNN: ch0 = pi0 logit residual, ch1 = log feedback-energy modulation.
+        if cnn_out.ndim == 4:
+            residual = cnn_out[0]
+            cnn_feedback_log_mod = cnn_out[1]
+        else:
+            residual = cnn_out
+            cnn_feedback_log_mod = None
+        # 1e-8 keeps spurious Gumbel firings negligible (~0.02 cells/step at 128^3)
+        # while the floored logit (~ -18.4) stays within reach of lambda + CNN output.
+        eps = jnp.asarray(1.0e-8, dtype=jnp.float32)
+        pi0_c = jnp.clip(pi0, eps, 1.0 - eps)
+        logit_phys = jnp.log(pi0_c) - jnp.log1p(-pi0_c)
+        lam = jnp.asarray(sf_cnn_lambda, dtype=jnp.float32)
+        # finite_cotangent_sigmoid: a single non-finite downstream cotangent cell
+        # (Gumbel ST derivative ~1/tau compounding over the late rollout) would
+        # otherwise poison every CNN weight through the conv sum.
+        pi0 = finite_cotangent_sigmoid(lam * logit_phys + residual)
 
     mode_norm = str(mode).lower()
     if mode_norm == "gumbel":
@@ -369,6 +468,7 @@ def evaluate_star_formation_diagnostics(
             feedback_stellar_wind_energy=jnp.zeros_like(delta_star_grid),
             feedback_total_energy=jnp.zeros_like(delta_star_grid),
             feedback_clip_scale=jnp.ones_like(delta_star_grid),
+            cnn_feedback_log_mod=cnn_feedback_log_mod,
         ),
         rng_key,
     )
@@ -494,8 +594,25 @@ class StellarFeedbackTracerForce:
         i_step_arr = jnp.asarray(i_step, dtype=jnp.int32)
         rng_key = params.get("rng_sf", jr.PRNGKey(self.seed))
         dm_out = dict(dm_params)
-        dm_positions = jnp.asarray(dm_out["x"], dtype=jnp.float32)
+        dm_positions = jax.lax.stop_gradient(jnp.asarray(dm_out["x"], dtype=jnp.float32))
         sf_active = i_step_arr >= jnp.asarray(self.star_step_start, dtype=jnp.int32)
+
+        sf_cnn_weights = hyper.get("sf_cnn", None)
+        sf_cnn_lambda = hyper.get("sf_cnn_lambda", 1.0)
+        cnn_extra_fields = None
+        if sf_cnn_weights is not None:
+            from .metallicity import extract_metal_fields
+
+            mesh_shape = tuple(int(v) for v in U_gas.shape[-3:])
+            _, metal_fraction = extract_metal_fields(U_gas, self.eq)
+            if metal_fraction is None:
+                metal_fraction = jnp.zeros(mesh_shape, dtype=jnp.float32)
+            star_mass_cur = jnp.asarray(
+                dm_out.get("star_mass", jnp.zeros((dm_positions.shape[0],), dtype=jnp.float32)),
+                dtype=jnp.float32,
+            )
+            stellar_grid = particle_to_grid_cic_paint(star_mass_cur, dm_positions, mesh_shape)
+            cnn_extra_fields = (metal_fraction, stellar_grid)
 
         sf_diag, rng_next = evaluate_star_formation_diagnostics(
             U_gas,
@@ -517,6 +634,9 @@ class StellarFeedbackTracerForce:
             dtau=jnp.asarray(dtau, dtype=jnp.float32),
             mode=self.mode,
             rng_key=rng_key,
+            sf_cnn_weights=sf_cnn_weights,
+            sf_cnn_lambda=sf_cnn_lambda,
+            cnn_extra_fields=cnn_extra_fields,
         )
         sf_diag = StarFormationDiagnostics(
             overdensity=sf_diag.overdensity,
@@ -539,6 +659,7 @@ class StellarFeedbackTracerForce:
             feedback_stellar_wind_energy=sf_diag.feedback_stellar_wind_energy,
             feedback_total_energy=sf_diag.feedback_total_energy,
             feedback_clip_scale=sf_diag.feedback_clip_scale,
+            cnn_feedback_log_mod=sf_diag.cnn_feedback_log_mod,
         )
 
         delta_star_particles = grid_to_particle_mass_increment(sf_diag.delta_star_grid, dm_positions)
@@ -600,6 +721,9 @@ class StellarFeedbackTracerForce:
         feedback_stellar_wind_energy = (
             positive_source_product(stellar_wind_energy, wind_source_grid) * dtau_arr
         )
+        # (4) AGN-like thermal injection: lightweight net(stellar field) -> heating,
+        # scaled by local gas energy (zero-init net -> no AGN). Routed through the
+        # same clip below for stability.
         feedback_clip_scale = jnp.ones_like(feedback_snf_energy)
         if self.feedback_energy_clip_fraction is not None:
             i_energy = int(self.eq.energy_ids)
@@ -616,6 +740,45 @@ class StellarFeedbackTracerForce:
             feedback_snf_energy = feedback_snf_energy * feedback_clip_scale
             feedback_stellar_wind_energy = feedback_stellar_wind_energy * feedback_clip_scale
         thermal_deposition_grid = feedback_snf_energy + feedback_stellar_wind_energy
+        # (4) AGN-like thermal injection. CRITICAL: inject AFTER the SF energy clip,
+        # not through it. Routing AGN through the min/max clip (clip_limit/thermal_raw)
+        # makes the per-cell gradient singular -> NaN (the direct per-cell adjoint is
+        # finite; the clip's division is the NaN source). Bound AGN smoothly with tanh
+        # to <= clip_fraction * E_gas so it stays stable with a finite gradient.
+        agn_w = hyper.get("agn_net", None)
+        if agn_w is not None:
+            from cosmo_feedback.sf_cnn import apply_agn_net
+            _ie = int(self.eq.energy_ids)
+            # Bound to a small fraction of cell energy per step (smooth tanh, finite
+            # gradient -- not the min/max clip whose division is singular). 1% (was 2%):
+            # heating-only AGN accumulates, and 2% destabilized the forward as the net
+            # engaged -> step_scale ratcheted to a stall at 0.588 (job 7478).
+            _bound = jax.lax.stop_gradient(
+                jnp.asarray(0.01, dtype=jnp.float32)
+                * jnp.maximum(jnp.asarray(U_new[_ie], dtype=jnp.float32), getattr(self.eq, "eps", 1.0e-20)))
+            _agn_raw = jax.checkpoint(apply_agn_net)(agn_w, stellar_density_grid)  # >= 0
+            agn_thermal = _bound * jnp.tanh(_agn_raw)   # smooth, in [0, bound)
+            # Restrict AGN heating to the DENSEST gas (overdensity > 10 -- halo centers,
+            # physical for SMBH accretion). Heating diffuse cells evacuates them ->
+            # forward NaN; AGN bypasses the SF feedback clip's stability. stop_gradient
+            # mask; gradient is already finite, so masked cells are a clean zero.
+            _rho_now = jnp.asarray(U_new[int(self.eq.mass_ids)], dtype=jnp.float32)
+            _dense = jax.lax.stop_gradient((_rho_now > 10.0 * jnp.mean(_rho_now)).astype(jnp.float32))
+            agn_thermal = agn_thermal * _dense
+            thermal_deposition_grid = thermal_deposition_grid + agn_thermal
+        # (3) CNN feedback-energy head: per-cell learned thermal injection from the CNN
+        # 2nd channel. Same clip-safe construction as AGN -- after the clip (the min/max
+        # division is the NaN source), tanh-bounded, dense-gated. Bidirectional (tanh
+        # in [-1,1]) so the CNN can boost OR suppress local feedback; zero at zero-init.
+        _fb_mod = sf_diag.cnn_feedback_log_mod
+        if _fb_mod is not None:
+            _ie2 = int(self.eq.energy_ids)
+            _fb_bound = jax.lax.stop_gradient(
+                jnp.asarray(0.01, dtype=jnp.float32)
+                * jnp.maximum(jnp.asarray(U_new[_ie2], dtype=jnp.float32), getattr(self.eq, "eps", 1.0e-20)))
+            _rho2 = jnp.asarray(U_new[int(self.eq.mass_ids)], dtype=jnp.float32)
+            _dense2 = jax.lax.stop_gradient((_rho2 > jnp.mean(_rho2)).astype(jnp.float32))
+            thermal_deposition_grid = thermal_deposition_grid + _fb_bound * jnp.tanh(_fb_mod) * _dense2
         feedback_momentum_x = jnp.zeros_like(thermal_deposition_grid)
         feedback_momentum_y = jnp.zeros_like(thermal_deposition_grid)
         feedback_momentum_z = jnp.zeros_like(thermal_deposition_grid)
@@ -642,6 +805,9 @@ class StellarFeedbackTracerForce:
             U_new = U_new.at[2].add(feedback_momentum_y)
             U_new = U_new.at[3].add(feedback_momentum_z)
         feedback_total_energy = thermal_deposition_grid + feedback_kinetic_energy
+        # Sanitize the per-cell injected-energy cotangent so the singular hydro
+        # adjoint can't poison per-cell trainable weights (AGN net / CNN feedback head).
+        feedback_total_energy = finite_cotangent_passthrough(feedback_total_energy)
         i_energy = int(self.eq.energy_ids)
         U_new = U_new.at[i_energy].add(feedback_total_energy)
         i_dual = getattr(self.eq, "dual_energy_ids", None)

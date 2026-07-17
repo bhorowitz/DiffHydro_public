@@ -499,23 +499,34 @@ class MUSCL3:
     
         """
         eps_ad = 1e-6
+        # The shifted denominators (delta_upwind + eps) pass through ZERO when
+        # delta_upwind ~ -eps, making the untaken where-branch divide by ~0.
+        # The primal survives (where picks the other branch) but reverse-mode
+        # multiplies the branch's inf partial (-num/den^2) by its zero
+        # cotangent -> 0*inf = NaN gradient (hit by smooth limiters like
+        # VANLEER whose response doesn't clip to zero there). Clamp the
+        # denominator MAGNITUDE away from zero; values change only where the
+        # ratio was ~1/0 anyway (limiter already saturated).
+        def _den_safe(den, eps_min=1.0e-8):
+            return jnp.where(jnp.abs(den) > eps_min, den,
+                             jnp.where(den >= 0.0, eps_min, -eps_min))
         if j == 0: #left
                 delta_central = jnp.roll(buffer,self.f_sten(2,j), axis=axis) - jnp.roll(buffer,self.f_sten(1,j), axis=axis)
                 delta_upwind =  jnp.roll(buffer,self.f_sten(1,j), axis=axis) - jnp.roll(buffer,self.f_sten(0,j), axis=axis)
                 r = jnp.where(
                     delta_upwind >= eps_ad,
-                    delta_central / (delta_upwind + eps_ad), 
-                    (delta_central + eps_ad) / (delta_upwind + eps_ad))
+                    delta_central / _den_safe(delta_upwind + eps_ad),
+                    (delta_central + eps_ad) / _den_safe(delta_upwind + eps_ad))
                 limiter = self.limiter(r)
-                cell_state_xi_j = jnp.roll(buffer,0,axis=axis) + 0.5 * limiter * (jnp.roll(buffer,-1,axis=axis) - jnp.roll(buffer,0,axis=axis)) 
+                cell_state_xi_j = jnp.roll(buffer,0,axis=axis) + 0.5 * limiter * (jnp.roll(buffer,-1,axis=axis) - jnp.roll(buffer,0,axis=axis))
         if j == 1: #right
                 delta_central = -1* jnp.roll(buffer,self.f_sten(2,j), axis=axis) + jnp.roll(buffer,self.f_sten(1,j), axis=axis)
                 delta_upwind =  -1* jnp.roll(buffer,self.f_sten(1,j), axis=axis) + jnp.roll(buffer,self.f_sten(0,j), axis=axis)
-    
+
                 r = jnp.where(
-                    delta_upwind >= eps_ad**2, 
-                    delta_central / (delta_upwind + eps_ad), 
-                    (delta_central + eps_ad) / (delta_upwind + eps_ad**2))
+                    delta_upwind >= eps_ad**2,
+                    delta_central / _den_safe(delta_upwind + eps_ad),
+                    (delta_central + eps_ad) / _den_safe(delta_upwind + eps_ad**2))
                 limiter = self.limiter(r)
                 cell_state_xi_j = jnp.roll(buffer,-1,axis=axis) - 0.5 * limiter * (jnp.roll(buffer,-2,axis=axis) - jnp.roll(buffer,-1,axis=axis))
         return cell_state_xi_j

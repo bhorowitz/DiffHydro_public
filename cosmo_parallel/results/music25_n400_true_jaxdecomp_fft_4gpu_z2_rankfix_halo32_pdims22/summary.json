@@ -1,0 +1,67 @@
+{
+  "checkpoints": [
+    {
+      "a": 0.33343589305877686,
+      "dm_mean": 0.837444543838501,
+      "dm_std": 6.504037857055664,
+      "label": "snapshot_z2",
+      "rho_mean": 4.136700681556249e-06,
+      "rho_std": 3.0069264539633878e-05,
+      "temp_mean_k": 22881.041015625,
+      "temp_std_k": 248550.125,
+      "z": 1.9990772463830813,
+      "z_requested": 2.0
+    }
+  ],
+  "run": {
+    "a_final": 0.9999991059303284,
+    "a_init": 0.009900989942252636,
+    "a_target": 1.0,
+    "box_size": 35.21126937866211,
+    "cached_ic_npz": "/home/ben.horowitz/DiffHydro_public/cosmo_parallel/results/cache/music25_n400_true_init_fields.npz",
+    "coupling_impl": "jaxdecomp_pm",
+    "device_count_visible": 4,
+    "dm_h5": "/home/ben.horowitz/DiffHydro_public/Nyx/Exec/LyA/music25_runs/n400_true_init/plt_init_00000_particles.h5",
+    "dm_kick_scale": 1.0,
+    "dm_particles": 64000000,
+    "elapsed_s": 12818.201645793393,
+    "gas_kick_mode": "legacy_h0sq",
+    "gas_kick_scale": 1.0,
+    "gpu": "0,1,2,3",
+    "gravity_backend": "jaxdecomp_fft",
+    "ic_import_density_a3": false,
+    "jaxdecomp_halo_size": 48,
+    "jaxdecomp_pdims": [
+      2,
+      2
+    ],
+    "kick_prefactor_dm": 30.199499999999997,
+    "kick_prefactor_gas": 2026.6884449999998,
+    "max_retry_in_step": 0,
+    "n_grid": 400,
+    "n_steps_taken": 2405,
+    "plotfile": null,
+    "pmesh_shape": [
+      4,
+      1,
+      1
+    ],
+    "retry_steps_nonzero": 0,
+    "retry_total": 0,
+    "solver": "hll",
+    "t_final": 0.4940381404583129,
+    "tau_target": 0.48452034151444884,
+    "z_final": 8.940704709914371e-07,
+    "z_init": 100.00000159908089,
+    "z_target": 0.0
+  },
+  "stats": {
+    "dm_final_mean": 0.7811290621757507,
+    "dm_final_std": 22.90277862548828,
+    "dt_nonzero_count": 2405,
+    "rho_final_mean": 1.5692546639911598e-07,
+    "rho_final_std": 1.2801908269466367e-05,
+    "temp_final_mean_k": 19655.455078125,
+    "temp_final_std_k": 335576.8125
+  }
+}

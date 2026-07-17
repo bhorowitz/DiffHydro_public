@@ -483,6 +483,22 @@ def build_nyx_cooling_table(
     return table
 
 
+def assert_nyx_table_finite(table: NyxCoolingTableData) -> None:
+    """Check that all table arrays are finite and print diagnostics."""
+    for name, arr in [("heat", table.heat_cgs), ("cool", table.cool_cgs), ("net", table.net_cgs)]:
+        n_nan = int(np.sum(~np.isfinite(arr)))
+        n_zeros = int(np.sum(arr == 0.0))
+        n_negative = int(np.sum(arr < 0.0))
+        arr_min = float(np.min(arr))
+        arr_max = float(np.max(arr))
+        print(
+            f"[nyx_table] {name}: min={arr_min:.3g} max={arr_max:.3g} "
+            f"n_zeros={n_zeros} n_negative={n_negative} n_nonfinite={n_nan}"
+        )
+        if n_nan > 0:
+            raise ValueError(f"Nyx cooling table '{name}' contains {n_nan} non-finite values!")
+
+
 class NyxCoolingRateInterpolator:
     """JAX runtime interpolator for Nyx cooling/heating tables."""
 
@@ -507,6 +523,12 @@ class NyxCoolingRateInterpolator:
         self.n_lt = int(self.logT_nodes.size)
         self._ld_scale = (self.n_ld - 1) / jnp.maximum(self.ld_max - self.ld_min, 1.0e-12)
         self._lt_scale = (self.n_lt - 1) / jnp.maximum(self.lt_max - self.lt_min, 1.0e-12)
+        # When True, the bilinear blend weights use the smoothstep 3f^2-2f^3
+        # (ds/df -> 0 at f in {0,1}), making the interpolant C1 across table grid
+        # lines instead of C0. Default False preserves the exact bilinear behavior;
+        # enabled for gradient-based sampling where the C0 kink comb injects
+        # high-k gradient noise. Set via NyxTabulatedCoolingForce(smooth_table=...).
+        self.smooth_interp = False
 
     def _bilinear(self, grid2d: jnp.ndarray, logdelta: jnp.ndarray, logt: jnp.ndarray) -> jnp.ndarray:
         x = (jnp.clip(logdelta, self.ld_min, self.ld_max) - self.ld_min) * self._ld_scale
@@ -515,8 +537,12 @@ class NyxCoolingRateInterpolator:
         j0 = jnp.floor(y).astype(jnp.int32)
         i0 = jnp.clip(i0, 0, self.n_ld - 2)
         j0 = jnp.clip(j0, 0, self.n_lt - 2)
-        fx = x - i0.astype(jnp.float32)
-        fy = y - j0.astype(jnp.float32)
+        fx = x - i0.astype(x.dtype)
+        fy = y - j0.astype(y.dtype)
+        if self.smooth_interp:
+            # C1 smoothstep on the interpolation weights (value-identical at nodes).
+            fx = fx * fx * (3.0 - 2.0 * fx)
+            fy = fy * fy * (3.0 - 2.0 * fy)
 
         v00 = grid2d[i0, j0]
         v10 = grid2d[i0 + 1, j0]

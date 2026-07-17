@@ -4,6 +4,7 @@ from dataclasses import dataclass
 
 import jax
 import jax.numpy as jnp
+import numpy as np
 import jax_cosmo as jc
 import jaxpm.pm as jpm
 from jaxpm.growth import _growth_factor_ODE, dGfa, growth_factor, growth_rate
@@ -100,6 +101,24 @@ def _wrap_positions(pos: jnp.ndarray, mesh_n: int) -> jnp.ndarray:
     return jnp.mod(pos, jnp.asarray(float(mesh_n), dtype=jnp.float32))
 
 
+def _fftk(shape, symmetric: bool = True, dtype=np.float32):
+    """Env-agnostic copy of jaxpm.kernels.fftk (the non-distributed convention).
+
+    The jaxdecomp build of jaxpm replaces fftk with a distributed variant that
+    expects a complex array, so we inline the real-shape version here to keep IC
+    generation identical across the jax-gpu and jaxdecomp envs.
+    """
+    k = []
+    for d in range(len(shape)):
+        kd = np.fft.fftfreq(shape[d]) * 2 * np.pi
+        kdshape = np.ones(len(shape), dtype="int")
+        if symmetric and d == len(shape) - 1:
+            kd = kd[: shape[d] // 2 + 1]
+        kdshape[d] = len(kd)
+        k.append(kd.reshape(kdshape).astype(dtype))
+    return k
+
+
 def make_pk_sqrt(cosmo: jc.Cosmology, cfg: ForwardModelConfig, k_points: int = 256) -> jnp.ndarray:
     mesh_shape = (cfg.mesh_n, cfg.mesh_n, cfg.mesh_n)
     box_size = [cfg.box_size_mpc_h] * 3
@@ -110,7 +129,7 @@ def make_pk_sqrt(cosmo: jc.Cosmology, cfg: ForwardModelConfig, k_points: int = 2
     def pk_fn(x: jnp.ndarray) -> jnp.ndarray:
         return jnp.interp(x.reshape([-1]), k, pk).reshape(x.shape)
 
-    kvec = jpm.fftk(mesh_shape)
+    kvec = _fftk(mesh_shape)
     kmesh = sum((kk / box_size[i] * mesh_shape[i]) ** 2 for i, kk in enumerate(kvec)) ** 0.5
     pk_mesh = pk_fn(kmesh) * (mesh_shape[0] * mesh_shape[1] * mesh_shape[2]) / (
         box_size[0] * box_size[1] * box_size[2]

@@ -168,8 +168,20 @@ class EquationManager:
                 rhoe_dual = jnp.maximum(conservatives[self.dual_energy_ids], self.eps)
                 e_dual = rhoe_dual * inv_rho
                 etot_specific = jnp.maximum(conservatives[self.energy_ids] * inv_rho, self.eps)
-                use_dual = e_tot <= self.dual_energy_eta * etot_specific
-                e = jnp.where(use_dual, jnp.maximum(e_dual, self.eps), e)
+                smooth_w = float(getattr(self, "dual_energy_smooth_width", 0.0))
+                if smooth_w > 0.0:
+                    # C-infinity selector: the hard where() below is a genuine
+                    # VALUE discontinuity (e_dual != e_tot at the switch), so
+                    # grad(U) != d(value) for any objective through this state
+                    # -- fatal for leapfrog/MH samplers. Blend over a relative
+                    # window of width smooth_w around the eta threshold instead.
+                    thr = self.dual_energy_eta * etot_specific
+                    t = (thr - e_tot) / jnp.maximum(smooth_w * thr, self.eps)
+                    w_dual = 1.0 / (1.0 + jnp.exp(-jnp.clip(t, -30.0, 30.0)))
+                    e = w_dual * jnp.maximum(e_dual, self.eps) + (1.0 - w_dual) * e
+                else:
+                    use_dual = e_tot <= self.dual_energy_eta * etot_specific
+                    e = jnp.where(use_dual, jnp.maximum(e_dual, self.eps), e)
             
             # build pressure with safe rho
             p = self.get_pressure(e, rho_safe)

@@ -121,7 +121,9 @@ class hydro:
                  dx_o: float | None = None,
                  snapshot_every: int | None = None,
                  snapshot_dir: str = "snapshots",
-                 track_time: bool = True):
+                 track_time: bool = True,
+                 mesh=None,
+                 field_spec=None):
         #parameters that are held constant per run (i.e. probably don't want to take derivatives with respect to...)
    #     self.init_dt = init_dt # tiny starting timestep to smooth out anything too sharp
         self.splitting_schemes = splitting_schemes #strang splitting for x,y,z sweeps
@@ -149,10 +151,18 @@ class hydro:
         self.iBx, self.iBy, self.iBz = 4, 5, 6  # if Euler run, these rows may not exist
 
         self.pmesh_shape = pmesh_shape #parallelism
-        
-        devices = mesh_utils.create_device_mesh(self.pmesh_shape)
-        self.mesh =  Mesh(devices, ('x', 'y','z'))
-        self.FIELD_XYZ = P(None, 'x', 'y','z')
+
+        if mesh is not None:
+            # Externally provided mesh (e.g. a 2-axis ('x','y') mesh shared with a
+            # jaxdecomp gravity solver so hydro + gravity can co-occur in one traced
+            # program). pmesh_shape must still describe the per-spatial-axis device
+            # counts (size-1 axes skip halo exchange in roll_with_halo/boundary).
+            self.mesh = mesh
+            self.FIELD_XYZ = field_spec if field_spec is not None else P(None, 'x', 'y', 'z')
+        else:
+            devices = mesh_utils.create_device_mesh(self.pmesh_shape)
+            self.mesh = Mesh(devices, ('x', 'y','z'))
+            self.FIELD_XYZ = P(None, 'x', 'y','z')
         
         # --- NEW runtime state ---
         self.sim_time: float = 0.0
@@ -1056,5 +1066,8 @@ class hydro:
                     "fluxes":self.fluxes,"forces":self.forces,
                 "use_mol":self.use_mol,"use_ct":self.use_ct,
                 "pmesh_shape":self.pmesh_shape,
-                "dx_o": self.dx_o}  # static values
+                "dx_o": self.dx_o,
+                # preserve an injected (unified) mesh across unflatten — otherwise
+                # __init__ would silently rebuild the default 3-axis ('x','y','z') mesh
+                "mesh": self.mesh, "field_spec": self.FIELD_XYZ}  # static values
         return (children, aux_data)
