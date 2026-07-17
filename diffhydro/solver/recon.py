@@ -361,6 +361,7 @@ class PLM:
 
         return qL_iphalf if j == 0 else qR_iphalf
     
+    
 class PPM:
     """
     Piecewise Parabolic Method (Colella–Woodward style, simplified) with MUSCL-style

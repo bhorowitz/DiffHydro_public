@@ -851,7 +851,7 @@ class StellarRadiationForce:
                         raise ValueError(f"Unknown injection_geometry: {self.injection_geometry}")
 
         # Safety limiter
-        sol = self._clip_to_m1_cone(sol)
+        # sol = self._clip_to_m1_cone(sol)
 
         if self.debug:
             self._debug_after_clip(sol, i)   # <-- voir note ci-dessous

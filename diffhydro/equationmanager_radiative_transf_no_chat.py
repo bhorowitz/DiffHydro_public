@@ -27,7 +27,7 @@ class EquationManager:
     """
     gamma: float = 1.6
     n_cons: int = 4 #avant c etait 5
-    eps: float = 1e-30
+    eps: float = 1e-40
     isothermal: bool = False
     light_speed: float = 1#3e8 #en m.s-1
     # fraction_escape: float = 0.1
@@ -68,7 +68,7 @@ class EquationManager:
         self.equation_type = "SINGLE-PHASE"#equation_information.equation_type
         self.thermal_conductivity_model = "SUTHERLAND"
         self.sutherland_parameters = [0.1, 1.0, 1.0]
-        self.cfl = 0.01 #original value 0.4 , value when debugging 0.01
+        self.cfl = 0.4 #original value 0.4 , value when debugging 0.01
         # self.mesh_shape = list(self.mesh_shape)
         self.R = 1.0
         self.cp = self.gamma / (self.gamma - 1.0) * self.R
