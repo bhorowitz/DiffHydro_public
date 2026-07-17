@@ -143,6 +143,111 @@ def white_noise_to_init_mesh(white_noise: jnp.ndarray, pk_sqrt: jnp.ndarray) -> 
     return jnp.asarray(mesh, dtype=jnp.float32)
 
 
+def make_lya_kaiser_scale(
+    cosmo: jc.Cosmology,
+    cfg: ForwardModelConfig,
+    *,
+    b_flux: float,
+    beta_flux: float,
+    n_eff: float,
+    los_axis: int = 2,
+    k_points: int = 256,
+) -> jnp.ndarray:
+    """Linear-LyA Kaiser posterior-preconditioning scale, in rfftn layout.
+
+    Returns ``scale(k)`` of shape ``(mesh_n, mesh_n, mesh_n // 2 + 1)`` with
+
+        scale(k) = sqrt(1 + n_eff * (D(a_obs) * b_flux * (1 + beta_flux * mu^2))^2 * P_mesh(k))
+
+    where ``P_mesh`` uses the same normalization as :func:`make_pk_sqrt` (so that
+    ``make_pk_sqrt(...)**2 == P_mesh``), ``mu`` is the cosine of the angle to the
+    line-of-sight ``los_axis``, and ``D`` is the linear growth factor at the target
+    scale factor. This is the LyA-flux analogue of FLBench's galaxy Kaiser boost
+    ``D * (bE + f * mu^2)``; the posterior transfer is ``make_pk_sqrt / scale``.
+    """
+    mesh_shape = (cfg.mesh_n, cfg.mesh_n, cfg.mesh_n)
+    box_size = [cfg.box_size_mpc_h] * 3
+
+    k = jnp.logspace(-4, 1, k_points, dtype=jnp.float32)
+    pk = jc.power.linear_matter_power(cosmo, k)
+
+    def pk_fn(x: jnp.ndarray) -> jnp.ndarray:
+        return jnp.interp(x.reshape([-1]), k, pk).reshape(x.shape)
+
+    kvec = _fftk(mesh_shape)
+    kphys = [kk / box_size[i] * mesh_shape[i] for i, kk in enumerate(kvec)]
+    kmesh = sum(kp**2 for kp in kphys) ** 0.5
+    pk_mesh = pk_fn(kmesh) * (mesh_shape[0] * mesh_shape[1] * mesh_shape[2]) / (
+        box_size[0] * box_size[1] * box_size[2]
+    )
+
+    # mu^2 = (k_los / |k|)^2 along the line-of-sight axis (0 at k=0).
+    klos = kphys[int(los_axis)]
+    kmesh_safe = jnp.where(kmesh > 0, kmesh, jnp.asarray(1.0, dtype=jnp.float32))
+    mu2 = jnp.where(kmesh > 0, (klos / kmesh_safe) ** 2, jnp.asarray(0.0, dtype=jnp.float32))
+
+    a_obs = jnp.atleast_1d(jnp.asarray(a_from_z(cfg.z_target), dtype=jnp.float32))
+    growth = jnp.asarray(growth_factor(cosmo, a_obs), dtype=jnp.float32).reshape(())
+    boost = growth * jnp.asarray(b_flux, dtype=jnp.float32) * (
+        1.0 + jnp.asarray(beta_flux, dtype=jnp.float32) * mu2
+    )
+    scale = jnp.sqrt(1.0 + jnp.asarray(n_eff, dtype=jnp.float32) * boost**2 * pk_mesh)
+    return jnp.asarray(scale, dtype=jnp.float32)
+
+
+def make_pk_sqrt_post(pk_sqrt: jnp.ndarray, scale: jnp.ndarray) -> jnp.ndarray:
+    """Posterior transfer ``P(k)^1/2 / scale(k)`` (rfftn layout).
+
+    Replaces ``pk_sqrt`` in :func:`white_noise_to_init_mesh` so that the sampling
+    coordinate has an approximately unit-Gaussian *posterior* under a linear LyA
+    response model.
+    """
+    return jnp.asarray(pk_sqrt / scale, dtype=jnp.float32)
+
+
+def make_lowpass_filter(cfg: ForwardModelConfig, k_cut_frac: float) -> jnp.ndarray:
+    """Gaussian low-pass window in rfftn layout, for smoothing the REVERSE-pass
+    gradient of the full-hydro forward (a surrogate force for adjusted samplers).
+
+    The full-hydro/cooling gradient is rough (slope-limiter kinks, bilinear
+    cooling-table corners, float32 jaggedness), which pins HMC/NUTS leapfrog to
+    tiny steps. Low-passing the white-noise gradient removes that high-k roughness
+    so the Hamiltonian flow is smooth and large steps are stable; with a
+    Metropolis-adjusted sampler the accept/reject uses the EXACT forward
+    log-density, so the filtered force only changes efficiency, not the target.
+
+    k_cut_frac is the cutoff as a fraction of the per-axis Nyquist (pi, cell units).
+    W(k) = exp(-0.5 (|k| / (k_cut_frac*pi))^2); W(0)=1. Shape (N, N, N//2+1).
+    """
+    mesh_shape = (cfg.mesh_n, cfg.mesh_n, cfg.mesh_n)
+    kvec = _fftk(mesh_shape)
+    kmesh = sum(kk**2 for kk in kvec) ** 0.5  # |k| in cell units (rfft layout)
+    k_cut = max(float(k_cut_frac) * float(np.pi), 1.0e-6)
+    W = jnp.exp(-0.5 * (kmesh / k_cut) ** 2)
+    return jnp.asarray(W, dtype=jnp.float32)
+
+
+def rfft_hermitian_weights(mesh_shape, dtype=np.float32) -> jnp.ndarray:
+    """Per-mode multiplicities for the rfftn half-spectrum (Parseval weights).
+
+    For a real field ``f`` with ``N`` total points,
+    ``sum_x f(x)^2 == (1/N) * sum_k w_k * |rfftn(f)_k|^2`` where ``w_k`` is 1 for
+    the self-conjugate planes (last-axis index 0 and, for even length, Nyquist)
+    and 2 otherwise. Shape matches ``rfftn(f)``: ``(*mesh_shape[:-1], n_last//2+1)``.
+    """
+    n_last = int(mesh_shape[-1])
+    w_last = np.full(n_last // 2 + 1, 2.0, dtype=dtype)
+    w_last[0] = 1.0
+    if n_last % 2 == 0:
+        w_last[-1] = 1.0
+    bshape = [1] * len(mesh_shape)
+    bshape[-1] = w_last.size
+    full = np.broadcast_to(
+        w_last.reshape(bshape), (*mesh_shape[:-1], n_last // 2 + 1)
+    ).astype(dtype)
+    return jnp.asarray(full, dtype=dtype)
+
+
 def _pm_acceleration(
     positions: jnp.ndarray,
     a: jnp.ndarray,

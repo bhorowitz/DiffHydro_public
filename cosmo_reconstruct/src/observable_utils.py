@@ -36,6 +36,24 @@ def _smooth_abs(x: jnp.ndarray, eps: float = 1.0e-30) -> jnp.ndarray:
     return jnp.abs(xx) + ee
 
 
+def _smooth_floor(x: jnp.ndarray, floor: float, width: float | None = None) -> jnp.ndarray:
+    """C1 lower bound (softplus-relaxed jnp.maximum(x, floor)); result >= floor."""
+    xx = jnp.asarray(x, dtype=jnp.float32)
+    f = jnp.asarray(float(floor), dtype=xx.dtype)
+    if width is None:
+        w = jnp.maximum(jnp.abs(f), jnp.asarray(1.0e-30, dtype=xx.dtype))
+    else:
+        w = jnp.asarray(float(width), dtype=xx.dtype)
+    return f + w * nn.softplus((xx - f) / w)
+
+
+def _smooth_floor_tau(tau: jnp.ndarray, width: float = 1.0e-3) -> jnp.ndarray:
+    """Smooth version of jnp.maximum(tau, 0) with a small fixed width."""
+    tt = jnp.asarray(tau, dtype=jnp.float32)
+    w = jnp.asarray(float(width), dtype=tt.dtype)
+    return w * nn.softplus(tt / w)
+
+
 @contextmanager
 def stage_treecool(treecool_file: Path):
     treecool_file = Path(treecool_file).resolve()
@@ -105,6 +123,8 @@ def make_observable_mapper(
     fgpa_tau_a: float = 1.0,
     fgpa_tau_b: float = 1.6,
     fgpa_rho_floor: float = 1.0e-6,
+    lya_differentiable: bool = False,
+    lya_smooth_eos: bool = False,
 ):
     obs_name = str(observable).lower()
     proj_name = str(projection).lower()
@@ -163,10 +183,13 @@ def make_observable_mapper(
                 logdelta_limits=(float(lya_logdelta_min), float(lya_logdelta_max)),
                 logt_limits=(float(lya_logt_min), float(lya_logt_max)),
                 eos_search_paths=[Path(lya_eos_path)],
+                smooth_eos=bool(lya_smooth_eos),
             )
 
+        lya_diff = bool(lya_differentiable)
+
         def _lya_forward(delta, temp, v_los):
-            n_hi = compute_nhi_number_density(delta, temp, eos_interp)
+            n_hi = compute_nhi_number_density(delta, temp, eos_interp, differentiable=lya_diff)
             tau = tau_cube_from_nhi(
                 n_hi,
                 temp,
@@ -177,8 +200,14 @@ def make_observable_mapper(
                 axis_los=axis,
                 num_integ_pixels=int(max(1, lya_num_integ_pixels)),
                 skewer_batch_size=int(max(1, lya_skewer_batch_size)),
+                differentiable=lya_diff,
             )
-            tau = jnp.maximum(jnp.asarray(tau, dtype=jnp.float32), 0.0)
+            if lya_diff:
+                # C1 smooth-floor instead of hard clamp at 0 (tau is already >= 0
+                # from the erf profile; softplus keeps the gradient continuous).
+                tau = _smooth_floor_tau(jnp.asarray(tau, dtype=jnp.float32))
+            else:
+                tau = jnp.maximum(jnp.asarray(tau, dtype=jnp.float32), 0.0)
             flux = flux_from_tau(tau)
             return project_observable(jnp.asarray(flux, dtype=jnp.float32), proj_name, axis)
 
@@ -186,8 +215,14 @@ def make_observable_mapper(
         _lya_forward = checkpoint(_lya_forward)
 
         def mapper(rho_norm, temp_k, v_los_cms=None):
-            delta = jnp.maximum(_normalize_mean(jnp.asarray(rho_norm, dtype=jnp.float32)), float(lya_delta_floor))
-            temp = jnp.maximum(jnp.asarray(temp_k, dtype=jnp.float32), float(lya_temp_floor_k))
+            delta_raw = _normalize_mean(jnp.asarray(rho_norm, dtype=jnp.float32))
+            temp_raw = jnp.asarray(temp_k, dtype=jnp.float32)
+            if lya_diff:
+                delta = _smooth_floor(delta_raw, float(lya_delta_floor))
+                temp = _smooth_floor(temp_raw, float(lya_temp_floor_k))
+            else:
+                delta = jnp.maximum(delta_raw, float(lya_delta_floor))
+                temp = jnp.maximum(temp_raw, float(lya_temp_floor_k))
             if v_los_cms is None:
                 v_los = jnp.zeros_like(delta)
             else:
@@ -211,6 +246,8 @@ def make_observable_mapper(
             "lya_skewer_batch_size": int(max(1, lya_skewer_batch_size)),
             "lya_treecool_file": str(Path(lya_treecool_file).resolve()),
             "lya_eos_path": str(Path(lya_eos_path).resolve()),
+            "lya_differentiable": bool(lya_differentiable),
+            "lya_smooth_eos": bool(lya_smooth_eos),
         }
         return mapper, meta
 

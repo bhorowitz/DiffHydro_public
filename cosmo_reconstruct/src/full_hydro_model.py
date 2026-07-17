@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import diffhydro as dh
+import functools
 import jax
 import jax.numpy as jnp
 import jax_cosmo as jc
@@ -62,8 +63,28 @@ class FullHydroConfig:
     # dtau <= solver_dt_safety * sim.timestep(U). 0 disables (pure a-schedule, default).
     # Needed for dense cooling-collapse regions where the a-schedule dt violates CFL.
     solver_dt_safety: float = 0.0
+    # Hard floor on the conformal step (0 disables). Caps the *max* step count when the CFL
+    # cap is active; relies on the state ceilings below to keep the floored step stable.
+    dtau_floor: float = 0.0
+    # Per-cell state ceilings (0 disables each). A few numerically over-collapsed cells reach
+    # absurd T / |v|, spiking the per-cell signal speed |v|+c_s -> they dominate the global CFL
+    # min and collapse the timestep (and can diverge). Capping T (-> bounds c_s) and the peculiar
+    # velocity each step bounds max(inv_dt), so the CFL-limited dtau stops collapsing (step count
+    # returns to ~hydro_steps) and the runaway cells stay finite. Set far above the real WHIM
+    # (~1e7 K) so only numerical runaways are touched.
+    hydro_temp_ceiling_k: float = 0.0
+    hydro_velocity_ceiling_kms: float = 0.0
 
     solver: str = "hll"
+    # Reconstruction slope limiter (diffhydro LIMITER_DICT): "MINMOD" (default,
+    # legacy), "VANLEER" (smoother -> less-kinky gradient), "MC", "SUPERBEE".
+    hydro_limiter: str = "MINMOD"
+    # Soft-HLL Riemann smoothing: 0 = standard HLL (default, exact). >0 replaces
+    # the wave-speed clamps min(S_L,0)/max(S_R,0) and the piecewise flux selection
+    # with softplus blends so the flux is C-infinity (no min/max/where kinks). The
+    # value is the transition width as a fraction of the local sound speed; small
+    # (e.g. 0.05-0.2) stays close to HLL while removing the gradient kinks.
+    hydro_riemann_smooth: float = 0.0
     # Hydro time integration: True = MOL/RK2 unsplit (default; all 3 axes reconstructed at once),
     # False = dimensionally-split sweep (one axis at a time -> ~3x less peak memory, needed to fit
     # 512^3 on 4x32GB). Split changes the operator-splitting but is a standard, valid scheme.
@@ -89,6 +110,12 @@ class FullHydroConfig:
     # (= DM particle resolution) instead of the hydro mesh_n. 0 = coupled (grav == hydro). Lets a
     # high-res hydro mesh (e.g. 512^3) use coarser DM gravity (e.g. 256^3) to fit memory.
     jaxdecomp_grav_mesh_n: int = 0
+    # Unified-mesh mode (Option C'): build the hydro shard_map on the SAME 2-axis
+    # ('x','y') mesh as the jaxdecomp gravity (hydro pmesh (pd0,pd1,1), field spec
+    # P(None,'x','y',None)). Lets hydro + gravity co-occur in ONE traced program,
+    # enabling jit/scan/checkpoint BPTT through the distributed rollout. Requires
+    # gravity_backend='jaxdecomp_fft' + field_sharding.
+    unified_mesh: bool = False
     projection_stop_gradient_correction: bool = False
     cooling_update_stop_gradient: bool = False
     hydro_flux_stop_gradient: bool = False
@@ -116,8 +143,41 @@ class FullHydroConfig:
     nyx_heating_scale: float = 1.2
     cooling_rate_scale: float = 1.0
     cooling_temp_floor_k: float = 50.0
+    # UVB/reionization temperature floor (campaign Batch 2, default OFF = legacy).
+    # The equilibrium cooling table cannot reheat diffuse gas within a Hubble time
+    # (relaxation ~1e20 yr at void densities), so gas that never got the reionization
+    # flash rides a cold adiabat to cooling_temp_floor_k while the real IGM sits near
+    # T_eq(nH, z) ~ 1e4 K. This floors T at uvb_temp_floor_scale * T_eq(nH, z)
+    # (primordial heat=cool from the loaded Grackle table), smoothly gated OFF above
+    # uvb_temp_floor_delta_cut in overdensity so dense/metal-cooled gas is untouched.
+    uvb_temp_floor: bool = False
+    uvb_temp_floor_delta_cut: float = 5.0
+    uvb_temp_floor_width_dex: float = 0.3
+    uvb_temp_floor_scale: float = 1.0
     cooling_subcycles: int = 8
     cooling_dtmax_s: float = 1.0e16
+    # Sub-step integrator for the cooling/heating source. "explicit" = forward
+    # Euler (default, legacy). "exponential" = analytic relaxation of the locally
+    # linearized ODE (Et_new = Et + dotE*dt*(exp(k*dt)-1)/(k*dt), k=d dotE/d Et):
+    # unconditionally stable and gives a bounded, contractive reverse-mode
+    # gradient (exp(k*dt) in (0,1) for cooling) instead of explicit Euler's
+    # amplifying 1+k*dt -- smoother gradient for sampling.
+    # "implicit_adjoint" = unconditionally-stable backward-Euler sub-steps with
+    # the EXACT implicit-function-theorem adjoint (exact + smooth gradient, no
+    # stop_gradient surrogate); the correct choice for HMC/NUTS sampling.
+    cooling_integrator: str = "explicit"
+    # Path to a trained NN cooling-rate surrogate npz (src/nn_cooling.py). When
+    # set, replaces the tabulated NyxCoolingRateInterpolator with a C-infinity
+    # tanh MLP whose curvature is training-bounded -> with
+    # cooling_integrator="exponential_exact" the potential is conservative AND
+    # leapfrog-integrable (the table's exact adjoint is chaos-amplified).
+    cooling_nn_npz: str | None = None
+    # >0 enables the C-inf sigmoid dual-energy selector with this relative
+    # blend width around eta (e.g. 0.5). 0 keeps the hard where() (default).
+    dual_energy_smooth: float = 0.0
+    # C1 smoothstep interpolation of the Nyx cooling table (removes the bilinear
+    # C0 gradient-kink comb). Recommended with cooling_integrator="implicit_adjoint".
+    cooling_smooth_table: bool = False
     #NYX COOLING (with UVB but no metallicity dependence)
     nyx_cooling_table_npz: str = "data/nyx_cooling_table.npz"
     nyx_cooling_treecool: str = "diffhydro/nyx_eos/TREECOOL_middle"
@@ -254,11 +314,55 @@ def _paint_dm_velocity_tilde(
     return vx, vy, vz
 
 
+class SoftHLL(dh.HLL):
+    """HLL Riemann solver with C-infinity wave-speed clamps.
+
+    Standard HLL has gradient kinks from min(S_L,0), max(S_R,0) and the nested
+    `where` flux selection. Here the clamps are replaced by softplus blends:
+        S_R =  s*softplus( S_R_raw/s) > 0     (~ max(S_R_raw, 0))
+        S_L = -s*softplus(-S_L_raw/s) < 0     (~ min(S_L_raw, 0))
+    with s = smooth_frac*(cs_L+cs_R). Because S_L<0<S_R STRICTLY, the HLL average
+    flux is smooth everywhere and recovers F_L/F_R in the supersonic limits
+    automatically, so the piecewise selection (and its kinks) is dropped. As
+    smooth_frac -> 0 this converges to standard HLL.
+    """
+
+    def __init__(self, equation_manager, signal_speed, smooth_frac=0.1, **kwargs):
+        super().__init__(equation_manager, signal_speed)
+        self.smooth_frac = float(smooth_frac)
+
+    def _solve_riemann_problem_xi_single_phase(
+            self, primitives_L, primitives_R, conservatives_L, conservatives_R, axis, **kwargs):
+        eq = self.equation_manager
+        F_L = eq.get_fluxes_xi(primitives_L, conservatives_L, axis)
+        F_R = eq.get_fluxes_xi(primitives_R, conservatives_R, axis)
+        uL = primitives_L[self.velocity_ids[axis]]
+        uR = primitives_R[self.velocity_ids[axis]]
+        cs_L = eq.get_speed_of_sound(primitives_L[eq.energy_ids], primitives_L[eq.mass_ids])
+        cs_R = eq.get_speed_of_sound(primitives_R[eq.energy_ids], primitives_R[eq.mass_ids])
+        S_L_raw, S_R_raw = self.signal_speed(
+            uL, uR, cs_L, cs_R,
+            rho_L=primitives_L[self.mass_ids], rho_R=primitives_R[self.mass_ids],
+            p_L=primitives_L[self.energy_ids], p_R=primitives_R[self.energy_ids],
+            gamma=eq.gamma,
+        )
+        s = self.smooth_frac * (cs_L + cs_R + self.eps)
+        S_R = s * jnp.logaddexp(0.0, S_R_raw / s)    # ~ max(S_R_raw, 0), > 0
+        S_L = -s * jnp.logaddexp(0.0, -S_L_raw / s)  # ~ min(S_L_raw, 0), < 0
+        denom = S_R - S_L  # strictly positive -> no guard / no where needed
+        F_hll = (
+            S_R * F_L - S_L * F_R + S_L * S_R * (conservatives_R - conservatives_L)
+        ) / denom
+        return F_hll, None, None
+
+
 def _build_hydrosim(
     eq,
     forces,
     *,
     solver_name: str,
+    limiter: str = "MINMOD",
+    riemann_smooth: float = 0.0,
     use_mol: bool = True,
     dx_o: float = 1.0,
     enable_vacuum_momentum_cap: bool = False,
@@ -271,6 +375,8 @@ def _build_hydrosim(
     hydro_repair_max_kinetic_to_thermal_ratio: float = 1.0e6,
     hydro_flux_stop_gradient: bool = False,
     pmesh_shape: tuple[int, int, int] = (1, 1, 1),
+    mesh=None,
+    field_spec=None,
 ):
     ss = dh.signal_speed_Einfeldt
     sname = solver_name.lower()
@@ -279,7 +385,10 @@ def _build_hydrosim(
     elif sname in ("laxfriedrichs", "lf"):
         riemann_solver = dh.LaxFriedrichs(equation_manager=eq, signal_speed=ss)
     elif sname == "hll":
-        riemann_solver = dh.HLL(equation_manager=eq, signal_speed=ss)
+        if float(riemann_smooth) > 0.0:
+            riemann_solver = SoftHLL(equation_manager=eq, signal_speed=ss, smooth_frac=float(riemann_smooth))
+        else:
+            riemann_solver = dh.HLL(equation_manager=eq, signal_speed=ss)
     elif sname in ("nyx_riemann", "nyx"):
         riemann_solver = dh.NyxRiemannEuler(
             equation_manager=eq,
@@ -292,7 +401,7 @@ def _build_hydrosim(
     conv_flux = dh.ConvectiveFlux(
         eq,
         riemann_solver,
-        dh.PPM_CW(limiter="MINMOD", steepen=False),
+        dh.PPM_CW(limiter=str(limiter), steepen=False),
         positivity=True,
     )
     conv_flux.dx_o = float(dx_o)
@@ -304,6 +413,8 @@ def _build_hydrosim(
         forces=list(forces),
         use_mol=bool(use_mol),
         pmesh_shape=tuple(int(v) for v in pmesh_shape),
+        mesh=mesh,
+        field_spec=field_spec,
     )
     sim.dx_o = float(dx_o)
     sim.enable_vacuum_momentum_cap = bool(enable_vacuum_momentum_cap)
@@ -319,6 +430,132 @@ def _build_hydrosim(
         if hasattr(flux, "dx_o"):
             flux.dx_o = float(dx_o)
     return sim
+
+
+def _stable_temperature_kelvin(rho_cgs, p_cgs, *, mu, mH_cgs, kB_cgs, rho_unit_cgs, p_unit_cgs, eps):
+    """T = (mu mH / kB) * p_cgs / rho_cgs, evaluated via O(1) code-unit ratios.
+
+    rho_cgs ~ 1e-30 g/cm^3, so the direct cgs division has a forward value
+    (~1e30) that fits float32 but a reverse-mode term ~1/rho_cgs^2 (~1e50+) that
+    under/overflows float32 -> NaN gradient on every cell (rho_cgs**2 flushes to
+    0). Since p_unit_cgs / rho_unit_cgs == vel_unit_cms^2 exactly, dividing the
+    O(1) physical (code-unit) density/pressure is value-identical while keeping
+    all gradient intermediates representable.
+    """
+    rho_phys = rho_cgs / rho_unit_cgs
+    p_phys = p_cgs / p_unit_cgs
+    floor_phys = eps / rho_unit_cgs
+    return (mu * mH_cgs / kB_cgs) * (p_unit_cgs / rho_unit_cgs) * p_phys / jnp.maximum(rho_phys, floor_phys)
+
+
+def _safe_denom(x, eps=1.0e-30):
+    """1/x-safe denominator: replace |x|<eps by +/-eps keeping the sign."""
+    return jnp.where(jnp.abs(x) < eps, jnp.where(x >= 0, eps, -eps), x)
+
+
+def _implicit_energy_newton(rate_fn, E0, rho_cgs, z, dt, E_floor, n_newton=8):
+    """Backward-Euler solve of  E1 = E0 + dt*rate_fn(E1, rho, z)  per cell.
+
+    All Newton algebra runs in per-cell SCALED units: e = E/A with
+    A = max(E0, E_floor), so the residual e - e0 - f, the scaled rate
+    f = dt*R/A (the fractional energy change per sub-step), and the Jacobian
+    1 - df/de are all O(1). cgs energies here are ~1e-18 erg/cm^3 and their
+    jvp tangents reach ~1e22 when seeded with ones -- right where float32
+    under/overflows and shreds gradient reproducibility. Seeding the rate
+    derivative in e-space (tangent A instead of 1) keeps every intermediate
+    representable, pure float32, no x64 needed.
+    e is clamped to >= e_floor each iteration so T stays positive and the table
+    never sees a non-physical state (a Newton overshoot -> T<0 -> NaN).
+    """
+    A = jnp.maximum(jnp.maximum(E0, E_floor), jnp.asarray(1.0e-30, E0.dtype))
+    e0 = E0 / A                      # ~1 by construction
+    ef = E_floor / A                 # <=1
+    def f_scaled(e):
+        # fractional energy change per sub-step; O(1) for a resolved sub-step
+        return dt * rate_fn(A * e, rho_cgs, z) / A
+    e = jnp.maximum(e0, ef)
+    for _ in range(int(n_newton)):
+        # value and derivative of the scaled rate in ONE jvp, seeded in e-space
+        f, f_e = jax.jvp(f_scaled, (e,), (jnp.ones_like(e),))
+        # saturated/extreme cells (T or rho clipped at a table edge) can produce
+        # inf*0=NaN tangents; the true local sensitivity there is 0.
+        f = jnp.nan_to_num(f, nan=0.0, posinf=0.0, neginf=0.0)
+        f_e = jnp.nan_to_num(f_e, nan=0.0, posinf=0.0, neginf=0.0)
+        F = e - e0 - f
+        dF = 1.0 - f_e
+        e = jnp.maximum(e - F / _safe_denom(dF), ef)
+    return A * e
+
+
+@functools.partial(jax.custom_vjp, nondiff_argnums=(0,))
+def _nyx_implicit_energy_step(rate_fn, E0, rho_cgs, z, dt, E_floor):
+    """One implicit (backward-Euler) cooling sub-step with an EXACT, smooth VJP.
+
+    Forward: solve E1 = E0 + dt*rate_fn(E1, rho, z) (Newton, per-cell O(1)
+    scaled units -- see _implicit_energy_newton).
+    Backward: the implicit-function-theorem adjoint of that fixed point --
+      dE1/dE0   = 1 / (1 - dt*R_E)
+      dE1/drho  = dt*R_rho / (1 - dt*R_E)
+    where R_E = d(rate)/dE1, R_rho = d(rate)/drho are FIRST derivatives of the
+    rate at the converged E1 (one forward-mode jvp each -- no 2nd-order AD through
+    the table, hence no NaN, and no stop_gradient bias). The adjoint algebra is
+    likewise formed on O(1) scaled quantities so float32 stays reproducible.
+    This makes grad(U) the exact gradient of the value U for HMC, unlike the
+    exponential-phi surrogate.
+    Only `rate_fn` is nondiff (a callable); z/dt/E_floor are differentiable args
+    carried for the solve but get zero cotangents (none is sampled).
+    """
+    return _implicit_energy_newton(rate_fn, E0, rho_cgs, z, dt, E_floor)
+
+
+def _nyx_implicit_step_fwd(rate_fn, E0, rho_cgs, z, dt, E_floor):
+    E1 = _implicit_energy_newton(rate_fn, E0, rho_cgs, z, dt, E_floor)
+    return E1, (E1, rho_cgs, z, dt, E_floor)
+
+
+def _nyx_implicit_step_bwd(rate_fn, residual, g):
+    E1, rho_cgs, z, dt, E_floor = residual
+    # Same per-cell O(1) scaling as the forward Newton: e = E/A. All adjoint
+    # algebra (Jacobian, denominators, sensitivities) is formed on O(1) scaled
+    # quantities; the only large/small factors are applied once at the end.
+    A = jnp.maximum(jnp.maximum(E1, E_floor), jnp.asarray(1.0e-30, E1.dtype))
+    e1 = E1 / A
+    # d(scaled rate)/de at the converged solution, seeded in e-space (tangent 1
+    # in e == tangent A in E -> O(1) intermediates through the table).
+    def f_of_e(e):
+        return dt * rate_fn(A * e, rho_cgs, z) / A
+    _, f_e = jax.jvp(f_of_e, (e1,), (jnp.ones_like(e1),))
+    # d(scaled rate)/dlog(rho), seeded with tangent rho (O(1) through log-density
+    # table coordinates); converts to d/drho by a single 1/rho at the end.
+    def f_of_rho(r):
+        return dt * rate_fn(A * e1, r, z) / A
+    _, f_lrho = jax.jvp(f_of_rho, (rho_cgs,), (rho_cgs,))
+    # nan_to_num guards saturated cells (T/rho clipped at a table edge -> the
+    # true sensitivity is 0 but float32 can form inf*0=NaN in the tangent).
+    f_e = jnp.nan_to_num(f_e, nan=0.0, posinf=0.0, neginf=0.0)
+    f_lrho = jnp.nan_to_num(f_lrho, nan=0.0, posinf=0.0, neginf=0.0)
+    # IFT adjoint of e1 = e0 + f(e1, log rho):
+    #   de1/de0     = 1/(1 - f_e)
+    #   de1/dlogrho = f_lrho/(1 - f_e)
+    # For a dissipative step f_e<=0 -> denom>=1 (contractive). Limit f_e<=0 so a
+    # numerically-positive f_e (heating cells / table noise) cannot drive the
+    # denominator toward 0 and blow the gradient up.
+    f_e = jnp.minimum(f_e, 0.0)
+    denom = 1.0 - f_e
+    # dE1/dE0 = de1/de0 (A cancels); dE1/drho = A*(de1/dlogrho)/rho.
+    gE0 = g / denom
+    grho = gE0 * f_lrho * (A / jnp.maximum(rho_cgs, jnp.asarray(1.0e-35, rho_cgs.dtype)))
+    # cells pinned to the energy floor have a (sub)gradient of 0 (E1 no longer
+    # depends on the inputs there) -- zero their cotangents to stay consistent.
+    active = (E1 > E_floor * (1.0 + 1.0e-4)).astype(g.dtype)
+    gE0 = jnp.nan_to_num(gE0 * active, nan=0.0, posinf=0.0, neginf=0.0)
+    grho = jnp.nan_to_num(grho * active, nan=0.0, posinf=0.0, neginf=0.0)
+    # cotangents for (E0, rho_cgs, z, dt, E_floor); only E0, rho_cgs matter.
+    return (gE0.astype(g.dtype), grho.astype(g.dtype),
+            jnp.zeros_like(z), jnp.zeros_like(dt), jnp.zeros_like(E_floor))
+
+
+_nyx_implicit_energy_step.defvjp(_nyx_implicit_step_fwd, _nyx_implicit_step_bwd)
 
 
 class CosmologicalHydrogenCoolingForce:
@@ -392,7 +629,9 @@ class CosmologicalHydrogenCoolingForce:
 
     def temperature_kelvin_from_code(self, rho_code, p_code, a):
         _, _, rho_cgs, p_cgs = self._code_thermo_to_cgs(rho_code, p_code, a)
-        t_kelvin = (self.mu * self.mH_cgs / self.kB_cgs) * p_cgs / jnp.maximum(rho_cgs, self.eps)
+        t_kelvin = _stable_temperature_kelvin(
+            rho_cgs, p_cgs, mu=self.mu, mH_cgs=self.mH_cgs, kB_cgs=self.kB_cgs,
+            rho_unit_cgs=self.rho_unit_cgs, p_unit_cgs=self.p_unit_cgs, eps=self.eps)
         return jnp.maximum(t_kelvin, self.temp_floor_k)
 
     def cooling_rate_cgs_from_code(self, rho_code, p_code, a):
@@ -426,7 +665,9 @@ class CosmologicalHydrogenCoolingForce:
 
         def body(_, Et_cur):
             p_cgs_cur = (self.gamma - 1.0) * jnp.maximum(Et_cur, self.eps)
-            T_cur = (self.mu * self.mH_cgs / self.kB_cgs) * p_cgs_cur / jnp.maximum(rho_cgs, self.eps)
+            T_cur = _stable_temperature_kelvin(
+                rho_cgs, p_cgs_cur, mu=self.mu, mH_cgs=self.mH_cgs, kB_cgs=self.kB_cgs,
+                rho_unit_cgs=self.rho_unit_cgs, p_unit_cgs=self.p_unit_cgs, eps=self.eps)
             logT = jnp.log10(jnp.maximum(T_cur, self.temp_floor_k))
             logLambda = self._interp_log_lambda(logT)
             Lambda = 10.0**logLambda
@@ -475,9 +716,20 @@ class NyxTabulatedCoolingForce:
         stop_rate_grad: bool = False,
         stop_update_grad: bool = False,
         eps: float = 1.0e-40,
+        integrator: str = "explicit",
+        cooling_step_mode: str = None,
+        smooth_table: bool = False,
+        newton_iters: int = 8,
     ):
         self.eq = equation_manager
         self.nyx = nyx_interp
+        # `cooling_step_mode` is an alias for `integrator` (explicit | exponential |
+        # implicit_adjoint) kept for the standalone implicit-adjoint test suite.
+        self.integrator = str(cooling_step_mode if cooling_step_mode is not None else integrator)
+        self.newton_iters = int(newton_iters)
+        # C1 smoothstep table interpolation -> smooth cooling-rate derivatives for
+        # the implicit-adjoint gradient (default off preserves bilinear behavior).
+        self.nyx.smooth_interp = bool(smooth_table)
         self.rho_unit_cgs = float(rho_unit_cgs)
         self.vel_unit_cms = float(vel_unit_cms)
         self.p_unit_cgs = float(rho_unit_cgs) * float(vel_unit_cms) * float(vel_unit_cms)
@@ -511,7 +763,9 @@ class NyxTabulatedCoolingForce:
 
     def temperature_kelvin_from_code(self, rho_code, p_code, a):
         _, _, rho_cgs, p_cgs = self._code_thermo_to_cgs(rho_code, p_code, a)
-        t_kelvin = (self.mu * self.mH_cgs / self.kB_cgs) * p_cgs / jnp.maximum(rho_cgs, self.eps)
+        t_kelvin = _stable_temperature_kelvin(
+            rho_cgs, p_cgs, mu=self.mu, mH_cgs=self.mH_cgs, kB_cgs=self.kB_cgs,
+            rho_unit_cgs=self.rho_unit_cgs, p_unit_cgs=self.p_unit_cgs, eps=self.eps)
         return jnp.maximum(t_kelvin, self.temp_floor_k)
 
     def cooling_rate_cgs_from_code(self, rho_code, p_code, a):
@@ -526,6 +780,26 @@ class NyxTabulatedCoolingForce:
             cool_cgs = jax.lax.stop_gradient(cool_cgs)
         dotE = self.heating_rate_scale * heat_cgs - self.cooling_rate_scale * cool_cgs
         return jnp.nan_to_num(dotE, nan=0.0, posinf=0.0, neginf=0.0)
+
+    def _rate_from_energy_cgs(self, E_cgs, rho_cgs, z):
+        """Net heating-cooling rate dotE (cgs) as a function of internal energy
+        density E_cgs and rho_cgs. T is recovered from E via
+        E = rho*kB*T/(mu*mH*(gamma-1)); works in the caller's dtype (float64 in
+        the implicit solve). Used by the implicit-adjoint integrator."""
+        rho_safe = jnp.maximum(rho_cgs, self.eps)
+        T = (self.gamma - 1.0) * E_cgs * (self.mu * self.mH_cgs) / (self.kB_cgs * rho_safe)
+        T = jnp.maximum(T, self.temp_floor_k)
+        heat_cgs, cool_cgs, _ = self.nyx.evaluate(rho_cgs, T, z)
+        heat_cgs = jnp.nan_to_num(heat_cgs, nan=0.0, posinf=0.0, neginf=0.0)
+        cool_cgs = jnp.nan_to_num(cool_cgs, nan=0.0, posinf=0.0, neginf=0.0)
+        dotE = self.heating_rate_scale * heat_cgs - self.cooling_rate_scale * cool_cgs
+        return jnp.nan_to_num(dotE, nan=0.0, posinf=0.0, neginf=0.0)
+
+    def _implicit_energy_solve(self, E0, rho_cgs, z, dt, E_floor):
+        """One implicit backward-Euler cooling sub-step with the exact IFT adjoint
+        (see _nyx_implicit_energy_step), then apply the energy floor."""
+        E1 = _nyx_implicit_energy_step(self._rate_from_energy_cgs, E0, rho_cgs, z, dt, E_floor)
+        return jnp.maximum(E1, E_floor)
 
     def force(self, i_step, U, params, dtau):
         del i_step
@@ -545,21 +819,123 @@ class NyxTabulatedCoolingForce:
             self.mu * self.mH_cgs * (self.gamma - 1.0)
         )
 
-        def body(_, Et_cur):
-            p_cgs_cur = (self.gamma - 1.0) * jnp.maximum(Et_cur, self.eps)
-            T_cur = (self.mu * self.mH_cgs / self.kB_cgs) * p_cgs_cur / jnp.maximum(rho_cgs, self.eps)
-            heat_cgs, cool_cgs, _ = self.nyx.evaluate(rho_cgs, T_cur, z)
+        exponential = self.integrator in ("exponential", "exponential_exact")
+        # exponential_exact: SAME forward value as `exponential` (same surrogate
+        # posterior), but the gradient flows through dotE, k and phi (no
+        # stop_gradient), so the AD force IS the gradient of the evaluated
+        # value -- a conservative force, as leapfrog-based MH samplers require
+        # (the stop_gradient surrogate force does ~0.4 nats of phantom work per
+        # unit path length, measured by --energy-probe force, which vetoes any
+        # trajectory longer than ~2 sampling-coord units). Requires 2nd-order
+        # AD through the cooling table: pair with cooling_smooth_table=True
+        # (C1 interpolation) so d(dotE)/dT is continuous.
+        exact_grad = (self.integrator == "exponential_exact")
+
+        def _dotE_of_T(T):
+            heat_cgs, cool_cgs, _ = self.nyx.evaluate(rho_cgs, T, z)
             heat_cgs = jnp.nan_to_num(heat_cgs, nan=0.0, posinf=0.0, neginf=0.0)
             cool_cgs = jnp.nan_to_num(cool_cgs, nan=0.0, posinf=0.0, neginf=0.0)
-            if self.stop_rate_grad:
-                heat_cgs = jax.lax.stop_gradient(heat_cgs)
-                cool_cgs = jax.lax.stop_gradient(cool_cgs)
-            dotE = self.heating_rate_scale * heat_cgs - self.cooling_rate_scale * cool_cgs
-            dotE = jnp.nan_to_num(dotE, nan=0.0, posinf=0.0, neginf=0.0)
-            Et_new = jnp.maximum(Et_cur + dotE * dt_sub, Et_floor)
+            d = self.heating_rate_scale * heat_cgs - self.cooling_rate_scale * cool_cgs
+            return jnp.nan_to_num(d, nan=0.0, posinf=0.0, neginf=0.0)
+
+        def body(_, Et_cur):
+            p_cgs_cur = (self.gamma - 1.0) * jnp.maximum(Et_cur, self.eps)
+            T_cur = _stable_temperature_kelvin(
+                rho_cgs, p_cgs_cur, mu=self.mu, mH_cgs=self.mH_cgs, kB_cgs=self.kB_cgs,
+                rho_unit_cgs=self.rho_unit_cgs, p_unit_cgs=self.p_unit_cgs, eps=self.eps)
+            if exact_grad:
+                # exponential_exact: same analytic-relaxation update as the
+                # `exponential` branch below, but the gradient flows through
+                # dotE, k and phi so the AD force IS the gradient of the
+                # evaluated value (conservative -- required by leapfrog MH).
+                # Computed in per-cell O(1) rescaled variables e = Et/A with
+                # the huge dt/A factor FUSED into the differentiated function:
+                # the naive formulation materializes backward partials like
+                # (T/Et)^2 * dt ~ 1e42 which overflow float32 -> NaN. Here
+                # dg/de = k*dt exactly, with all AD intermediates O(1..1e28).
+                # A is a stop_gradient CONSTANT scale: the value is
+                # A-independent, so the gradient stays exact.
+                # Floor the scale at the PHYSICAL energy floor, not machine eps:
+                # cells at Et ~ eps=1e-40 (reachable under sharp limiters) give
+                # dtA = dt_sub/A ~ 1e13/1e-40 = f32 inf -> NaN gradient.
+                A = jax.lax.stop_gradient(
+                    jnp.maximum(Et_cur, jnp.maximum(Et_floor, jnp.asarray(1.0e-20, Et_cur.dtype)))
+                )
+                dtA = dt_sub / A
+                e_cur = Et_cur / A
+
+                def _g_of_e(e):
+                    p_e = (self.gamma - 1.0) * jnp.maximum(A * e, self.eps)
+                    T_e = _stable_temperature_kelvin(
+                        rho_cgs, p_e, mu=self.mu, mH_cgs=self.mH_cgs,
+                        kB_cgs=self.kB_cgs, rho_unit_cgs=self.rho_unit_cgs,
+                        p_unit_cgs=self.p_unit_cgs, eps=self.eps)
+                    return _dotE_of_T(T_e) * dtA
+
+                g, kdt = jax.jvp(_g_of_e, (e_cur,), (jnp.ones_like(e_cur),))
+                kdt = jnp.clip(kdt, -50.0, 50.0)
+                kdt_safe = jnp.where(jnp.abs(kdt) > 1.0e-4, kdt, 1.0)
+                phi = jnp.where(jnp.abs(kdt) > 1.0e-4, jnp.expm1(kdt) / kdt_safe, 1.0 + 0.5 * kdt)
+                Et_new = A * jnp.maximum(e_cur + g * phi, Et_floor / A)
+            elif exponential:
+                # Exponential (analytic-relaxation) sub-step of the locally
+                # linearized cooling ODE dEt/dt = dotE0 + k*(Et-Et0):
+                #   Et_new = Et + dotE*dt * (exp(k*dt)-1)/(k*dt),  k = d dotE/d Et.
+                # k = (d dotE/dT) * (dT/dEt); T is linear in Et so dT/dEt = T/Et.
+                # The factor (exp(k*dt)-1)/(k*dt) -> 1 as k->0 (recovers Euler) and
+                # is bounded in (0,1) for k<0 (cooling) -> unconditionally stable,
+                # bounded contractive gradient.
+                dotE, ddotE_dT = jax.jvp(_dotE_of_T, (T_cur,), (jnp.ones_like(T_cur),))
+                if self.stop_rate_grad:
+                    dotE = jax.lax.stop_gradient(dotE)
+                # The relaxation coefficient is a numerically-derived RATE, not part
+                # of the differentiated state map: stop its gradient. This (a) makes
+                # the reverse pass first-order (no second-order AD through the table
+                # -> no NaN), and (b) yields exactly the desired smooth, bounded
+                # backward: d Et_new/d inputs = d Et_cur + dt*phi*d dotE, with the
+                # contractive phi in (0,1) for cooling damping the gradient.
+                k = jax.lax.stop_gradient(ddotE_dT * T_cur / jnp.maximum(Et_cur, self.eps))
+                kdt = jnp.clip(k * dt_sub, -50.0, 50.0)
+                kdt_safe = jnp.where(jnp.abs(kdt) > 1.0e-4, kdt, 1.0)
+                phi = jax.lax.stop_gradient(
+                    jnp.where(jnp.abs(kdt) > 1.0e-4, jnp.expm1(kdt) / kdt_safe, 1.0 + 0.5 * kdt)
+                )
+                Et_new = jnp.maximum(Et_cur + dotE * dt_sub * phi, Et_floor)
+            else:
+                dotE = _dotE_of_T(T_cur)
+                if self.stop_rate_grad:
+                    dotE = jax.lax.stop_gradient(dotE)
+                Et_new = jnp.maximum(Et_cur + dotE * dt_sub, Et_floor)
             return Et_new
 
-        Et_final = jax.lax.fori_loop(0, self.subcycles, body, Et)
+        if exact_grad:
+            # Unrolled + per-substep remat: reverse-mode through the subcycle
+            # fori_loop stores every substep's internals (with the NN rate
+            # surrogate that is a ~15 GiB single tensor at 64^3 x 128 steps);
+            # checkpointing the substep body stores only Et and recomputes.
+            body_ckpt = jax.checkpoint(lambda e: body(0, e))
+            Et_final = Et
+            for _ in range(self.subcycles):
+                Et_final = body_ckpt(Et_final)
+        elif self.integrator == "implicit_adjoint":
+            # Unconditionally-stable backward-Euler sub-steps with the exact
+            # implicit-function-theorem adjoint (exact + smooth gradient, no
+            # stop_gradient surrogate). Unrolled so the per-substep custom_vjp
+            # chain composes explicitly under reverse-mode.
+            Et_cur = Et
+            for _ in range(self.subcycles):
+                Et_cur = self._implicit_energy_solve(Et_cur, rho_cgs, z, dt_sub, Et_floor)
+            Et_final = Et_cur
+            # Boundary finite-guard: away from the MAP (e.g. during unadjusted
+            # MCLMC warmup exploration) a single cell can drive the implicit
+            # solve non-finite; unadjusted dynamics have no accept/reject to
+            # reject it, so one NaN poisons the whole field and the run dies.
+            # Fall back that cell to the (finite) pre-cooling energy. `where`
+            # cuts the NaN branch so no non-finite value or cotangent leaks
+            # forward or backward from those cells.
+            Et_final = jnp.where(jnp.isfinite(Et_final), Et_final, Et)
+        else:
+            Et_final = jax.lax.fori_loop(0, self.subcycles, body, Et)
         p_cgs_new = (self.gamma - 1.0) * jnp.maximum(Et_final, self.eps)
         p_phys_new = p_cgs_new / self.p_unit_cgs
         p_code_new = cosmo_conv.pressure_phys_to_code(p_phys_new, a)
@@ -572,6 +948,12 @@ class NyxTabulatedCoolingForce:
         U_new = self.eq.get_conservatives_from_primitives(W_new)
         valid_mask = _raw_hydro_cell_valid_mask(U, self.i_rho)
         U_new = jnp.where(valid_mask[jnp.newaxis, ...], U_new, U)
+        # Final cell-wise finite-guard: any cell whose updated conservative
+        # state came out non-finite falls back to the (finite) input state, so
+        # a single bad cooling cell cannot poison the whole loss/gradient. This
+        # matters for unadjusted MCLMC, which cannot reject a NaN proposal.
+        finite_mask = jnp.all(jnp.isfinite(U_new), axis=0)
+        U_new = jnp.where(finite_mask[jnp.newaxis, ...], U_new, U)
         if self.stop_update_grad:
             U_new = U + jax.lax.stop_gradient(U_new - U)
         return U_new, params
@@ -599,9 +981,19 @@ class GrackleTabulatedCoolingForce:
         stop_rate_grad: bool = False,
         stop_update_grad: bool = False,
         eps: float = 1.0e-40,
+        integrator: str = "explicit",
+        uvb_floor: bool = False,
+        uvb_floor_delta_cut: float = 5.0,
+        uvb_floor_width_dex: float = 0.3,
+        uvb_floor_scale: float = 1.0,
     ):
         self.eq = equation_manager
         self.grackle = grackle_interp
+        # "explicit" = forward-Euler subcycles (fast but STIFF-UNSTABLE for a correct
+        # cooling table; the old clipped table masked this). Anything else uses the
+        # unconditionally-stable implicit backward-Euler step with the exact IFT
+        # adjoint (_nyx_implicit_energy_step), same as the Nyx force.
+        self.integrator = str(integrator)
         self.rho_unit_cgs = float(rho_unit_cgs)
         self.vel_unit_cms = float(vel_unit_cms)
         self.p_unit_cgs = float(rho_unit_cgs) * float(vel_unit_cms) * float(vel_unit_cms)
@@ -624,6 +1016,59 @@ class GrackleTabulatedCoolingForce:
         self.mH_cgs = 1.6735575e-24
         self.kB_cgs = 1.380649e-16
 
+        # UVB/reionization temperature floor: precompute logT_eq(z, lognH) where the
+        # PRIMORDIAL heat=cool (first downward crossing) on the table nodes. Constant
+        # w.r.t. the state -> no gradient through the floor value itself; the floor
+        # enters via jnp.maximum (clean subgradient) with a smooth overdensity gate.
+        self.uvb_floor = bool(uvb_floor)
+        self.uvb_floor_delta_cut = float(uvb_floor_delta_cut)
+        self.uvb_floor_width_dex = float(max(uvb_floor_width_dex, 1.0e-3))
+        self.uvb_floor_scale = float(uvb_floor_scale)
+        if self.uvb_floor:
+            import numpy as _np
+            zN = _np.asarray(self.grackle.z_nodes, _np.float64)
+            nN = _np.asarray(self.grackle.lognH_nodes, _np.float64)
+            tN = _np.asarray(self.grackle.logT_nodes, _np.float64)
+            heat = _np.asarray(getattr(self.grackle, "heat_prim_cgs",
+                                        getattr(self.grackle, "heat_prim")), _np.float64)
+            cool = _np.asarray(getattr(self.grackle, "cool_prim_cgs",
+                                       getattr(self.grackle, "cool_prim")), _np.float64)
+            logTeq = _np.full((len(zN), len(nN)), tN[0])
+            for i in range(len(zN)):
+                for j in range(len(nN)):
+                    net = heat[i, j, :] - cool[i, j, :]
+                    s = _np.sign(net)
+                    cr = _np.where((s[:-1] > 0) & (s[1:] <= 0))[0]
+                    if cr.size:
+                        k = cr[0]
+                        f = net[k] / (net[k] - net[k + 1] + 1e-300)
+                        logTeq[i, j] = tN[k] + f * (tN[k + 1] - tN[k])
+                    elif _np.all(s >= 0):
+                        logTeq[i, j] = tN[-1]
+            self._uvb_z_nodes = jnp.asarray(zN, dtype=jnp.float32)
+            self._uvb_lognH_nodes = jnp.asarray(nN, dtype=jnp.float32)
+            self._uvb_logTeq = jnp.asarray(logTeq, dtype=jnp.float32)
+
+    def _uvb_floor_temp_k(self, nH_cgs, rho_code, z):
+        """Per-cell UVB floor temperature: uvb_floor_scale * T_eq(nH, z), smoothly
+        gated off above uvb_floor_delta_cut in overdensity (dense/metal-cooled gas
+        untouched). Never below the global temp_floor_k."""
+        zc = jnp.clip(jnp.asarray(z, dtype=jnp.float32),
+                      self._uvb_z_nodes[0], self._uvb_z_nodes[-1])
+        iz = jnp.clip(jnp.searchsorted(self._uvb_z_nodes, zc) - 1,
+                      0, self._uvb_z_nodes.shape[0] - 2)
+        w = (zc - self._uvb_z_nodes[iz]) / jnp.maximum(
+            self._uvb_z_nodes[iz + 1] - self._uvb_z_nodes[iz], 1e-6)
+        teq_row = (1.0 - w) * self._uvb_logTeq[iz] + w * self._uvb_logTeq[iz + 1]
+        lognH = jnp.log10(jnp.maximum(nH_cgs, 1.0e-30))
+        logTeq = jnp.interp(lognH, self._uvb_lognH_nodes, teq_row)
+        delta = rho_code / (jnp.mean(rho_code) + 1.0e-30)
+        gate = jax.nn.sigmoid(
+            (jnp.log10(jnp.asarray(self.uvb_floor_delta_cut, dtype=jnp.float32))
+             - jnp.log10(jnp.maximum(delta, 1.0e-12))) / self.uvb_floor_width_dex)
+        t_eq = jnp.power(10.0, logTeq) * self.uvb_floor_scale
+        return jnp.maximum(self.temp_floor_k, t_eq * gate)
+
     def timestep(self, U):
         del U
         return jnp.asarray(1.0e10, dtype=jnp.float32)
@@ -636,7 +1081,10 @@ class GrackleTabulatedCoolingForce:
         return rho_phys, p_phys, rho_cgs, p_cgs
 
     def _temperature_from_mu(self, rho_cgs, p_cgs, mu_eff):
-        t_kelvin = (jnp.maximum(mu_eff, 1.0e-8) * self.mH_cgs / self.kB_cgs) * p_cgs / jnp.maximum(rho_cgs, self.eps)
+        t_kelvin = _stable_temperature_kelvin(
+            rho_cgs, p_cgs, mu=jnp.maximum(mu_eff, 1.0e-8), mH_cgs=self.mH_cgs,
+            kB_cgs=self.kB_cgs, rho_unit_cgs=self.rho_unit_cgs,
+            p_unit_cgs=self.p_unit_cgs, eps=self.eps)
         return jnp.maximum(t_kelvin, self.temp_floor_k)
 
     def _temperature_and_mu(self, rho_code, p_code, a):
@@ -700,7 +1148,11 @@ class GrackleTabulatedCoolingForce:
             z_ratio = jax.lax.stop_gradient(z_ratio)
 
         Et = p_cgs / (self.gamma - 1.0)
-        Et_floor = rho_cgs * self.kB_cgs * self.temp_floor_k / (
+        # Floor temperature: global scalar, or per-cell UVB floor T_eq(nH,z) when
+        # enabled (uvb_floor). Same energy-floor formula either way.
+        _t_floor = (self._uvb_floor_temp_k(nH_cgs, rho_code, z) if self.uvb_floor
+                    else self.temp_floor_k)
+        Et_floor = rho_cgs * self.kB_cgs * _t_floor / (
             jnp.maximum(mu_eff, 1.0e-8) * self.mH_cgs * (self.gamma - 1.0)
         )
 
@@ -712,10 +1164,46 @@ class GrackleTabulatedCoolingForce:
         heat_scale = self.heating_rate_scale * jnp.asarray(
             _hyper.get("heating_rate_mult", 1.0), dtype=jnp.float32)
 
+        # Exponential (analytic-relaxation) integrator, ported from the Nyx force:
+        # net rate as a function of T at fixed rho, differentiated w.r.t. T so the
+        # local relaxation coefficient k = (d dotE/dT)*(dT/dEt) is known. Uses the
+        # fixed mu_eff for E<->T (use_mu_table refinement dropped here, as in the
+        # implicit branch). "exponential_exact" shares the identical forward value.
+        exponential = self.integrator in ("exponential", "exponential_exact")
+
+        def _dotE_of_T(T):
+            # NO stop_gradient here: the exponential branch needs the REAL d(dotE)/dT
+            # from jax.jvp to form the relaxation coefficient k. (Applying stop_gradient
+            # inside this closure zeros the jvp tangent -> k=0 -> phi=1 -> the update
+            # silently degenerates to explicit Euler.) The outer-gradient detachment is
+            # applied AFTER the jvp (to dotE and k below), mirroring the Nyx force.
+            heat_prim, cool_prim, cool_metal_solar, _ = self.grackle.evaluate(nH_cgs, T, z)
+            d = (heat_scale * heat_prim - cool_scale * cool_prim
+                 - cool_scale * self.metal_cooling_scale * z_ratio * cool_metal_solar)
+            return jnp.nan_to_num(d, nan=0.0, posinf=0.0, neginf=0.0)
+
         def body(_, Et_cur):
             p_cgs_cur = (self.gamma - 1.0) * jnp.maximum(Et_cur, self.eps)
-            temp_guess = self._temperature_from_mu(rho_cgs, p_cgs_cur, mu_eff)
-            heat_prim, cool_prim, cool_metal_solar, mu_tab = self.grackle.evaluate(nH_cgs, temp_guess, z)
+            temp_cur = self._temperature_from_mu(rho_cgs, p_cgs_cur, mu_eff)
+            if exponential:
+                # dEt/dt = dotE0 + k*(Et-Et0);  Et_new = Et + dotE*dt*(e^{kdt}-1)/(kdt).
+                # k = (d dotE/dT)*(T/Et) since T is linear in Et. For cooling (k<0) the
+                # factor phi in (0,1) -> unconditionally stable, energy asymptotes to
+                # equilibrium and can never overshoot negative (kills the explicit
+                # runaway collapse). Recovers Euler as k->0. k and phi are RATES, not
+                # part of the differentiated state map -> stop_gradient (first-order,
+                # bounded contractive backward; no 2nd-order AD through the table).
+                dotE, ddotE_dT = jax.jvp(_dotE_of_T, (temp_cur,), (jnp.ones_like(temp_cur),))
+                if self.stop_rate_grad:
+                    dotE = jax.lax.stop_gradient(dotE)
+                k = jax.lax.stop_gradient(ddotE_dT * temp_cur / jnp.maximum(Et_cur, self.eps))
+                kdt = jnp.clip(k * dt_sub, -50.0, 50.0)
+                kdt_safe = jnp.where(jnp.abs(kdt) > 1.0e-4, kdt, 1.0)
+                phi = jax.lax.stop_gradient(
+                    jnp.where(jnp.abs(kdt) > 1.0e-4, jnp.expm1(kdt) / kdt_safe, 1.0 + 0.5 * kdt))
+                Et_new = jnp.maximum(Et_cur + dotE * dt_sub * phi, Et_floor)
+                return Et_new
+            heat_prim, cool_prim, cool_metal_solar, mu_tab = self.grackle.evaluate(nH_cgs, temp_cur, z)
             if self.use_mu_table:
                 mu_eval = jnp.maximum(mu_tab, 1.0e-6)
                 temp_eval = self._temperature_from_mu(rho_cgs, p_cgs_cur, mu_eval)
@@ -733,7 +1221,32 @@ class GrackleTabulatedCoolingForce:
             Et_new = jnp.maximum(Et_cur + dotE * dt_sub, Et_floor)
             return Et_new
 
-        Et_final = jax.lax.fori_loop(0, self.subcycles, body, Et)
+        if self.integrator in ("explicit", "exponential", "exponential_exact"):
+            Et_final = jax.lax.fori_loop(0, self.subcycles, body, Et)
+        else:
+            # Unconditionally-stable implicit backward-Euler subcycles (exact IFT
+            # adjoint via _nyx_implicit_energy_step). rate_fn(E,rho,z) recovers T
+            # from E and reads the table; nH follows the perturbed rho so the
+            # adjoint stays consistent. use_mu_table refinement dropped here (fixed
+            # mu_eff for E<->T). Fixes the explicit-Euler stiff instability that a
+            # correct (unclipped) cooling table exposes.
+            def rate_fn(E, rcgs, zz):
+                rsafe = jnp.maximum(rcgs, self.eps)
+                nH = self.grackle.h_species * rsafe / self.mH_cgs
+                T = (self.gamma - 1.0) * E * (mu_eff * self.mH_cgs) / (self.kB_cgs * rsafe)
+                T = jnp.maximum(T, self.temp_floor_k)
+                hp, cp, cm, _ = self.grackle.evaluate(nH, T, zz)
+                if self.stop_rate_grad:
+                    hp = jax.lax.stop_gradient(hp); cp = jax.lax.stop_gradient(cp)
+                    cm = jax.lax.stop_gradient(cm)
+                dE = (heat_scale * hp - cool_scale * cp
+                      - cool_scale * self.metal_cooling_scale * z_ratio * cm)
+                return jnp.nan_to_num(dE, nan=0.0, posinf=0.0, neginf=0.0)
+            Et_final = Et
+            for _ in range(self.subcycles):
+                Et_final = jnp.maximum(
+                    _nyx_implicit_energy_step(rate_fn, Et_final, rho_cgs, z, dt_sub, Et_floor),
+                    Et_floor)
         p_cgs_new = (self.gamma - 1.0) * jnp.maximum(Et_final, self.eps)
         p_phys_new = p_cgs_new / self.p_unit_cgs
         p_code_new = cosmo_conv.pressure_phys_to_code(p_phys_new, a)
@@ -822,8 +1335,14 @@ def _build_cooling_force(eq, bg: LCDMBackground, cfg: FullHydroConfig):
                 jhe=1,
                 eos_search_paths=[Path(cfg.nyx_cooling_eos_path).resolve()],
             )
-        nyx_table = NyxCoolingTableData.load(nyx_table_path)
-        nyx_interp = NyxCoolingRateInterpolator(nyx_table)
+        if getattr(cfg, "cooling_nn_npz", None):
+            from .nn_cooling import NNCoolingEvaluator
+
+            nyx_interp = NNCoolingEvaluator(str(cfg.cooling_nn_npz))
+            print(f"[cooling] NN rate surrogate active: {cfg.cooling_nn_npz}", flush=True)
+        else:
+            nyx_table = NyxCoolingTableData.load(nyx_table_path)
+            nyx_interp = NyxCoolingRateInterpolator(nyx_table)
         return NyxTabulatedCoolingForce(
             eq,
             nyx_interp,
@@ -838,6 +1357,8 @@ def _build_cooling_force(eq, bg: LCDMBackground, cfg: FullHydroConfig):
             dtmax_s=float(cfg.cooling_dtmax_s),
             stop_rate_grad=bool(cfg.cooling_stop_gradient),
             stop_update_grad=bool(cfg.cooling_update_stop_gradient),
+            integrator=str(cfg.cooling_integrator),
+            smooth_table=bool(cfg.cooling_smooth_table),
         )
 
     if cooling_model == "grackle_eq":
@@ -884,6 +1405,22 @@ def _build_cooling_force(eq, bg: LCDMBackground, cfg: FullHydroConfig):
             f"logT=[{gsum['logT_min']:.3g},{gsum['logT_max']:.3g}] ({gsum['n_logT']} nodes), "
             f"uvb={gsum['uvb_model']}"
         )
+        # Domain-coverage guard: the interpolator clips out-of-range (nH,T,z) to the
+        # table edge, which SILENTLY gives voids/halo gas the boundary rate. Warn
+        # loudly when the loaded table under-covers the configured domain so the
+        # clip-extrapolation failure mode is visible (see the IGM-temperature audit).
+        _cov = []
+        if gsum['lognH_min'] > float(cfg.grackle_lognH_min) + 1e-6:
+            _cov.append(f"lognH_min {gsum['lognH_min']:.3g} > cfg {cfg.grackle_lognH_min:.3g}")
+        if gsum['lognH_max'] < float(cfg.grackle_lognH_max) - 1e-6:
+            _cov.append(f"lognH_max {gsum['lognH_max']:.3g} < cfg {cfg.grackle_lognH_max:.3g}")
+        if gsum['logT_min'] > float(cfg.grackle_logt_min) + 1e-6:
+            _cov.append(f"logT_min {gsum['logT_min']:.3g} > cfg {cfg.grackle_logt_min:.3g}")
+        if gsum['logT_max'] < float(cfg.grackle_logt_max) - 1e-6:
+            _cov.append(f"logT_max {gsum['logT_max']:.3g} < cfg {cfg.grackle_logt_max:.3g}")
+        if _cov:
+            print("[WARN] Grackle table UNDER-COVERS the configured domain; out-of-range "
+                  "cells get clip-to-boundary rates: " + "; ".join(_cov), flush=True)
         grackle_interp = GrackleCoolingRateInterpolator(grackle_table)
         return GrackleTabulatedCoolingForce(
             eq,
@@ -901,6 +1438,11 @@ def _build_cooling_force(eq, bg: LCDMBackground, cfg: FullHydroConfig):
             dtmax_s=float(cfg.cooling_dtmax_s),
             stop_rate_grad=bool(cfg.cooling_stop_gradient),
             stop_update_grad=bool(cfg.cooling_update_stop_gradient),
+            integrator=str(cfg.cooling_integrator),
+            uvb_floor=bool(getattr(cfg, "uvb_temp_floor", False)),
+            uvb_floor_delta_cut=float(getattr(cfg, "uvb_temp_floor_delta_cut", 5.0)),
+            uvb_floor_width_dex=float(getattr(cfg, "uvb_temp_floor_width_dex", 0.3)),
+            uvb_floor_scale=float(getattr(cfg, "uvb_temp_floor_scale", 1.0)),
         )
 
     raise ValueError(f"Unsupported cooling model: {cfg.cooling_model}")
@@ -931,6 +1473,12 @@ def build_full_hydro_system(cfg: FullHydroConfig, cosmo_lpt: jc.Cosmology, field
         has_metallicity=bool(cfg.track_metallicity),
     )
     base_eq.mesh_shape = [cfg.mesh_n, cfg.mesh_n, cfg.mesh_n]
+    _de_smooth = float(getattr(cfg, "dual_energy_smooth", 0.0))
+    if _de_smooth > 0.0:
+        # C-inf sigmoid blend of the dual-energy pressure selector (relative
+        # window width around eta); removes the value-discontinuous where()
+        # that breaks force-vs-value consistency for MH samplers.
+        base_eq.dual_energy_smooth_width = _de_smooth
     eq = SuperComovingEquationManager(base_eq, enforce_gamma_53=True)
     eq.eps = float(eq.eps)
 
@@ -1031,10 +1579,28 @@ def build_full_hydro_system(cfg: FullHydroConfig, cosmo_lpt: jc.Cosmology, field
             )
         )
 
+    # Unified-mesh mode (Option C'): hydro runs its shard_map on the SAME 2-axis
+    # ('x','y') mesh as the jaxdecomp gravity, with field spec P(None,'x','y',None)
+    # and pmesh (pd0, pd1, 1). One mesh across the whole step -> the rollout can be
+    # jitted/scanned/checkpointed as a single traced program (distributed BPTT).
+    hydro_mesh = None
+    hydro_field_spec = None
+    pmesh_shape = cfg.pmesh_shape
+    if bool(getattr(cfg, "unified_mesh", False)):
+        if str(getattr(cfg, "gravity_backend", "jaxpm")) != "jaxdecomp_fft" or field_sharding is None:
+            raise ValueError("unified_mesh=True requires gravity_backend='jaxdecomp_fft' and field_sharding")
+        from jax.sharding import PartitionSpec as _PSpec
+        hydro_mesh = field_sharding.mesh
+        hydro_field_spec = _PSpec(None, "x", "y", None)
+        pd = tuple(int(s) for s in hydro_mesh.devices.shape)
+        pmesh_shape = (pd[0], pd[1], 1)
+
     sim = _build_hydrosim(
         eq,
         force_stack,
         solver_name=cfg.solver,
+        limiter=str(getattr(cfg, "hydro_limiter", "MINMOD")),
+        riemann_smooth=float(getattr(cfg, "hydro_riemann_smooth", 0.0)),
         use_mol=bool(getattr(cfg, "use_mol", True)),
         dx_o=1.0,
         enable_vacuum_momentum_cap=cfg.enable_vacuum_momentum_cap,
@@ -1046,7 +1612,9 @@ def build_full_hydro_system(cfg: FullHydroConfig, cosmo_lpt: jc.Cosmology, field
         hydro_repair_pressure_floor=cfg.hydro_repair_pressure_floor,
         hydro_repair_max_kinetic_to_thermal_ratio=cfg.hydro_repair_max_kinetic_to_thermal_ratio,
         hydro_flux_stop_gradient=cfg.hydro_flux_stop_gradient,
-        pmesh_shape=cfg.pmesh_shape,
+        pmesh_shape=pmesh_shape,
+        mesh=hydro_mesh,
+        field_spec=hydro_field_spec,
     )
     return FullHydroSystem(
         cosmo_lpt=cosmo_lpt,
@@ -1276,6 +1844,45 @@ def _project_hydro_state_with_floors(
     return system.eq.get_conservatives_from_primitives(w_new)
 
 
+def _apply_state_ceilings(
+    U: jnp.ndarray,
+    params: dict,
+    system: FullHydroSystem,
+    cfg: FullHydroConfig,
+) -> jnp.ndarray:
+    """Cap per-cell temperature and peculiar velocity so a handful of numerically
+    over-collapsed cells can't dominate the global CFL timestep (or diverge). Bounds the
+    per-cell signal speed |v|+c_s -> bounds max(inv_dt) -> the CFL-limited dtau stops
+    collapsing. Physical and conservative: the caps sit far above the real WHIM, touching
+    only runaway cells. No-op when both knobs are 0 (so default behavior is unchanged)."""
+    t_ceil_k = float(getattr(cfg, "hydro_temp_ceiling_k", 0.0))
+    v_ceil_kms = float(getattr(cfg, "hydro_velocity_ceiling_kms", 0.0))
+    if t_ceil_k <= 0.0 and v_ceil_kms <= 0.0:
+        return U
+    w = system.eq.get_primitives_from_conservatives(U)
+    a = jnp.asarray(params.get("a", 1.0), dtype=jnp.float32)
+    rho_safe = jnp.maximum(w[0], jnp.asarray(system.eq.eps, dtype=w.dtype))
+    if t_ceil_k > 0.0:
+        # temperature ceiling -> pressure ceiling (mirror of the floor in _project_..._floors)
+        t_ceil_code = jnp.asarray(float(system.kelvin_to_code_temp) * t_ceil_k, dtype=w.dtype)
+        rho_phys = cosmo_conv.density_code_to_phys(rho_safe, a)
+        p_ceil_phys = rho_phys * jnp.asarray(float(system.eq.R), dtype=w.dtype) * t_ceil_code
+        p_ceil_code = cosmo_conv.pressure_phys_to_code(p_ceil_phys, a)
+        w = w.at[4].set(jnp.minimum(w[4], p_ceil_code))
+        # keep the dual-energy channel (rho*e_int passive) consistent with the capped pressure,
+        # else the dual-energy recovery would re-expose the uncapped internal energy.
+        i_dual = getattr(system.eq, "dual_energy_ids", None)
+        if i_dual is not None and int(i_dual) < int(w.shape[0]):
+            rhoe_ceil = rho_safe * system.eq.get_specific_energy(p_ceil_code, rho_safe)
+            w = w.at[int(i_dual)].set(jnp.minimum(w[int(i_dual)], rhoe_ceil))
+    if v_ceil_kms > 0.0:
+        v_ceil_code = jnp.abs(cosmo_conv.velocity_phys_to_code(
+            jnp.asarray(v_ceil_kms, dtype=w.dtype), a))
+        for i_v in system.eq.vel_ids:
+            w = w.at[int(i_v)].set(jnp.clip(w[int(i_v)], -v_ceil_code, v_ceil_code))
+    return system.eq.get_conservatives_from_primitives(w)
+
+
 def _raw_hydro_cell_valid_mask(U_state: jnp.ndarray, i_rho: int) -> jnp.ndarray:
     U_state = jnp.asarray(U_state, dtype=jnp.float32)
     rho_raw = U_state[int(i_rho)]
@@ -1343,8 +1950,18 @@ def advance_full_hydro_step(
         dtau_cfl = jnp.asarray(float(cfg.solver_dt_safety), dtype=jnp.float32) * jnp.asarray(
             system.sim.timestep(U), dtype=jnp.float32)
         dtau = jnp.minimum(jnp.minimum(dtau_to_target, dtau_cfl), float(cfg.dtau_max))
-        dtau = jnp.maximum(dtau, float(cfg.dtau_min))
+        # Hard floor on the step (caps the max step count). The state ceilings keep this
+        # floored step CFL-stable by bounding the per-cell signal speed. Never overshoot a_target.
+        dtau_lo = max(float(cfg.dtau_min), float(getattr(cfg, "dtau_floor", 0.0)))
+        dtau = jnp.maximum(jnp.minimum(dtau, dtau_to_target), dtau_lo)
+        # Diagnostic: the dtau the pure a-schedule would have taken this step (so the driver
+        # can report whether/how much the CFL cap is throttling the step, esp. at early time).
+        _dtau_aschedule = jnp.clip(
+            (a_target - a_now) / jnp.maximum(da_dtau * remaining, 1.0e-12),
+            float(cfg.dtau_min), float(cfg.dtau_max))
+        _dtau_diag = {"_dtau_cfl": dtau_cfl, "_dtau_aschedule": _dtau_aschedule}
     else:
+        _dtau_diag = None
         dtau_raw = (a_target - a_now) / jnp.maximum(da_dtau * remaining, 1.0e-12)
         dtau = jnp.clip(dtau_raw, float(cfg.dtau_min), float(cfg.dtau_max))
 
@@ -1364,6 +1981,12 @@ def advance_full_hydro_step(
             U_new = U_new + jax.lax.stop_gradient(U_projected - U_new)
         else:
             U_new = U_projected
+    # Cap runaway T / |v| so a few over-collapsed cells can't dominate the next step's CFL
+    # timestep (or diverge). No-op unless hydro_temp_ceiling_k / velocity ceiling are set.
+    U_new = _apply_state_ceilings(U_new, params_new, system, cfg)
+    if _dtau_diag is not None:
+        # eager (adaptive) path only — never taken under the scan carry, so no key mismatch
+        params_new = {**params_new, **_dtau_diag}
     return (U_new, params_new), dtau
 
 

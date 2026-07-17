@@ -31,15 +31,36 @@ _CIC_OFFSETS = jnp.array(
      [1., 1., 0.], [1., 0., 1.], [0., 1., 1.], [1., 1., 1.]], dtype=jnp.float32)[None, :, :]
 
 
+_USE_DETERMINISTIC_PAINT = False
+
+
+def use_deterministic_paint(flag: bool = True) -> None:
+    """Bitwise-deterministic local CIC painting (sorted compensated-scan segment
+    sum, src.deterministic_paint). GPU float32 scatter_add uses atomics whose
+    summation order varies run to run (~1e-6/paint); >100 chaotic hydro steps
+    amplify that to percent-level loss noise that drowns small optimizer steps.
+    ~2x paint cost; forward values become a deterministic function of theta."""
+    global _USE_DETERMINISTIC_PAINT
+    _USE_DETERMINISTIC_PAINT = bool(flag)
+
+
 def _cic_paint_local(particle_scalar, particle_positions, mesh_shape):
     """Pure-JAX trilinear CIC scatter (flat positions); matches jaxpm cic_paint math."""
-    mesh = jnp.zeros(tuple(int(s) for s in mesh_shape), dtype=jnp.float32)
+    mesh_shape = tuple(int(s) for s in mesh_shape)
     pos = jnp.expand_dims(jnp.asarray(particle_positions, jnp.float32), 1)
     neigh = jnp.floor(pos) + _CIC_OFFSETS
     kernel = 1.0 - jnp.abs(pos - neigh)
     kernel = kernel[..., 0] * kernel[..., 1] * kernel[..., 2]
     kernel = kernel * jnp.expand_dims(jnp.asarray(particle_scalar, jnp.float32), -1)
-    neigh = jnp.mod(neigh.astype(jnp.int32), jnp.asarray(mesh.shape, jnp.int32))
+    neigh = jnp.mod(neigh.astype(jnp.int32), jnp.asarray(mesh_shape, jnp.int32))
+    if _USE_DETERMINISTIC_PAINT:
+        from .deterministic_paint import deterministic_segment_sum
+        nx, ny, nz = mesh_shape
+        flat_idx = (neigh[..., 0] * ny + neigh[..., 1]) * nz + neigh[..., 2]
+        flat = deterministic_segment_sum(kernel.reshape(-1), flat_idx.reshape(-1),
+                                         nx * ny * nz)
+        return flat.reshape(mesh_shape)
+    mesh = jnp.zeros(mesh_shape, dtype=jnp.float32)
     dnums = jax.lax.ScatterDimensionNumbers(
         update_window_dims=(), inserted_window_dims=(0, 1, 2),
         scatter_dims_to_operand_dims=(0, 1, 2))
@@ -341,6 +362,9 @@ class StarFormationDiagnostics:
     # Optional CNN 2nd-head output (per-cell log feedback-energy modulation); None
     # for a 1-channel CNN. Defaulted so existing keyword constructions are unaffected.
     cnn_feedback_log_mod: "jnp.ndarray | None" = None
+    # Optional standardized CNN input channel stack (C,n,n,n) exactly as the net
+    # sees it; None when no CNN. For diagnostics/visualization only.
+    cnn_input_channels: "jnp.ndarray | None" = None
 
 
 def evaluate_star_formation_diagnostics(
@@ -366,6 +390,7 @@ def evaluate_star_formation_diagnostics(
     rng_key: jax.Array | None = None,
     sf_cnn_weights: dict | None = None,
     sf_cnn_lambda: float | jnp.ndarray = 1.0,
+    sf_alpha_sf: "float | jnp.ndarray | None" = None,
     cnn_extra_fields: tuple | None = None,
 ) -> tuple[StarFormationDiagnostics, jax.Array | None]:
     W = eq.get_primitives_from_conservatives(U_gas)
@@ -398,6 +423,7 @@ def evaluate_star_formation_diagnostics(
     pi0 = jnp.clip(jnp.asarray(sf_pi0, dtype=jnp.float32) * s_rho * s_temp, 0.0, 1.0)
 
     cnn_feedback_log_mod = None
+    cnn_input_channels = None
     if sf_cnn_weights is not None:
         # Hybrid SF model: pi0 = sigmoid(lambda * logit(pi0_phys) + CNN(fields)).
         # Zero-initialized CNN final layer + lambda=1 reproduces the physical model.
@@ -410,6 +436,7 @@ def evaluate_star_formation_diagnostics(
             rho_phys, temp_k, metal_fraction, stellar_grid,
             scale_factor=a if cnn_in_ch == 5 else None,
         )
+        cnn_input_channels = channels
         # remat: the roll-based conv would otherwise save 27 shifted activation
         # copies per layer (~8 GB/step) as backward residuals
         cnn_out = jax.checkpoint(apply_sf_cnn)(sf_cnn_weights, channels)
@@ -429,7 +456,16 @@ def evaluate_star_formation_diagnostics(
         # finite_cotangent_sigmoid: a single non-finite downstream cotangent cell
         # (Gumbel ST derivative ~1/tau compounding over the late rollout) would
         # otherwise poison every CNN weight through the conv sum.
-        pi0 = finite_cotangent_sigmoid(lam * logit_phys + residual)
+        if sf_alpha_sf is not None:
+            # RESIDUAL GATE (campaign Batch 2): alpha gates the LEARNED residual and
+            # the physical prior is always fully on. alpha=0 == pure physics exactly;
+            # zero final CNN layer == pure physics for any alpha. (The legacy gate
+            # below multiplies the PRIOR by lambda, so lambda=0 removes physics, not
+            # the CNN.) Active only when 'sf_alpha_sf' is present in feedback_hyper.
+            alpha_sf = jnp.asarray(sf_alpha_sf, dtype=jnp.float32)
+            pi0 = finite_cotangent_sigmoid(logit_phys + alpha_sf * residual)
+        else:
+            pi0 = finite_cotangent_sigmoid(lam * logit_phys + residual)
 
     mode_norm = str(mode).lower()
     if mode_norm == "gumbel":
@@ -469,6 +505,7 @@ def evaluate_star_formation_diagnostics(
             feedback_total_energy=jnp.zeros_like(delta_star_grid),
             feedback_clip_scale=jnp.ones_like(delta_star_grid),
             cnn_feedback_log_mod=cnn_feedback_log_mod,
+            cnn_input_channels=cnn_input_channels,
         ),
         rng_key,
     )
@@ -599,6 +636,9 @@ class StellarFeedbackTracerForce:
 
         sf_cnn_weights = hyper.get("sf_cnn", None)
         sf_cnn_lambda = hyper.get("sf_cnn_lambda", 1.0)
+        # Residual-gate params (campaign Batch 2). Absent -> exact legacy behavior.
+        sf_alpha_sf = hyper.get("sf_alpha_sf", None)
+        sf_alpha_energy = hyper.get("sf_alpha_energy", None)
         cnn_extra_fields = None
         if sf_cnn_weights is not None:
             from .metallicity import extract_metal_fields
@@ -636,6 +676,7 @@ class StellarFeedbackTracerForce:
             rng_key=rng_key,
             sf_cnn_weights=sf_cnn_weights,
             sf_cnn_lambda=sf_cnn_lambda,
+            sf_alpha_sf=sf_alpha_sf,
             cnn_extra_fields=cnn_extra_fields,
         )
         sf_diag = StarFormationDiagnostics(
@@ -660,6 +701,7 @@ class StellarFeedbackTracerForce:
             feedback_total_energy=sf_diag.feedback_total_energy,
             feedback_clip_scale=sf_diag.feedback_clip_scale,
             cnn_feedback_log_mod=sf_diag.cnn_feedback_log_mod,
+            cnn_input_channels=sf_diag.cnn_input_channels,
         )
 
         delta_star_particles = grid_to_particle_mass_increment(sf_diag.delta_star_grid, dm_positions)
@@ -770,6 +812,9 @@ class StellarFeedbackTracerForce:
         # 2nd channel. Same clip-safe construction as AGN -- after the clip (the min/max
         # division is the NaN source), tanh-bounded, dense-gated. Bidirectional (tanh
         # in [-1,1]) so the CNN can boost OR suppress local feedback; zero at zero-init.
+        # baseline (physical SNe/wind + any AGN) feedback thermal, before the CNN head
+        thermal_baseline_grid = thermal_deposition_grid
+        cnn_feedback_injection = jnp.zeros_like(thermal_deposition_grid)
         _fb_mod = sf_diag.cnn_feedback_log_mod
         if _fb_mod is not None:
             _ie2 = int(self.eq.energy_ids)
@@ -778,7 +823,14 @@ class StellarFeedbackTracerForce:
                 * jnp.maximum(jnp.asarray(U_new[_ie2], dtype=jnp.float32), getattr(self.eq, "eps", 1.0e-20)))
             _rho2 = jnp.asarray(U_new[int(self.eq.mass_ids)], dtype=jnp.float32)
             _dense2 = jax.lax.stop_gradient((_rho2 > jnp.mean(_rho2)).astype(jnp.float32))
-            thermal_deposition_grid = thermal_deposition_grid + _fb_bound * jnp.tanh(_fb_mod) * _dense2
+            cnn_feedback_injection = _fb_bound * jnp.tanh(_fb_mod) * _dense2
+            if sf_alpha_energy is not None:
+                # Residual-gate: dedicated trainable amplitude for the energy head
+                # (the legacy path is entirely lambda-ungated). alpha_energy=0 ==
+                # head off exactly. Active only via 'sf_alpha_energy' in hyper.
+                cnn_feedback_injection = (
+                    jnp.asarray(sf_alpha_energy, dtype=jnp.float32) * cnn_feedback_injection)
+            thermal_deposition_grid = thermal_deposition_grid + cnn_feedback_injection
         feedback_momentum_x = jnp.zeros_like(thermal_deposition_grid)
         feedback_momentum_y = jnp.zeros_like(thermal_deposition_grid)
         feedback_momentum_z = jnp.zeros_like(thermal_deposition_grid)
@@ -812,7 +864,12 @@ class StellarFeedbackTracerForce:
         U_new = U_new.at[i_energy].add(feedback_total_energy)
         i_dual = getattr(self.eq, "dual_energy_ids", None)
         if i_dual is not None and int(i_dual) < int(U_new.shape[0]):
-            U_new = U_new.at[int(i_dual)].add(thermal_deposition_grid)
+            # Same singular-adjoint guard as the main energy channel above: the
+            # per-cell thermal injection into the dual-energy channel has the same
+            # singular hydro adjoint, which (unguarded) poisons the CNN feedback head
+            # -- this is the late-rollout NaN-gradient path on the hot metal-fixed
+            # baseline. Identity forward; sanitizes only the backward cotangent.
+            U_new = U_new.at[int(i_dual)].add(finite_cotangent_passthrough(thermal_deposition_grid))
         if self.enable_metal_source and bool(getattr(self.eq, "has_metallicity", lambda: False)()):
             metal_id = int(self.eq.metal_density_ids)
             U_new = U_new.at[metal_id].add(metal_yield * metal_deposition_grid)
@@ -843,5 +900,15 @@ class StellarFeedbackTracerForce:
                 "feedback_stellar_wind_energy": feedback_stellar_wind_energy,
                 "feedback_total_energy": feedback_total_energy,
                 "feedback_clip_scale": feedback_clip_scale,
+                # baseline (pre-CNN-head) thermal + the CNN head's injected energy +
+                # the standardized CNN inputs — for the NN-vs-baseline visualization.
+                "thermal_baseline_grid": thermal_baseline_grid,
+                "cnn_feedback_injection": cnn_feedback_injection,
+                "cnn_feedback_log_mod": (sf_diag.cnn_feedback_log_mod
+                                         if sf_diag.cnn_feedback_log_mod is not None
+                                         else jnp.zeros_like(thermal_deposition_grid)),
+                "cnn_input_channels": (sf_diag.cnn_input_channels
+                                       if sf_diag.cnn_input_channels is not None
+                                       else jnp.zeros((1,) + thermal_deposition_grid.shape, dtype=jnp.float32)),
             }
         return U_new, params_out
