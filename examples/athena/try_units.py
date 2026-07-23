@@ -30,16 +30,14 @@ importlib.reload(unit_code_units)
 importlib.reload(unit_convert)
 importlib.reload(unit_pkg)
 
-from diffhydro.units import CodeUnits, to_code
+from diffhydro.units import CodeUnits, to_code ,from_code_fields, to_code_fields
 from diffhydro.equationmanager_radiative_transf_no_chat import EquationManager as EquationManager_RT
 from diffhydro.physics.radiative_transfer import StellarRadiationForce
 import copy as cp
 
-
 # ============================================================================
 # PLOT STYLE: BLACK BACKGROUND
 # ============================================================================
-
 plt.style.use("dark_background")
 plt.rcParams.update({
     "figure.facecolor": "black",
@@ -54,9 +52,9 @@ plt.rcParams.update({
     "grid.color": "gray",
 })
 
-
 def make_black_imshow(data, extent, title, cbar_label, cmap="afmhot", log=False,
-                      xlim=None, ylim=None, figsize=(6, 5)):
+                      xlim=None, ylim=None, figsize=(6, 5),
+                      output_dir="examples/athena/Images_athena"):
     fig, ax = plt.subplots(figsize=figsize, facecolor="black")
     ax.set_facecolor("black")
 
@@ -96,9 +94,11 @@ def make_black_imshow(data, extent, title, cbar_label, cmap="afmhot", log=False,
     cbar.ax.yaxis.set_tick_params(color="white")
     plt.setp(cbar.ax.get_yticklabels(), color="white")
     plt.tight_layout()
-    plt.savefig(f"examples/athena/Images_athena/{title}_c=1e5.png", dpi=300, bbox_inches="tight")
-    plt.show()
 
+    os.makedirs(output_dir, exist_ok=True)
+    safe_title = title.replace(" ", "_").replace("/", "_")
+    plt.savefig(f"{output_dir}/{safe_title}.png", dpi=300, bbox_inches="tight")
+    plt.show()
 
 
 # ============================================================================
@@ -106,58 +106,46 @@ def make_black_imshow(data, extent, title, cbar_label, cmap="afmhot", log=False,
 # ============================================================================
 
 size_shape = 256
-box_width_phys = 1.0  # cm
-unit_length = 1  # cm
-dx_cell_code = box_width_phys / size_shape  # code units
-# dx_phys = 1.0 / size_shape   # cm per cell
+box_width_phys = 1.0          # cm : physical width of the whole box
+length_unit_cm = box_width_phys   # 1 code length unit = 1 cm = whole box
+cell_size_phys = box_width_phys / size_shape    # cm per cell
+cell_size_code = cell_size_phys / length_unit_cm  # = 1/256 code length units
 
 cu = CodeUnits.from_config(
     {
-        "length": f"{unit_length} cm",
+        "length": f"{length_unit_cm} cm",
         "mass": "1 g",
-        "velocity": "3e10 cm/s",
+        "velocity": "100000 cm/s",
+        "light_speed": "3e10 cm/s",#remove
     },
     {"gamma": 5.0 / 3.0, "mu": 0.61},
 )
 
 source_rate_phys = "1e10 photons/s"
 source_rate_code = to_code(source_rate_phys, "photon_rate", cu)
-print(f"Source rate: {source_rate_phys} = {source_rate_code:.4e} code units")
 t_phys = 5.2e-11
-time_code = to_code(f"{t_phys} s", "time", cu)
-print("INFORMATIONS : ===============================")
-print("time_code =", time_code)
-print("box_width_phys =", box_width_phys)
-print("dx_cell_code =", dx_cell_code)
-print("light_speed_code =", cu.light_speed_code)
+time_code = t_phys / cu.T_cgs
 
-# print("=" * 70)
-# print("RAMSES-RT UNIT SYSTEM")
-# print("=" * 70)
-# print("\nPhysical domain:")
-# print("  Size: 1 cm (box width in paper)")
-# print("  Resolution: 256² cells (paper)")
-# print("  Source: 10¹⁰ photons/s (isotropic point source)")
-print("  Snapshot time:", f"{t_phys:.2e} s")
+print("Snapshot time:", f"{t_phys:.2e} s")
 
 print("\nCode unit scales:")
 print(f"  L_cgs = {cu.L_cgs:.6e} cm")
 print(f"  V_cgs = {cu.V_cgs:.6e} cm/s")
 print(f"  T_cgs = {cu.T_cgs:.6e} s")
-print(f"  c_cgs = {cu.light_speed_cgs:.6e} cm/s")
 print(f"  light_speed_code = {cu.light_speed_code:.6e}")
-print(f"  dx_code = {dx_cell_code:.6e}")
-print(f"  dt_light_crossing_code = {dx_cell_code / cu.light_speed_code:.6e}")
+
+print("\nGrid geometry:")
+print(f"  box_width_phys = {box_width_phys:.6e} cm")
+print(f"  size_shape = {size_shape}")
+print(f"  cell_size_phys = {cell_size_phys:.6e} cm")
+print(f"  cell_size_code = {cell_size_code:.6e}")
 
 print("\nCode values:")
 print(f"  source_rate_phys = {source_rate_phys}")
 print(f"  source_rate_code = {source_rate_code:.4e}")
 print(f"  time_code = {time_code:.4e}")
-box_crossing_time_code = (box_width_phys / cu.L_cgs) / cu.light_speed_code
-print(f"  box_crossing_time_code = {box_crossing_time_code:.4e}")
-print(f"  box_crossing_times = {time_code / box_crossing_time_code:.2f}")
 
-light_cross_time_phys = cu.L_cgs / 3.0e10
+light_cross_time_phys = box_width_phys / 3.0e10
 print(f"\nPhysical light-crossing time of box = {light_cross_time_phys:.4e} s")
 
 
@@ -165,36 +153,32 @@ print(f"\nPhysical light-crossing time of box = {light_cross_time_phys:.4e} s")
 # SIMULATION SETUP
 # ============================================================================
 
-
 eq_test = EquationManager_RT(
     light_speed=cu.light_speed_code,
     mesh_shape=(size_shape, size_shape, size_shape),
     debug=False,
 )
 
-print("=" * 70)
-print("RAMSES-RT SIMULATION SETUP")
-print("=" * 70)
-
-print(eq_test)
-print(f"\n✓ Resolution: {size_shape}³ cells")
-print(f"✓ Light speed: {cu.light_speed_code:.4e} code units")
-# print("✓ Domain size: 1 cm (in code units = 1.0)")
-
 ss = dh.signal_speed_Rusanov
+solver_test = dh.HLL_Radiative_transfer_Local(
+    equation_manager=eq_test,
+    signal_speed=ss
+)
 
-solver_test = dh.HLL_Radiative_transfer_Local(equation_manager=eq_test, signal_speed=ss)
-
-
-cf_test = dh.ConvectiveFlux_Radiative_transfer(eq_test, solver_test, dh.PLM(limiter="VANLEER"),dx=dx_cell_code)
+cf_test = dh.ConvectiveFlux_Radiative_transfer(
+    eq_test,
+    solver_test,
+    dh.PLM(limiter="VANLEER"),
+    dx=cell_size_code
+)
 
 stellar_force = StellarRadiationForce(
     escape_fraction=0.1,
-    dx=dx_cell_code,
+    dx=cell_size_code,
     injection_mode="stromgren",
     stromgren_rate=source_rate_code,
     injection_momentum=False,
-    gaussian_star=False,
+    gaussian_star=True,
     injection_geometry="3D",
     eq=eq_test,
     debug=False,
@@ -212,11 +196,6 @@ hydrosim_test = dh.hydro(
     forces=[stellar_force],
 )
 
-print("hydrosim_test.dxo =", hydrosim_test.dx_o)
-# ============================================================================
-# INITIAL CONDITIONS
-# ============================================================================
-
 params = {
     "star_masses": jnp.array([1.0]),
     "star_ages": jnp.array([0.1]),
@@ -227,19 +206,8 @@ params = {
     ),
 }
 
-# Convention B:
 # field[0] = photons per cell
 sol_test = jnp.zeros((4, size_shape, size_shape, size_shape))
-
-print("=" * 70)
-print("RAMSES-RT SIMULATION RUN")
-print("=" * 70)
-print("\nInitial conditions:")
-print(f"  Domain size: {size_shape}³ cells")
-print("  Point source: isotropic at center")
-print(f"  Source strength: {source_rate_phys} = {source_rate_code:.4e} code units")
-
-print(f"\nRunning simulation until t = {t_phys:.2e} s = {time_code:.4e} code units...")
 
 field_test, _, _, dt_historique_test, nombre_de_pas_test_test = hydrosim_test.evolve_till_time(
     cp.deepcopy(sol_test),
@@ -248,11 +216,8 @@ field_test, _, _, dt_historique_test, nombre_de_pas_test_test = hydrosim_test.ev
 )
 
 print("✓ Simulation completed!")
-print(f"  E_gamma(cell photons): min={float(jnp.min(field_test[0])):.4e}, max={float(jnp.max(field_test[0])):.4e}")
-print(f"  |F|_max: {float(jnp.sqrt(jnp.sum(field_test[1:]**2, axis=0)).max()):.4e}")
 print(f"  Number of steps: {nombre_de_pas_test_test}")
 print(f"  Time step history physical: {float(jnp.sum(dt_historique_test)) * cu.T_cgs:.4e} s")
-
 
 # ============================================================================
 # DIAGNOSTICS
@@ -266,123 +231,49 @@ print(f"Expected injected photons = {N_expected:.4e} photons")
 print(f"Total photons in domain   = {N_gamma_tot:.4e} photons")
 print(f"Difference                = {N_gamma_tot - N_expected:.4e} photons")
 
-# Radius estimate from projected map
-dx_phys = cu.L_cgs / size_shape
-half_box = cu.L_cgs / 2.0
 extent_xy = [-box_width_phys/2, box_width_phys/2, -box_width_phys/2, box_width_phys/2]
-zoom_half_size = 12 * dx_phys
+
+zoom_cells = 12
+zoom_half_size = zoom_cells * cell_size_phys
 
 E3d = np.asarray(field_test[0])
 E_slice = E3d[:, :, size_shape // 2]
 
-cell_area_phys = dx_phys**2
-N_col_phys = np.sum(E3d, axis=2) / cell_area_phys
+cell_area_phys = cell_size_phys**2
+cell_volume_phys = cell_size_phys**3
 
-positive_col = N_col_phys[N_col_phys > 0]
-if positive_col.size:
-    peak_col = positive_col.max()
-    yy, xx = np.indices(N_col_phys.shape)
-    cx = cy = size_shape // 2
-    rr = np.sqrt((xx - cx)**2 + (yy - cy)**2) * dx_phys
+# photons per cm^3 in the central slice
+E_slice_density = E_slice#from_code_fields(E_slice) #/ cell_volume_phys
 
-    for th_frac in [1e-3, 1e-6, 1e-10, 1e-15, 1e-20, 1e-25, 1e-30]:
-        threshold = peak_col * th_frac
-        mask = N_col_phys > threshold
-        radius_est = rr[mask].max() if np.any(mask) else 0.0
-        print(f"threshold={th_frac:.0e} of peak -> radius_est = {radius_est:.4e} cm ({radius_est/dx_phys:.1f} cells)")
-
-
-r_expected = 3.0e10 * t_phys
-print(f"Free-streaming radius c*t = {r_expected:.4e} cm")
-print(f"Free-streaming radius in cells = {r_expected / dx_phys:.2f}")
-
+# projected photons per cm^2
+N_col_phys = np.sum(E3d, axis=2) 
 
 # ============================================================================
-# PLOTS
+# PLOTS RAMSES-RT STYLE
 # ============================================================================
-print(dt_historique_test, nombre_de_pas_test_test)
-zoom_cells = 12
-zoom_half_size = zoom_cells * dx_phys
 
-# Full-box and local views help separate real transport from the symmetric injection core.
-make_black_imshow(
-    data=E_slice,
-    extent=extent_xy,
-    title="Photon_number_per_cell_full_box_(log scale)",
-    cbar_label="Photons per cell",
-    cmap="hot",
-    log=False,
-)
+zoom_half_size = 0.05   # cm : même ordre que la figure RAMSES-RT
 
-# Linear center slice
+# 1) densité volumique en log, proche de la source
 make_black_imshow(
-    data=E_slice,
+    data=E_slice_density,
     extent=extent_xy,
-    title="Photon_number_per_cell_at_box_center",
-    cbar_label="Photons per cell",
-    cmap="hot",
-    log=False,
-)
-
-# Zoom linear
-make_black_imshow(
-    data=E_slice,
-    extent=extent_xy,
-    title="Photon_number_per_cell_near_source",
-    cbar_label="Photons per cell",
-    cmap="hot",
-    log=False,
-    xlim=(-zoom_half_size, zoom_half_size),
-    ylim=(-zoom_half_size, zoom_half_size),
-)
-
-# Log center slice
-make_black_imshow(
-    data=np.log(E_slice),
-    extent=extent_xy,
-    title="Photon_number_per_cell_at_box_center_(log scale)",
-    cbar_label="Photons per cell",
-    cmap="hot",
-    log=True,
-)
-
-# Log zoom
-make_black_imshow(
-    data=E_slice,
-    extent=extent_xy,
-    title="Photon_number_per_cell_near_source_(log scale)",
-    cbar_label="Photons per cell",
+    title=r"Photon number density near source $n_\gamma$ [photons cm$^{-3}$]",
+    cbar_label=r"$n_\gamma\ [\mathrm{photons\ cm^{-3}}]$",
     cmap="hot",
     log=True,
     xlim=(-zoom_half_size, zoom_half_size),
     ylim=(-zoom_half_size, zoom_half_size),
 )
 
-# Projection map
+# 2) densité surfacique projetée en log, proche de la source
 make_black_imshow(
     data=N_col_phys,
     extent=extent_xy,
-    title=r"Projected_photon_surface_density_$N$ [photons cm$^{-3}$]",
-    cbar_label=r"$N\ [\mathrm{photons\ cm^{-3}}]$",
-    cmap="hot",
-    log=True,
-)
-
-# Projection zoom
-make_black_imshow(
-    data=N_col_phys,
-    extent=extent_xy,
-    title=r"Projected_photon_surface_density_near_source_$N$ [photons cm$^{-3}$]",
-    cbar_label=r"$N\ [\mathrm{photons\ cm^{-3}}]$",
+    title=r"Projected photon surface density near source $N$ [photons cm$^{-2}$]",
+    cbar_label=r"$N\ [\mathrm{photons\ cm^{-2}}]$",
     cmap="hot",
     log=True,
     xlim=(-zoom_half_size, zoom_half_size),
     ylim=(-zoom_half_size, zoom_half_size),
 )
-plt.imshow(np.log(field_test[0, :,:,256//2]), origin="lower", cmap="hot", vmin=-20)
-# plt.title(f"field_test[0] at center point ({ix_center}, {iy_center}, {iz_center}), injection {injection_density} ")
-plt.xlabel("y")
-plt.ylabel("x")
-plt.colorbar()
-plt.savefig(f"examples/athena/Images_athena/field_test[0]_at_center_point_c=1.png", dpi=300, bbox_inches="tight")
-plt.show()

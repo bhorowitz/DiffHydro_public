@@ -1,4 +1,4 @@
-"""Small unit parser/registry for boundary-layer unit conversions."""
+"""Unit parsing and registry helpers for code/CGS conversions."""
 
 from __future__ import annotations
 
@@ -32,8 +32,9 @@ class UnitParser:
 
     _DIM_ALIASES = {
         "radiation_energy_density": "energy_density",
-        "photon_density": "photon_surface_density",
+        "photon_density": "photon_number_density",
         "photon_number_density": "photon_number_density",
+        "light_speed": "velocity",
     }
 
     _UNIT_TABLE = {
@@ -55,6 +56,10 @@ class UnitParser:
         "dyne/cm^2": (1.0, "pressure"),
         "erg/cm^3": (1.0, "energy_density"),
         "erg/s/cm^2": (1.0, "radiation_flux"),
+        "erg/s": (1.0, "power"),
+        "erg": (1.0, "energy"),
+        "J": (1.0e7, "energy"),
+        "Pa": (10.0, "pressure"),
         "photons/cm^2": (1.0, "photon_surface_density"),
         "cm^-2": (1.0, "photon_surface_density"),
         "1/cm^2": (1.0, "photon_surface_density"),
@@ -78,6 +83,8 @@ class UnitParser:
         "mass": "g",
         "time": "s",
         "velocity": "cm/s",
+        "energy": "erg",
+        "power": "erg/s",
         "density": "g/cm^3",
         "pressure": "dyne/cm^2",
         "energy_density": "erg/cm^3",
@@ -101,7 +108,7 @@ class UnitParser:
         unit = self._normalize_unit(match.group(2))
         factor, dim = self._unit_info(unit)
         expected_dim = self._normalize_dimension(expected_dim)
-        if expected_dim is not None and dim != expected_dim:
+        if not self._dimension_matches(dim, expected_dim):
             raise ValueError(
                 f"Unit '{unit}' has dimension '{dim}', expected '{expected_dim}'."
             )
@@ -111,7 +118,7 @@ class UnitParser:
         norm = self._normalize_unit(unit)
         factor, dim = self._unit_info(norm)
         expected_dim = self._normalize_dimension(expected_dim)
-        if expected_dim is not None and dim != expected_dim:
+        if not self._dimension_matches(dim, expected_dim):
             raise ValueError(
                 f"Unit '{norm}' has dimension '{dim}', expected '{expected_dim}'."
             )
@@ -144,4 +151,14 @@ class UnitParser:
         if dim is None:
             return None
         return self._DIM_ALIASES.get(dim, dim)
+
+    @staticmethod
+    def _dimension_matches(actual: str, expected: Optional[str]) -> bool:
+        if expected is None:
+            return True
+        if actual == expected:
+            return True
+        if {actual, expected} <= {"velocity", "light_speed"}:
+            return True
+        return False
 

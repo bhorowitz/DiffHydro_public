@@ -129,7 +129,7 @@ def test_thermo_helpers_invert_each_other():
 
 def test_metadata_roundtrip():
     cu = CodeUnits.from_config(
-        {"length": "2 kpc", "mass": "5e9 Msun", "velocity": "15 km/s"},
+        {"length": "2 kpc", "mass": "5e9 Msun", "velocity": "15 km/s", "light_speed": "2.5e10 cm/s"},
         {"gamma": 1.4, "mu": 0.58},
     )
     meta = build_unit_metadata(cu)
@@ -138,8 +138,21 @@ def test_metadata_roundtrip():
     assert cu2.L_cgs == pytest.approx(cu.L_cgs)
     assert cu2.M_cgs == pytest.approx(cu.M_cgs)
     assert cu2.V_cgs == pytest.approx(cu.V_cgs)
+    assert cu2.light_speed_cgs == pytest.approx(cu.light_speed_cgs)
     assert cu2.gamma == pytest.approx(cu.gamma)
     assert cu2.mu == pytest.approx(cu.mu)
+
+
+def test_light_speed_dimension_accepts_velocity_units():
+    cu = CodeUnits.from_config(
+        {"length": "1 pc", "mass": "1 Msun", "velocity": "10 km/s", "light_speed": "3e10 cm/s"},
+        {"mu": 0.61},
+    )
+
+    assert to_code("1 km/s", "light_speed", cu) == pytest.approx(1.0e5 / cu.light_speed_cgs)
+    q = from_code(1.0, "light_speed", cu, out_unit="km/s")
+    assert q.value == pytest.approx(cu.light_speed_cgs / 1.0e5)
+    assert q.unit == "km/s"
 
 
 def test_sedov_evolution_consistent_across_astropy_unit_representations():

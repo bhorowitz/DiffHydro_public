@@ -894,6 +894,7 @@ class ConvectiveFlux_Radiative_transfer:
         dim = sol.ndim - 1
         dx = float(self.dx_o)
         c = float(eq.light_speed)
+        # jax.debug.print('Light speed: {}', c)
 
         inv_dt = dim * c / dx
         # print(eq.cfl / (inv_dt + eq.eps))

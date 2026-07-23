@@ -47,7 +47,7 @@ class CodeUnits:
 
     @property
     def RadEnergy_cgs(self) -> float:
-        return self.PhotonNumberDensity_cgs
+        return self.Eden_cgs
 
     @property
     def PhotonSurfaceDensity_cgs(self) -> float:
@@ -85,19 +85,21 @@ class CodeUnits:
             "mass": self.M_cgs,
             "time": self.T_cgs,
             "velocity": self.V_cgs,
+            "light_speed": self.light_speed_cgs,
             "density": self.rho_cgs,
             "pressure": self.P_cgs,
+            "energy": self.M_cgs * (self.V_cgs**2),
+            "power": self.M_cgs * (self.V_cgs**2) / self.T_cgs,
             "energy_density": self.Eden_cgs,
             "radiation_energy_density": self.RadEnergy_cgs,
             "photon_number": self.PhotonNumber_cgs,
-            "photon_density": self.PhotonSurfaceDensity_cgs,
+            "photon_density": self.PhotonNumberDensity_cgs,
             "photon_surface_density": self.PhotonSurfaceDensity_cgs,
             "photon_number_density": self.PhotonNumberDensity_cgs,
             "photon_flux": self.PhotonFlux_cgs,
             "photon_rate": self.PhotonRate_cgs,
             "temperature": self.Temp_cgs,
             "radiation_flux": self.RadFlux_cgs,
-            "light_speed": self.light_speed_cgs,
         }
         try:
             return scales[dim]
@@ -118,8 +120,8 @@ class CodeUnits:
         M_cgs = _parse_base_scale(code_units_cfg["mass"], "mass", unit_parser)
         V_cgs = _parse_base_scale(code_units_cfg["velocity"], "velocity", unit_parser)
 
-        c_rt_cfg = code_units_cfg.get("light_speed", "3e10 cm/s")
-        c_rt_cgs = _parse_base_scale(c_rt_cfg, "velocity", unit_parser)
+        c_rt_cfg = code_units_cfg.get("light_speed", code_units_cfg.get("c_rt_cgs", "3e10 cm/s"))
+        c_rt_cgs = _parse_base_scale(c_rt_cfg, "light_speed", unit_parser)
 
         return cls(
             L_cgs=L_cgs,
@@ -135,6 +137,12 @@ def _parse_base_scale(value: Any, expected_dim: str, parser: UnitParser) -> floa
     if isinstance(value, str):
         if value.strip().lower().startswith("code:"):
             return float(value.split(":", 1)[1].strip())
-        parsed = parser.parse(value, expected_dim=expected_dim)
+        if expected_dim == "light_speed":
+            try:
+                parsed = parser.parse(value, expected_dim="light_speed")
+            except ValueError:
+                parsed = parser.parse(value, expected_dim="velocity")
+        else:
+            parsed = parser.parse(value, expected_dim=expected_dim)
         return parsed.cgs_value
     return float(value)
