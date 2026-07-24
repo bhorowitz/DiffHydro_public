@@ -72,7 +72,7 @@ class StellarRadiationForce:
         stellar_spectrum_func=None,
         dx=1.0,
         injection_mode="physical",
-        stromgren_rate=0,
+        stromgren_rate=1e-7,
         gaussian_star=True,
         injection_geometry="3D",
         injection_momentum=False,

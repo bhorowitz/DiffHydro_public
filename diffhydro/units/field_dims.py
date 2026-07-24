@@ -8,9 +8,8 @@ FIELD_DIMS = {
     "p": "pressure",
     "Etot": "energy_density",
     # Radiative transfer fields
-    "E_gamma": "photon_number_density",
+    "E_gamma": "energy_density",
     "Fx_gamma": "radiation_flux",
     "Fy_gamma": "radiation_flux",
     "Fz_gamma": "radiation_flux",
 }
-

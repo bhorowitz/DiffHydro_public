@@ -27,7 +27,7 @@ class EquationManager:
     """
     gamma: float = 1.6
     n_cons: int = 4 #avant c etait 5
-    eps: float = 1e-40
+    eps: float = 1e-10
     isothermal: bool = False
     light_speed: float = 1#3e8 #en m.s-1
     # fraction_escape: float = 0.1

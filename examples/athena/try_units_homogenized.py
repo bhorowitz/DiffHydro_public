@@ -132,7 +132,7 @@ def make_black_imshow(data, extent=None, title="", cbar_label="", cmap="hot", lo
                       xlim=None, ylim=None, figsize=(6, 5),
                       output_dir=BASE_OUTPUT_DIR,
                       use_extent=True,
-                      xlabel=None, ylabel=None):
+                      xlabel=None, ylabel=None,):
     fig, ax = plt.subplots(figsize=figsize, facecolor="black")
     ax.set_facecolor("black")
 
@@ -466,7 +466,6 @@ def run_pipeline(velocity_cms, mass_unit_g, tag, output_dir, time_phys=5.2e-11):
         cbar_label=r"$N$ [arb.]",
         cmap="hot",
         log=True,
-        vmin=-20,
         output_dir=output_dir,
     )
 
@@ -590,7 +589,7 @@ make_black_imshow(
     data=diff_abs,
     extent=extent_phys,
     title=f"ABSOLUTE DIFFERENCE - new minus ref ({time_phys_global:.1e}s)",
-    cbar_label=r"$\\Delta n_\\gamma$",
+    cbar_label=r"$\Delta n_\gamma$",
     cmap="coolwarm",
     log=False,
     output_dir=master_output_dir,
@@ -600,7 +599,7 @@ make_black_imshow(
     data=diff_rel,
     extent=extent_phys,
     title=f"RELATIVE DIFFERENCE - (new-ref)/ref ({time_phys_global:.1e}s)",
-    cbar_label=r"$\\Delta n_\\gamma / n_{\\gamma,\\mathrm{ref}}$",
+    cbar_label=r"$\Delta n_\gamma / n_{\gamma,\mathrm{ref}}$",
     cmap="coolwarm",
     log=False,
     output_dir=master_output_dir,
