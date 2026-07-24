@@ -1,3 +1,4 @@
+
 # Depending on your system/cluster, you may want to specify which GPU you want to use
 import os, sys, importlib, atexit
 sys.path.append("../../")
@@ -57,11 +58,11 @@ plt.rcParams.update({
 # ============================================================================
 velocity_ref = 1e10
 velocity_new = 10000.0   # <-- change this value
-length_unit_ref = 1.0
-length_unit_new = 10000
 mass_unit_ref = 1.0
 mass_unit_new = 1.0
 time_phys_global = 1.3e-11
+
+C_CGS = 2.99792458e10  # cm/s, exact speed of light
 
 
 # ============================================================================
@@ -183,6 +184,7 @@ def make_black_imshow(data, extent=None, title="", cbar_label="", cmap="hot", lo
     plt.savefig(f"{output_dir}/{safe_title}.png", dpi=300, bbox_inches="tight")
     # plt.show()
 
+
 def spherical_average(field_3d, center):
     cx, cy, cz = center
     nx, ny, nz = field_3d.shape
@@ -214,7 +216,7 @@ def analyze_inverse_r2(field_3d, size_shape, cell_size_phys, tag,
     injection_radius = len(jnp.arange(-3 * sigma, 3 * sigma + 1)) // 2
 
     if radius_truncation is None:
-        radius_truncation = max(injection_radius + 8, size_shape )
+        radius_truncation = max(injection_radius + 8, size_shape)
 
     r_sph, y_sph = spherical_average(
         np.array(field_3d, dtype=float),
@@ -295,81 +297,64 @@ def analyze_inverse_r2(field_3d, size_shape, cell_size_phys, tag,
     }
 
 
-def run_pipeline(length_unit_cm, velocity_cms, mass_unit_g, tag, output_dir, time_phys=5.2e-11):
-    print("\n" + "=" * 80)
-    print(f"RUN PIPELINE: {tag} | velocity = {velocity_cms:.6e} cm/s")
-    print(f"Length unit = {length_unit_cm:.6e} cm")
+def run_pipeline(velocity_cms, mass_unit_g, tag, output_dir, time_phys=5.2e-11):
+    print("\\n" + "=" * 80)
+    print(f"RUN PIPELINE: {tag} | velocity unit = {velocity_cms:.6e} cm/s")
     print(f"Output dir  = {output_dir}")
     print("=" * 80)
 
     os.makedirs(output_dir, exist_ok=True)
 
     # ============================================================================
-    # RAMSES-RT SETUP
+    # GRID GEOMETRY (single source of truth, no duplication)
     # ============================================================================
-    size_shape = 256
-    length_unit_cm = 1.0                          # cm : physical length unit
-    box_width_phys = 1.0 * length_unit_cm         # cm : physical width of the whole box
-       # 1 code length unit = 1 cm = whole box
-    cell_size_phys = box_width_phys / size_shape    # cm per cell
-    cell_size_code = cell_size_phys / length_unit_cm  # = 1/256 code length units
-    mass_unit_g = mass_unit_g            # g : physical mass unit
-    # cu = CodeUnits.from_config(
-    #     {
-    #         "length": f"{length_unit_cm} cm",
-    #         "mass": f"{mass_unit_g} g",
-    #         "velocity": f"{velocity_cms} cm/s",
-    #     },
-    #     {"gamma": 5.0 / 3.0, "mu": 0.61},
-    # )
+    size_shape       = int(os.environ.get("N", 256))
+    box_width_phys   = 1.0                          # cm : physical width of the whole box
+    dx_phys          = box_width_phys / size_shape   # cm per cell
+    cell_size_phys   = dx_phys                       # alias kept for downstream code
+    source_rate_phys = 1e10                          # photons / s
 
-    # source_rate_phys = "1e10 photons/s"
-    # source_rate_code = to_code(source_rate_phys, "photon_rate", cu)
-    # t_phys = time_phys
-    # time_code = t_phys / cu.T_cgs
-    size_shape     = int(os.environ.get("N", 256))
-    box_width_phys = 1.0                          # cm
-    dx_phys        = box_width_phys / size_shape  # cm per cell
-    source_rate_phys = 1e10                       # photons / s
+    # ct doit rester dans la boite (periodique) : ct < box/2 -> t < box/(2c).
+    t_phys = time_phys
 
-    # ct must stay inside the (periodic) box: ct < box/2 = 0.5 cm  ->  t < 1.67e-11 s.
-    # The original t = 5.2e-11 s gives ct = 1.56 cm = 1.56 box widths, i.e. the front
-    # has already wrapped around the periodic domain several times.
-    t_phys = time_phys_global#float(os.environ.get("TPHYS", 1.3e-11))   # s
-
-    # --- code units: length unit = ONE CELL ---------------------------------
+    # --- code units: length unit = ONE CELL, velocity unit = velocity_cms ------
     cu = CodeUnits.from_config(
-        {"length": f"{dx_phys} cm", "mass": "1 g", "velocity": "3e10 cm/s"},
+        {
+            "length": f"{dx_phys} cm",
+            "mass": f"{mass_unit_g} g",
+            "velocity": f"{velocity_cms} cm/s",
+        },
         {"gamma": 5.0 / 3.0, "mu": 0.61},
     )
 
-    c_cgs             = 2.99792458e10
-    light_speed_code  = c_cgs / cu.V_cgs          # ~1.0
-    dx_cell_code      = 1.0                       # the solver assumes this
-    time_code         = t_phys / cu.T_cgs
-    source_rate_code  = source_rate_phys * cu.T_cgs 
+    light_speed_code = C_CGS / cu.V_cgs      # vitesse de la lumiere en unites code
+    dx_cell_code     = 1.0                   # le solveur suppose dx = 1 cellule = 1 unite code
+    time_code        = t_phys / cu.T_cgs
+    source_rate_code = source_rate_phys * cu.T_cgs
 
     print("Snapshot time:", f"{t_phys:.2e} s")
 
-    print("\nCode unit scales:")
+    print("\\nCode unit scales:")
     print(f"  L_cgs = {cu.L_cgs:.6e} cm")
     print(f"  V_cgs = {cu.V_cgs:.6e} cm/s")
     print(f"  T_cgs = {cu.T_cgs:.6e} s")
     print(f"  light_speed_code = {light_speed_code:.6e}")
 
-    print("\nGrid geometry:")
+    print("\\nGrid geometry:")
     print(f"  box_width_phys = {box_width_phys:.6e} cm")
     print(f"  size_shape = {size_shape}")
-    print(f"  cell_size_phys = {cell_size_phys:.6e} cm")
-    print(f"  cell_size_code = {cell_size_code:.6e}")
+    print(f"  cell_size_phys (= dx_phys) = {cell_size_phys:.6e} cm")
+    print(f"  dx_cell_code = {dx_cell_code:.6e}")
 
-    print("\nCode values:")
-    print(f"  source_rate_phys = {source_rate_phys}")
+    print("\\nCode values:")
+    print(f"  source_rate_phys = {source_rate_phys:.4e} photons/s")
     print(f"  source_rate_code = {source_rate_code:.4e}")
     print(f"  time_code = {time_code:.4e}")
 
-    light_cross_time_phys = box_width_phys / 3.0e10
-    print(f"\nPhysical light-crossing time of box = {light_cross_time_phys:.4e} s")
+    light_cross_time_phys = box_width_phys / C_CGS
+    print(f"\\nPhysical light-crossing time of box = {light_cross_time_phys:.4e} s")
+    if t_phys >= box_width_phys / (2.0 * C_CGS):
+        print(f"  WARNING: ct >= box/2, le front lumineux boucle probablement autour du domaine periodique.")
 
     # ============================================================================
     # SIMULATION SETUP
@@ -390,12 +375,11 @@ def run_pipeline(length_unit_cm, velocity_cms, mass_unit_g, tag, output_dir, tim
         eq_test,
         solver_test,
         dh.PLM(limiter="VANLEER"),
-        # dx=cell_size_code before fix Ben
     )
 
     stellar_force = StellarRadiationForce(
         escape_fraction=0.1,
-        dx=dx_cell_code,               # = 1: only used as cell volume, unused in "stromgren"
+        dx=dx_cell_code,               # = 1: uniquement utilise comme volume de cellule
         injection_mode="stromgren",
         stromgren_rate=source_rate_code,
         injection_momentum=False,
@@ -427,7 +411,7 @@ def run_pipeline(length_unit_cm, velocity_cms, mass_unit_g, tag, output_dir, tim
         ),
     }
 
-    # field[0] = photons per cell
+    # field[0] = photons par cellule
     sol_test = jnp.zeros((4, size_shape, size_shape, size_shape))
 
     field_test, _, _, dt_historique_test, nombre_de_pas_test_test = hydrosim_test.evolve_till_time(
@@ -444,16 +428,18 @@ def run_pipeline(length_unit_cm, velocity_cms, mass_unit_g, tag, output_dir, tim
     # DIAGNOSTICS
     # ============================================================================
     dt_total_phys = float(jnp.sum(dt_historique_test)) * cu.T_cgs
-    N_expected = 1e10 * dt_total_phys
+    N_expected = source_rate_phys * dt_total_phys
     N_gamma_tot = float(np.sum(np.asarray(field_test[0])))
 
     print(f"Expected injected photons = {N_expected:.4e} photons")
     print(f"Total photons in domain   = {N_gamma_tot:.4e} photons")
     print(f"Difference                = {N_gamma_tot - N_expected:.4e} photons")
 
-    extent_xy = [-box_width_phys/2, box_width_phys/2, -box_width_phys/2, box_width_phys/2]
     extent_phys = compute_extent_phys(size_shape, cell_size_phys)
+    center_phys = box_width_phys / 2
     zoom_half_size = 0.05
+    xlim_zoom = (center_phys - zoom_half_size, center_phys + zoom_half_size)
+    ylim_zoom = (center_phys - zoom_half_size, center_phys + zoom_half_size)
 
     E3d = np.asarray(field_test[0])
     E_slice = E3d[:, :, size_shape // 2]
@@ -470,8 +456,6 @@ def run_pipeline(length_unit_cm, velocity_cms, mass_unit_g, tag, output_dir, tim
         cbar_label=r"$n_\gamma$ [arb.]",
         cmap="hot",
         log=True,
-        # xlim=(-zoom_half_size, zoom_half_size),
-        # ylim=(-zoom_half_size, zoom_half_size),
         output_dir=output_dir,
     )
 
@@ -482,19 +466,21 @@ def run_pipeline(length_unit_cm, velocity_cms, mass_unit_g, tag, output_dir, tim
         cbar_label=r"$N$ [arb.]",
         cmap="hot",
         log=True,
-        # xlim=(-zoom_half_size, zoom_half_size),
-        # ylim=(-zoom_half_size, zoom_half_size),
+        vmin=-20,
         output_dir=output_dir,
     )
+
     make_black_imshow(
         data=N_col_phys,
         extent=None,
+        use_extent=False,
         title=fr"{tag} - Photon density near source $N$ (brut)",
         cbar_label=r"$N$ [arb.]",
         cmap="hot",
         log=True,
         output_dir=output_dir,
     )
+
     fit_result = analyze_inverse_r2(
         field_3d=E3d,
         size_shape=size_shape,
@@ -511,9 +497,14 @@ def run_pipeline(length_unit_cm, velocity_cms, mass_unit_g, tag, output_dir, tim
         "field_3d": E3d,
         "E_slice": E_slice_density,
         "N_col_phys": N_col_phys,
-        "extent_xy": extent_xy,
-        "zoom_half_size": zoom_half_size,
+        "size_shape": size_shape,
+        "box_width_phys": box_width_phys,
         "cell_size_phys": cell_size_phys,
+        "extent_phys": extent_phys,
+        "center_phys": center_phys,
+        "zoom_half_size": zoom_half_size,
+        "xlim_zoom": xlim_zoom,
+        "ylim_zoom": ylim_zoom,
         "fit_result": fit_result,
         "output_dir": output_dir,
     }
@@ -523,11 +514,11 @@ def run_pipeline(length_unit_cm, velocity_cms, mass_unit_g, tag, output_dir, tim
 # RUN 1 AND RUN 2
 # ============================================================================
 run_ref = run_pipeline(
-    length_unit_ref, velocity_ref, mass_unit_ref,
+    velocity_ref, mass_unit_ref,
     f"run_ref_{time_phys_global:.1e}s", run_ref_output_dir, time_phys_global
 )
 run_new = run_pipeline(
-    length_unit_new, velocity_new, mass_unit_new,
+    velocity_new, mass_unit_new,
     f"run_new_{time_phys_global:.1e}s", run_new_output_dir, time_phys_global
 )
 
@@ -563,20 +554,13 @@ if fit_ref is not None and fit_new is not None:
 E_ref = run_ref["E_slice"]
 E_new = run_new["E_slice"]
 
-# Utiliser le meme systeme non centre que dans run_pipeline
-size_shape = 256
-box_width_phys = 1.0
-cell_size_phys = box_width_phys / size_shape
-extent_phys = compute_extent_phys(size_shape, cell_size_phys)
-
-center_phys = box_width_phys / 2
-zoom_half_size = run_ref["zoom_half_size"]
-xlim_zoom = (center_phys - zoom_half_size, center_phys + zoom_half_size)
-ylim_zoom = (center_phys - zoom_half_size, center_phys + zoom_half_size)
+# Reutilise le systeme non centre calcule dans run_pipeline pour run_ref
+extent_phys = run_ref["extent_phys"]
+xlim_zoom = run_ref["xlim_zoom"]
+ylim_zoom = run_ref["ylim_zoom"]
 
 diff_abs = E_new - E_ref
 diff_rel = np.abs(diff_abs) / np.maximum(np.abs(E_ref), 1e-30)
-
 
 make_black_imshow(
     data=E_ref,
@@ -590,7 +574,6 @@ make_black_imshow(
     output_dir=master_output_dir,
 )
 
-
 make_black_imshow(
     data=E_new,
     extent=extent_phys,
@@ -603,28 +586,22 @@ make_black_imshow(
     output_dir=master_output_dir,
 )
 
-
 make_black_imshow(
     data=diff_abs,
     extent=extent_phys,
     title=f"ABSOLUTE DIFFERENCE - new minus ref ({time_phys_global:.1e}s)",
-    cbar_label=r"$\Delta n_\gamma$",
+    cbar_label=r"$\\Delta n_\\gamma$",
     cmap="coolwarm",
     log=False,
-    # xlim=xlim_zoom,
-    # ylim=ylim_zoom,
     output_dir=master_output_dir,
 )
-
 
 make_black_imshow(
     data=diff_rel,
     extent=extent_phys,
     title=f"RELATIVE DIFFERENCE - (new-ref)/ref ({time_phys_global:.1e}s)",
-    cbar_label=r"$\Delta n_\gamma / n_{\gamma,\mathrm{ref}}$",
+    cbar_label=r"$\\Delta n_\\gamma / n_{\\gamma,\\mathrm{ref}}$",
     cmap="coolwarm",
     log=False,
-    # xlim=xlim_zoom,
-    # ylim=ylim_zoom,
     output_dir=master_output_dir,
 )
