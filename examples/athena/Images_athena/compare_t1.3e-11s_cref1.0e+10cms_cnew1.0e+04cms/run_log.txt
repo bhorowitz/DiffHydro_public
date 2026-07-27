@@ -1,0 +1,5483 @@
+Backend: gpu
+Devices: [CudaDevice(id=0)]
+Master output folder: examples/athena/Images_athena/compare_t1.3e-11s_cref1.0e+10cms_cnew1.0e+04cms
+Run ref output folder: examples/athena/Images_athena/compare_t1.3e-11s_cref1.0e+10cms_cnew1.0e+04cms/t1.3e-11s_c1.0e+10cms
+Run new output folder: examples/athena/Images_athena/compare_t1.3e-11s_cref1.0e+10cms_cnew1.0e+04cms/t1.3e-11s_c1.0e+04cms
+\n================================================================================
+RUN PIPELINE: run_ref_1.3e-11s | light speed used in solver = 1.000000e+10 cm/s
+Output dir  = examples/athena/Images_athena/compare_t1.3e-11s_cref1.0e+10cms_cnew1.0e+04cms/t1.3e-11s_c1.0e+10cms
+================================================================================
+Snapshot time: 1.30e-11 s
+\nCode unit scales (identical across runs):
+  L_cgs = 3.906250e-03 cm  (= 1 cell)
+  V_cgs = 2.997925e+10 cm/s (= true speed of light)
+  T_cgs = 1.302985e-13 s
+  light_speed_code_true  = 1.000000  (sanity check, should be ~1)
+  light_speed_code_used  = 3.335641e-01  (this run's solver light speed)
+\nGrid geometry:
+  box_width_phys = 1.000000e+00 cm
+  size_shape = 256
+  cell_size_phys (= dx_phys) = 3.906250e-03 cm
+  dx_cell_code = 1.000000e+00
+\nCode values:
+  source_rate_phys = 1.0000e+10 photons/s
+  source_rate_code = 1.3030e-03
+  time_code = 9.9771e+01
+\nExpected front  c_used*t = 1.3000e-01 cm = 33.3 cells = 0.130 box widths
+Physical light-crossing time of box (at c_used) = 1.0000e-10 s
+hydrosim_test.dx_o = 1  cf.dx_o = 1  cfl = 0.4
+expected dt_code   = 0.39972327733333335
+\nRunning to t = 1.300e-11 s = 99.77 code units ...
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+
+                [stromgren debug]
+                dt_code = 0.19986164569854736
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.0002604166802484542
+                
+Simulation completed!
+  Number of steps: 250,  dt_code[0] = 3.997233e-01
+  sum(dt) = 99.9308 code = 1.3021e-11 s
+  E min/max = -1.1210e-44 / 7.6852e-05
+Expected injected photons = 1.3021e-01 photons
+Total photons in domain   = 1.3021e-01 photons
+Difference                = -7.5977e-08 photons
+  thr 1e-03 of peak -> radius  35 cells = 1.3672e-01 cm
+  thr 1e-06 of peak -> radius  52 cells = 2.0312e-01 cm
+  thr 1e-10 of peak -> radius  56 cells = 2.1875e-01 cm
+  thr 1e-15 of peak -> radius  58 cells = 2.2656e-01 cm
+  expected free-streaming radius = 33.3 cells
+[run_ref_1.3e-11s] c=-7.606382  b=2.178355 (+/- 4.39e-02)
+[run_ref_1.3e-11s] injection_radius=6, fit_range=[7.0, 31.0] cells
+\n================================================================================
+RUN PIPELINE: run_new_1.3e-11s | light speed used in solver = 1.000000e+04 cm/s
+Output dir  = examples/athena/Images_athena/compare_t1.3e-11s_cref1.0e+10cms_cnew1.0e+04cms/t1.3e-11s_c1.0e+04cms
+================================================================================
+Snapshot time: 1.30e-11 s
+\nCode unit scales (identical across runs):
+  L_cgs = 3.906250e-03 cm  (= 1 cell)
+  V_cgs = 2.997925e+10 cm/s (= true speed of light)
+  T_cgs = 1.302985e-13 s
+  light_speed_code_true  = 1.000000  (sanity check, should be ~1)
+  light_speed_code_used  = 3.335641e-07  (this run's solver light speed)
+\nGrid geometry:
+  box_width_phys = 1.000000e+00 cm
+  size_shape = 256
+  cell_size_phys (= dx_phys) = 3.906250e-03 cm
+  dx_cell_code = 1.000000e+00
+\nCode values:
+  source_rate_phys = 1.0000e+10 photons/s
+  source_rate_code = 1.3030e-03
+  time_code = 9.9771e+01
+\nExpected front  c_used*t = 1.3000e-07 cm = 0.0 cells = 0.000 box widths
+Physical light-crossing time of box (at c_used) = 1.0000e-04 s
+hydrosim_test.dx_o = 1  cf.dx_o = 1  cfl = 0.4
+expected dt_code   = 399723.2773333334
+\nRunning to t = 1.300e-11 s = 99.77 code units ...
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+
+                [stromgren debug]
+                dt_code = 0.25
+                rate_code = 0.0013029847759753466
+                per_star_source_code = 0.00032574619399383664
+                
+Simulation completed!
+  Number of steps: 200,  dt_code[0] = 5.000000e-01
+  sum(dt) = 100.0000 code = 1.3030e-11 s
+  E min/max = 0.0000e+00 / 1.0373e-03
+Expected injected photons = 1.3030e-01 photons
+Total photons in domain   = 1.3030e-01 photons
+Difference                = 5.7047e-09 photons
+  thr 1e-03 of peak -> radius   6 cells = 2.3438e-02 cm
+  thr 1e-06 of peak -> radius   6 cells = 2.3438e-02 cm
+  thr 1e-10 of peak -> radius   7 cells = 2.7344e-02 cm
+  thr 1e-15 of peak -> radius   7 cells = 2.7344e-02 cm
+  expected free-streaming radius = 0.0 cells
+[run_new_1.3e-11s] c=118.943745  b=64.841679 (+/- 1.60e+01)
+[run_new_1.3e-11s] injection_radius=6, fit_range=[7.0, 12.0] cells

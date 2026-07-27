@@ -39,16 +39,18 @@ print("Backend:", jax.default_backend(), jax.devices())
 # ============================================================================
 # PHYSICAL SETUP
 # ============================================================================
+BASE_OUTPUT_DIR = "examples/athena/Images_athena"
+
 
 size_shape     = int(os.environ.get("N", 256))
-box_width_phys = 1.0                          # cm
+box_width_phys = 4                         # cm
 dx_phys        = box_width_phys / size_shape  # cm per cell
 source_rate_phys = 1e10                       # photons / s
 
 # ct must stay inside the (periodic) box: ct < box/2 = 0.5 cm  ->  t < 1.67e-11 s.
 # The original t = 5.2e-11 s gives ct = 1.56 cm = 1.56 box widths, i.e. the front
 # has already wrapped around the periodic domain several times.
-t_phys = float(os.environ.get("TPHYS", 1.3e-11))   # s
+t_phys = float(os.environ.get("TPHYS", 5.2e-11))   # s
 
 # --- code units: length unit = ONE CELL ---------------------------------
 cu = CodeUnits.from_config(
@@ -160,6 +162,6 @@ ax.set_xlabel("y [cm]"); ax.set_ylabel("x [cm]")
 ax.set_title(f"Photons/cell, t = {t_phys:.2e} s  (ct = {c_cgs*t_phys/dx_phys:.0f} cells)")
 fig.colorbar(im, ax=ax, label="photons per cell")
 plt.tight_layout()
-out = "/mnt/data2/travail/stage/DiffHydro_public/examples/athena/Images_athena/field_test_fixed_units.png"
+out = f"{BASE_OUTPUT_DIR}/field_test_fixed_units.png"
 plt.savefig(out, dpi=150, bbox_inches="tight")
 print("wrote", out)
