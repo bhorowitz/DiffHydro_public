@@ -15,7 +15,8 @@ class ConvectiveFlux:
                  EquationManager,
                  Solver,
                  Recon,
-                 positivity=True
+                 positivity=True,
+                 dx=1,
                  ):
         self.eq_manage = EquationManager
         self.solver = Solver
@@ -23,7 +24,8 @@ class ConvectiveFlux:
 
         self.positivity = positivity
         self.positivity_stencil = recon.WENO1()
-        self.dx_o = 1
+        # Taille de cellule en unites code : doit etre la meme que hydro(dx=...).
+        self.dx_o = dx
 
         try:  # 3d
             self.flux_shapes = (
@@ -219,7 +221,8 @@ class ConductiveFlux:
                  Solver,
                  Recon,
                  positivity=False,
-                 zeta=0
+                 zeta=0,
+                 dx=1,
                  ):
         self.eq_manage = EquationManager
         self.solver = Solver
@@ -227,7 +230,8 @@ class ConductiveFlux:
         self.zeta = zeta
         self.positivity = positivity
         self.positivity_stencil = recon.WENO1()
-        self.dx_o = 1
+        # Taille de cellule en unites code : doit etre la meme que hydro(dx=...).
+        self.dx_o = dx
 
         try:  # 3d
             self.flux_shapes = (

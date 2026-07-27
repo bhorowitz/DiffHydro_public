@@ -753,7 +753,8 @@ class StellarRadiationForce:
 
         if self.injection_mode == "stromgren":
             per_star_source = self.get_N_gamma_stromgen_sphere() * dt
-            self._debug_stromgren_units_jax(dt, per_star_source)
+            if self.debug:
+                self._debug_stromgren_units_jax(dt, per_star_source)
         elif self.injection_mode == "physical":
             per_star_source = self.get_N_gamma(
                 star_masses, star_ages_old, star_ages_new, star_metallicities, sol
@@ -870,6 +871,11 @@ class StellarRadiationForce:
         return (star_masses * delta_emission) * self.escape_fraction / cell_volume
 
     def get_N_gamma_stromgen_sphere(self):
-        return self.stromgren_rate
+        # stromgren_rate est un TAUX de photons (photons par unite de temps code),
+        # alors que sol[0] est une DENSITE (photons par unite de volume code) :
+        # il faut donc etaler le taux sur le volume de cellule dx**ndim, avec
+        # ndim = nombre d'axes spatiaux (len(mesh_shape), comme sol.ndim - 1).
+        cell_volume = self.dx ** len(self.mesh_shape)
+        return self.stromgren_rate / cell_volume
     
     
