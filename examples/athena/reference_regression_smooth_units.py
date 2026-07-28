@@ -1,33 +1,33 @@
 """
 RAMSES-RT point-source test, with units that match what the solver actually does.
 
-UNIT CONVENTION (new, unit-agnostic)
--------------------------------------
-Instead of forcing centimeters, every physical length/velocity/time input is now
-parsed through UnitParser, so the user can pass ANY supported unit string, e.g.:
+UNIT CONVENTION (new, fully unit-agnostic via UnitParser)
+----------------------------------------------------------
+Every physical length/velocity/time input can now be given in ANY unit known to
+diffhydro.units.registry.UnitParser (cm, m, km, pc, kpc for length; cm/s, m/s,
+km/s for velocity; s for time; ...). Each input is parsed once, converted to cgs
+immediately, and everything downstream (dx_code, CodeUnits, the solver, the
+plots) only ever sees cgs values -- so changing the unit of an input is
+completely transparent and never requires touching the rest of the script.
 
-    ULEN="1 km"        ULEN="0.05 cm"      ULEN="3.2e-3 pc"
-    BOXPHYS="10 km"    BOXPHYS="3.2 cm"    BOXPHYS="1e-2 pc"
-    UVEL="3e10 cm/s"   UVEL="3e5 km/s"
-    TPHYS="5.2e-11 s"
+    old :   unit_length   = box_width_phys / N      (1 cell = 1 code unit,
+                                                        dx_code == 1 enforced)
+    new:   box_width_phys_cgs = box_width_code * unit_length_phys_cgs
+           dx_code            = box_width_code / N     (arbitrary dx_code)
 
-Internally, everything is converted to cgs (cm, cm/s, s, g, ...) immediately after
-parsing, so the rest of the pipeline (dx_code, CodeUnits, the solver, the plots)
-is completely unaware of which unit the user originally chose. This is what makes
-the unit change "smooth": you only ever touch the *_cgs variables downstream.
+The two FREE inputs are now
+  * unit_length_phys : physical size of ONE code length unit, given as a
+                        free string with any supported unit, e.g. "1 km",
+                        "0.05 cm", "3.2e-3 pc",
+  * box_width_phys   : physical box size, also a free unit string
+                        (e.g. "10 km", "3.2 cm"), takes precedence over
+                        box_width_code if both are given,
+and both the physical box size and the cell size follow from them, always
+expressed internally in cgs (cm).
 
-    box_width_phys_cgs = box_width_code * unit_length_phys_cgs   # cm
-    dx_code            = box_width_code / N
-    dx_phys_cgs        = dx_code * unit_length_phys_cgs          # cm
-
-The two FREE inputs remain:
-  * unit_length_phys (any length unit string) : physical size of ONE code length unit,
-  * box_width_code                            : box size expressed in code length units,
-OR you can instead give box_width_phys directly (any length unit string) and
-box_width_code is derived from it -- both entry points are supported below.
-
-Consequence: dx_code is generally != 1, so it must be passed explicitly to
-EVERYTHING that contains a dx, otherwise the solver falls back to its default dx_o = 1:
+Consequence: dx_code is generally != 1, so it must be passed explicitly
+to EVERYTHING that contains a dx, otherwise the solver falls back to its
+default dx_o = 1:
 
   * hydro(dx=dx_code)                        -> flux divergence, rhs/dx_o
   * ConvectiveFlux_Radiative_transfer(dx=)   -> CFL, dt = cfl / (ndim*c/dx)
@@ -36,19 +36,21 @@ EVERYTHING that contains a dx, otherwise the solver falls back to its default dx
 And the sol[0] field (E_gamma) is a photon DENSITY in code units
 (photons per code-volume unit), not "photons per cell":
 
-    photons per cell   = E_code * dx_code**3
-    n_gamma [cm^-3]     = E_code / cu.L_cgs**3      (= photons_per_cell / dx_phys_cgs**3)
-    photons in the box  = sum(E_code) * dx_code**3
+    photons per cell    = E_code * dx_code**3
+    n_gamma [cm^-3]      = E_code / cu.L_cgs**3      (= photons_per_cell / dx_phys_cgs**3)
+    photons in the box   = sum(E_code) * dx_code**3
 
-All the diagnostics/plotting below work with E_cell (photons per cell), which is
-invariant under a change of unit convention.
+All the diagnostics/plotting below work with E_cell (photons per cell), which
+is invariant under a change of unit convention.
 
-Environment variables:
+Environment variables (ULEN, BOXPHYS, UVEL, TPHYS accept ANY unit string
+recognized by UnitParser, e.g. "1 km", "3.2 cm", "3e5 km/s", "5.2e-11 s"):
   GPU, N, ULEN, BOXPHYS, BOXCODE, UVEL, SRC, TPHYS, EPS, MAXDT, NSTEP,
   RTRUNC_AVG, RTRUNC_FIT
 
-  ULEN / BOXPHYS / UVEL / TPHYS accept full unit strings (e.g. "1 km", "3.2 cm",
-  "3e10 cm/s", "5.2e-11 s"). If BOXPHYS is set, it takes precedence over BOXCODE.
+If BOXPHYS is set, it takes precedence over BOXCODE. SRC (photons/s) has no
+length/mass/time dimension in the unit table, so it stays a plain float
+(interpreted as cgs photons/s).
 """
 
 import os, sys, math
@@ -70,23 +72,29 @@ from scipy.optimize import curve_fit
 
 import diffhydro as dh
 from diffhydro.units import CodeUnits
+from diffhydro.units.registry import UnitParser  # <- your unit parser/registry
 from diffhydro.equationmanager_radiative_transf_no_chat import EquationManager as EquationManager_RT
 from diffhydro.physics.radiative_transfer import StellarRadiationForce
-from diffhydro.registry import UnitParser  # the small parser you provided
 
 print("Backend:", jax.default_backend(), jax.devices())
 
 up = UnitParser()
 
-def env_quantity(name: str, default: str, expected_dim: str) -> "object":
-    """Read an env var as a free-form quantity string ('1 km', '3.2 cm', ...),
-    parse it with UnitParser and return the ParsedQuantity (value, unit, cgs_value)."""
+def env_quantity(name: str, default: str, expected_dim: str):
+    """Read an env var as a free-form quantity string ('1 km', '3.2 cm',
+    '3e10 cm/s', '5.2e-11 s', ...), parse it with UnitParser, and return the
+    ParsedQuantity (value, unit, dimension, cgs_value). This is the single
+    choke point that makes unit choice fully transparent to the rest of the
+    script: everything downstream only ever reads `.cgs_value`."""
     text = os.environ.get(name, default)
-    return up.parse(text, expected_dim=expected_dim)
+    try:
+        return up.parse(text, expected_dim=expected_dim)
+    except ValueError as exc:
+        raise SystemExit(f"Invalid value for {name}='{text}': {exc}") from exc
 
 # ============================================================================
-# PHYSICAL SETUP  (unit-agnostic: everything below is expressed in cgs
-# immediately after parsing, so any input unit works transparently)
+# PHYSICAL SETUP  (unit-agnostic: any input unit is converted to cgs here,
+# and only cgs values are used from this point on)
 # ============================================================================
 
 size_shape = int(os.environ.get("N", 256))
@@ -99,8 +107,8 @@ unit_length_str      = f"{ulen_q.value:g} {ulen_q.unit}"   # for printing/taggin
 uvel_q = env_quantity("UVEL", "3e10 cm/s", expected_dim="velocity")
 unit_velocity_phys = uvel_q.cgs_value          # cm/s <- 1 code velocity unit
 
-# Box size: either BOXPHYS (any length unit) or BOXCODE (dimensionless code units).
-# BOXPHYS takes precedence if provided.
+# Box size: either BOXPHYS (any length unit string) or BOXCODE (dimensionless
+# code units). BOXPHYS takes precedence if provided.
 if "BOXPHYS" in os.environ:
     boxphys_q = env_quantity("BOXPHYS", "3.2 cm", expected_dim="length")
     box_width_phys_cgs = boxphys_q.cgs_value                 # cm
@@ -119,10 +127,11 @@ cell_volume_cm3  = dx_phys_cgs ** 3                      # cell volume, cm^3
 
 # Source rate: photons/s has no length/mass/time dimension in the unit table,
 # so it is kept as a plain float (cgs photons/s by convention).
-source_rate_phys = float(os.environ.get("SRC", 1e15))    # photons / s
+source_rate_phys = float(os.environ.get("SRC", 1e10))    # photons / s
 
 # ct must stay inside the (periodic) box: ct < box/2 -> t < box/(2c).
-tphys_q = env_quantity("TPHYS", "5.2e-9 s", expected_dim="time")
+# The original t = 5.2e-11 s gives ct = 1.56 cm = 0.49 box widths for box = 3.2 cm.
+tphys_q = env_quantity("TPHYS", "5.2e-11 s", expected_dim="time")
 t_phys = tphys_q.cgs_value   # s
 
 # --- code units: 1 code length unit = unit_length_phys_cgs cm --------------
@@ -170,7 +179,7 @@ print(f"  output dir            = {BASE_OUTPUT_DIR}")
 print("=" * 70)
 print("  --- user-facing inputs (any unit, auto-converted to cgs) ---")
 print(f"  ULEN input            = '{unit_length_str}'  -> {unit_length_phys_cgs:.6e} cm")
-print(f"  BOX  input            = '{box_width_str}'")
+print(f"  BOX  input            = '{box_width_str}'    -> {box_width_phys_cgs:.6e} cm")
 print(f"  UVEL input            = '{uvel_q.value:g} {uvel_q.unit}' -> {unit_velocity_phys:.6e} cm/s")
 print(f"  TPHYS input           = '{tphys_q.value:g} {tphys_q.unit}' -> {t_phys:.6e} s")
 print("  --- convention box_size = box_width_code * unit_length ---")
@@ -203,7 +212,7 @@ print("=" * 70)
 # get_conservatives_from_primitives). Since E_code = photons_per_cell /
 # dx_code**3, changing unit_length changes the field amplitude and therefore
 # the part of the profile that gets clipped by eps: eps must stay << typical E_code.
-eps_code = float(os.environ.get("EPS", 1e-10))
+eps_code = float(os.environ.get("EPS", 1e-20))
 eq_test = EquationManager_RT(
     light_speed=light_speed_code,
     mesh_shape=(size_shape, size_shape, size_shape),
@@ -265,7 +274,7 @@ params = {
 }
 sol_test = jnp.zeros((4, size_shape, size_shape, size_shape))
 
-print(f"\\nRunning to t = {t_phys:.3e} s = {time_code:.3e} code units ...")
+print(f"\nRunning to t = {t_phys:.3e} s = {time_code:.3e} code units ...")
 field_test, _, _, dt_hist, n_steps = hydrosim_test.evolve_till_time(
     cp.deepcopy(sol_test), params, time_code
 )
@@ -344,6 +353,7 @@ fig.colorbar(im, ax=ax, label="photons per cell")
 plt.tight_layout()
 out = os.path.join(BASE_OUTPUT_DIR, f"field_test_fixed_units_{run_tag}.png")
 plt.savefig(out, dpi=150, bbox_inches="tight")
+plt.show()
 print("wrote", out)
 
 # raw solver field = density in code units, axes in cell indices
@@ -356,6 +366,7 @@ fig.colorbar(im, ax=ax, label="photons per code volume")
 plt.tight_layout()
 out = os.path.join(BASE_OUTPUT_DIR, f"field_test_fixed_units_{run_tag}_brut.png")
 plt.savefig(out, dpi=150, bbox_inches="tight")
+plt.show()
 print("wrote", out)
 
 fig, ax = plt.subplots(figsize=(6, 5))
@@ -367,6 +378,7 @@ fig.colorbar(im, ax=ax, label="log10 photons per code volume")
 plt.tight_layout()
 out = os.path.join(BASE_OUTPUT_DIR, f"field_test_fixed_units_{run_tag}_brut_log.png")
 plt.savefig(out, dpi=150, bbox_inches="tight")
+plt.show()
 print("wrote", out)
 
 # ============================================================================
@@ -396,10 +408,11 @@ ax.set_ylabel("x [cm]")
 ax.set_title(f"Photon number density, t = {t_phys:.2e} s  "
              f"(ct = {c_cgs*t_phys/dx_phys_cgs:.0f} cells)")
 cbar = fig.colorbar(im, ax=ax)
-cbar.set_label(r"$n_\\gamma$  [photons cm$^{-3}$]")
+cbar.set_label(r"$n_\gamma$  [photons cm$^{-3}$]")
 plt.tight_layout()
 out = os.path.join(BASE_OUTPUT_DIR, f"field_test_density_cm3_{run_tag}.png")
 plt.savefig(out, dpi=150, bbox_inches="tight")
+plt.show()
 print("wrote", out)
 
 # ============================================================================
@@ -488,6 +501,7 @@ def analyze_inverse_r2(field_3d, size_shape, cell_size_phys, tag,
     ax.legend(fontsize=8)
     plt.tight_layout()
     plt.savefig(f"{output_dir}/loglog_spherical_average_{tag}.png", dpi=300, bbox_inches="tight")
+    plt.show()
 
     fig, ax = plt.subplots(figsize=(7, 5), facecolor="black")
     ax.set_facecolor("black")
@@ -498,6 +512,7 @@ def analyze_inverse_r2(field_3d, size_shape, cell_size_phys, tag,
     ax.set_ylabel("Shell-averaged field value")
     ax.set_title(f"Linear spherical average - {tag}")
     ax.legend(fontsize=8)
+    plt.show()
     plt.tight_layout()
     plt.savefig(f"{output_dir}/linear_spherical_average_{tag}.png", dpi=300, bbox_inches="tight")
 
@@ -551,6 +566,7 @@ def value_average_radius(field_3d, size_shape, cell_size_phys, tag,
     ax.grid(which="both", color="0.25", ls="--", lw=0.5)
     plt.tight_layout()
     plt.savefig(f"{output_dir}/loglog_spherical_average_{tag}_brut.png", dpi=300, bbox_inches="tight")
+    plt.show()
 
     fig, ax = plt.subplots(figsize=(7, 5), facecolor="black")
     ax.set_facecolor("black")
@@ -562,7 +578,7 @@ def value_average_radius(field_3d, size_shape, cell_size_phys, tag,
     ax.legend(fontsize=8)
     plt.tight_layout()
     plt.savefig(f"{output_dir}/linear_spherical_average_{tag}_brut.png", dpi=300, bbox_inches="tight")
-
+    plt.show()
     return {
         "tag": tag, "r_sph": r_sph, "y_sph": y_sph, "r_valid": r_valid,
         "y_valid": y_valid, "x_valid": x_valid,
@@ -585,7 +601,7 @@ evolve_value_radius_result = value_average_radius(
     size_shape=size_shape,
     cell_size_phys=dx_phys_cgs,
     tag=run_tag,
-    radius_truncation=clamp_truncation(int(os.environ.get("RTRUNC_AVG", 157)), "avg"),
+    radius_truncation=clamp_truncation(int(os.environ.get("RTRUNC_AVG", 250)), "avg"),
     output_dir=BASE_OUTPUT_DIR,
 )
 fit_result = analyze_inverse_r2(
@@ -593,12 +609,12 @@ fit_result = analyze_inverse_r2(
     size_shape=size_shape,
     cell_size_phys=dx_phys_cgs,
     tag=run_tag,
-    radius_truncation=clamp_truncation(int(os.environ.get("RTRUNC_FIT", 80)), "fit"),
+    radius_truncation=clamp_truncation(int(os.environ.get("RTRUNC_FIT", 90)), "fit"),
     output_dir=BASE_OUTPUT_DIR,
 )
 
 if fit_result is not None:
-    print(f"\\nPower-law fit result: n_gamma(r) ~ r^(-{fit_result['b']:.3f})  "
+    print(f"\nPower-law fit result: n_gamma(r) ~ r^(-{fit_result['b']:.3f})  "
           f"(+/- {fit_result['b_err']:.2e})")
 else:
-    print("\\nPower-law fit could not be performed (not enough valid points).")
+    print("\nPower-law fit could not be performed (not enough valid points).")
