@@ -91,6 +91,18 @@ def temperature_from_Prho(p_code: Any, rho_code: Any, cu: CodeUnits) -> Any:
     T_k = p_cgs * cu.mu * cu.mH_cgs / (rho_cgs * cu.kB_cgs)
     return T_k if T_k.ndim > 0 else float(T_k)
 
+def temperature_code_from_Prho(p_code: Any, rho_code: Any, cu: CodeUnits) -> Any:
+    """Compute temperature directly in code units from pressure and density,
+    both given in code units. Equivalent to temperature_from_Prho(...) / cu.Temp_cgs,
+    but avoids an unnecessary round-trip through cgs Kelvin."""
+    p_arr = np.asarray(p_code)
+    rho_arr = np.asarray(rho_code)
+    # P_cgs / rho_cgs already cancels most of cu.scale() factors; going through
+    # cu.P_cgs and cu.rho_cgs explicitly keeps the formula symmetric with
+    # temperature_from_Prho and easy to audit.
+    T_k = temperature_from_Prho(p_arr, rho_arr, cu)
+    T_code = np.asarray(T_k) / cu.Temp_cgs
+    return T_code if T_code.ndim > 0 else float(T_code)
 
 def pressure_from_Trho(
     T: Any,

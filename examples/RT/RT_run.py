@@ -73,9 +73,12 @@ from scipy.optimize import curve_fit
 import diffhydro as dh
 from diffhydro.units import CodeUnits
 from diffhydro.units.registry import UnitParser  # <- your unit parser/registry
-from diffhydro.equationmanager_radiative_transf_no_chat import EquationManager as EquationManager_RT
-from diffhydro.physics.radiative_transfer import StellarRadiationForce
-
+from diffhydro.equationmanager_radiative_transf_no_chat_copy import EquationManager as EquationManager_RT
+from diffhydro.physics.radiative_transfer_fixed import StellarRadiationForce
+from diffhydro.coupled_rhd import (
+    EquationManagerCoupled, BlockFlux, ChemBlockFlux,
+    IonizationForce, ChemistryBoundsForce, build_coupled_hydro_example,
+)
 print("Backend:", jax.default_backend(), jax.devices())
 
 up = UnitParser()
@@ -97,7 +100,7 @@ def env_quantity(name: str, default: str, expected_dim: str):
 # and only cgs values are used from this point on)
 # ============================================================================
 
-size_shape = int(os.environ.get("N", 256))
+size_shape = int(os.environ.get("N", 100))
 
 # --- free inputs of the new convention, parsed via UnitParser --------------
 ulen_q = env_quantity("ULEN", "1.0 cm", expected_dim="length")
@@ -170,7 +173,7 @@ run_tag = (
     f"_t{t_phys:.2e}s"
 )
 
-BASE_OUTPUT_DIR = os.path.join(REPO_ROOT, "examples/athena/Images_athena", run_tag)
+BASE_OUTPUT_DIR = os.path.join(REPO_ROOT, "examples/RT/Images", run_tag)
 os.makedirs(BASE_OUTPUT_DIR, exist_ok=True)
 
 print("=" * 70)
@@ -219,6 +222,11 @@ eq_test = EquationManager_RT(
     eps=eps_code,
     debug=False,
 )
+eq_test_hydro = dh.EquationManager(
+    gamma=5.0 / 3.0,
+    mesh_shape=(size_shape, size_shape, size_shape),
+    eps=eps_code,
+)
 assert abs(cfl_code - eq_test.cfl) < 1e-12, (
     f"desynchronized cfl: dt_cfl computed with {cfl_code}, solver has {eq_test.cfl}"
 )
@@ -236,10 +244,41 @@ if source_density_per_step < 1e4 * eps_code or source_density_per_step < 1e-5:
 solver_test = dh.LaxFriedrichs_Radiative_transfer(
     equation_manager=eq_test, signal_speed=dh.signal_speed_Rusanov
 )
-# dx_code must be provided here: it sets the CFL of the RT flux.
-cf_test = dh.ConvectiveFlux_Radiative_transfer(
-    eq_test, solver_test, dh.PLM(limiter="VANLEER"), dx=dx_code
+solver_test_hydro = dh.LaxFriedrichs(
+    equation_manager=eq_test_hydro, signal_speed=dh.signal_speed_Rusanov
 )
+
+class StateBlockFlux:
+    def __init__(self, base_flux, state_slice):
+        self.base_flux = base_flux
+        self.state_slice = state_slice
+        self.dx_o = base_flux.dx_o
+
+    def flux(self, sol, ax, params, flux):
+        local_sol = sol[self.state_slice]
+        local_flux = self.base_flux.flux(local_sol, ax, params, flux)
+        full_flux = jnp.zeros_like(sol)
+        return full_flux.at[self.state_slice].set(local_flux)
+
+    def timestep(self, sol):
+        return self.base_flux.timestep(sol[self.state_slice])
+
+# dx_code must be provided here: it sets the CFL of the RT flux.
+rt_flux = StateBlockFlux(
+    dh.ConvectiveFlux_Radiative_transfer(
+        eq_test, solver_test, dh.PLM(limiter="VANLEER"), dx=dx_code,
+    ),
+    slice(0, eq_test.n_cons),
+)
+hydro_flux = StateBlockFlux(
+    dh.ConvectiveFlux(
+        eq_test_hydro, solver_test_hydro, dh.PLM(limiter="VANLEER"), dx=dx_code,
+    ),
+    slice(eq_test.n_cons, eq_test.n_cons + eq_test_hydro.n_cons),
+)
+# n_cons_total = (EquationManager_RT.get_conservatives_from_primitives() +
+#                 dh.EquationManager.get_conservatives_from_primitives()+
+#                 EquationManager_RT.get_xHII_grid())
 
 stellar_force = StellarRadiationForce(
     escape_fraction=0.1,
@@ -250,19 +289,30 @@ stellar_force = StellarRadiationForce(
     gaussian_star=True,            # gaussian_star=False breaks under jit (python `if` on tracer)
     injection_geometry="3D",
     eq=eq_test,
+    hydro_eq=eq_test_hydro,
     debug=False,
     momentum_only=False,
 )
+# heatcool_force = dh.physics.cooling.HeatCoolForce(                      # ADAPT import path
+#     equation_manager=eq_test_hydro, pressure_fn=None,
+#     logT_table=np.linspace(4.0, 8.5, 91),
+#     logLambda_m20_table=np.zeros(91),      # ADAPT: your real cooling table
+# )
+
+# coupled_eq = EquationManagerCoupled(hydro_eq=eq_test_hydro, rt_eq=eq_test)
+# n_cons_total = eqmanagerrtgetcons +eqmanagergasgetcons   # 5 + 4 + 1 = 10
+
+
 
 hydrosim_test = dh.hydro(
     n_super_step=n_super_step,
-    fluxes=[cf_test],
-    forces=[stellar_force],
+    fluxes=[hydro_flux, rt_flux],
+    forces=[stellar_force], #,cool,chemhii
     dx=dx_code,                    # flux divergence: rhs / dx_o
     max_dt=max_dt,
 )
-assert hydrosim_test.dx_o == cf_test.dx_o == stellar_force.dx, "desynchronized dx !"
-print("hydrosim_test.dx_o =", hydrosim_test.dx_o, " cf.dx_o =", cf_test.dx_o,
+assert hydrosim_test.dx_o == rt_flux.dx_o == stellar_force.dx, "desynchronized dx !"
+print("hydrosim_test.dx_o =", hydrosim_test.dx_o, " rt_flux.dx_o =", rt_flux.dx_o,
       " force.dx =", stellar_force.dx, " cfl =", eq_test.cfl)
 print("expected dt_code   =", eq_test.cfl / (3.0 * light_speed_code / dx_code))
 
@@ -272,9 +322,14 @@ params = {
     "star_metallicities": jnp.array([0.02]),
     "star_positions":     jnp.array([[size_shape // 2] * 3], dtype=jnp.int32),
 }
-sol_test = jnp.zeros((4, size_shape, size_shape, size_shape))
+sol_test = jnp.zeros((10, size_shape, size_shape, size_shape), dtype=jnp.float32)
+center = size_shape // 2
+sol_test = sol_test.at[0, center, center, center].set(1e-20)  # RT photon density
+sol_test = sol_test.at[5, center, center, center].set(1.0)      # hydro density
+sol_test = sol_test.at[9, center, center, center].set(1.0)      # hydro pressure
 
 print(f"\nRunning to t = {t_phys:.3e} s = {time_code:.3e} code units ...")
+#RUNNING TILL TIME
 field_test, _, _, dt_hist, n_steps = hydrosim_test.evolve_till_time(
     cp.deepcopy(sol_test), params, time_code
 )
@@ -325,6 +380,25 @@ for th in [1e-3, 1e-6, 1e-10, 1e-15]:
           f"= {r * dx_code:.4e} code units")
 print(f"  expected free-streaming radius = {c_cgs * t_phys / dx_phys_cgs:.1f} cells")
 
+
+if field_test.shape[0] > eq_test.n_active:
+    xHII_3d = np.asarray(field_test[eq_test.xHII_id], dtype=np.float64)
+
+    print(f"  x_HII min/max/mean = "
+          f"{xHII_3d.min():.4e} / {xHII_3d.max():.4e} / {xHII_3d.mean():.4e}")
+
+    # vérification des bornes physiques [0,1] -- doit toujours être vrai
+    n_out_of_bounds = np.sum((xHII_3d < -1e-9) | (xHII_3d > 1.0 + 1e-9))
+    print(f"  x_HII cells out of [0,1] bounds = {n_out_of_bounds}")
+
+    # cohérence avec le front radiatif: x_HII doit être ~1 près de la
+    # source et retomber vers 0 loin devant le front de photons
+    line_xHII = xHII_3d[c:, c, c]
+    print(f"  x_HII along +x axis (first 10 cells) = {line_xHII[:10]}")
+    print(f"  x_HII along +x axis (last 10 cells)  = {line_xHII[-10:]}")
+else:
+    print("  !! x_HII not present in field_test (n_cons/passive_names not configured)")
+
 # ============================================================================
 # PLOT
 # ============================================================================
@@ -345,16 +419,22 @@ E_slice = E_cell[:, :, c]          # photons per cell
 extent  = compute_extent_phys(size_shape, centered=False)
 fig, ax = plt.subplots(figsize=(6, 5))
 pos = E_slice[E_slice > 0]
-im = ax.imshow(np.ma.masked_less_equal(E_slice, 0.0), origin="lower", cmap="hot",
-               extent=extent, norm=LogNorm(vmin=max(pos.min(), peak * 1e-12), vmax=peak))
-ax.set_xlabel("y [cm]"); ax.set_ylabel("x [cm]")
-ax.set_title(f"Photons/cell, t = {t_phys:.2e} s  (ct = {c_cgs*t_phys/dx_phys_cgs:.0f} cells)")
-fig.colorbar(im, ax=ax, label="photons per cell")
-plt.tight_layout()
-out = os.path.join(BASE_OUTPUT_DIR, f"field_test_fixed_units_{run_tag}.png")
-plt.savefig(out, dpi=150, bbox_inches="tight")
-plt.show()
-print("wrote", out)
+if pos.size == 0:
+    print("  !! WARNING: E_slice has no positive values -- skipping this plot "
+          "(E_gamma is zero everywhere on this slice, injection likely failed).")
+else:
+    fig, ax = plt.subplots(figsize=(6, 5))
+    im = ax.imshow(np.ma.masked_less_equal(E_slice, 0.0), origin="lower", cmap="hot",
+                   extent=extent, norm=LogNorm(vmin=max(pos.min(), peak * 1e-12), vmax=peak))
+    ax.set_xlabel("y [cm]"); ax.set_ylabel("x [cm]")
+    ax.set_title(f"Photons/cell, t = {t_phys:.2e} s  (ct = {c_cgs*t_phys/dx_phys_cgs:.0f} cells)")
+    fig.colorbar(im, ax=ax, label="photons per cell")
+    plt.tight_layout()
+    out = os.path.join(BASE_OUTPUT_DIR, f"field_test_fixed_units_{run_tag}.png")
+    plt.savefig(out, dpi=150, bbox_inches="tight")
+    plt.show()
+    print("wrote", out)
+    
 
 # raw solver field = density in code units, axes in cell indices
 fig, ax = plt.subplots(figsize=(6, 5))
@@ -381,6 +461,21 @@ plt.savefig(out, dpi=150, bbox_inches="tight")
 plt.show()
 print("wrote", out)
 
+
+xHII_slice = xHII_3d[:, :, c]
+
+fig, ax = plt.subplots(figsize=(6, 5))
+im = ax.imshow(xHII_slice, origin="lower", cmap="viridis",
+               extent=extent, vmin=0.0, vmax=1.0)
+ax.set_xlabel("y [cm]"); ax.set_ylabel("x [cm]")
+ax.set_title(f"Ionization fraction x_HII, t = {t_phys:.2e} s")
+fig.colorbar(im, ax=ax, label=r"$x_{HII}$")
+plt.tight_layout()
+out = os.path.join(BASE_OUTPUT_DIR, f"xHII_slice_{run_tag}.png")
+plt.savefig(out, dpi=150, bbox_inches="tight")
+plt.show()
+print("wrote", out)
+
 # ============================================================================
 # NEW FIGURE: photon density in cm^-3 in the colorbar
 # ============================================================================
@@ -394,26 +489,27 @@ assert np.allclose(E_slice_density, E_slice_code / cu.L_cgs**3,
                    rtol=1e-9, atol=1e-15 * E_slice_density.max())
 
 pos_density = E_slice_density[E_slice_density > 0]
-peak_density = E_slice_density.max()
-
-fig, ax = plt.subplots(figsize=(6, 5))
-im = ax.imshow(
-    np.ma.masked_less_equal(E_slice_density, 0.0),
-    origin="lower", cmap="hot",
-    extent=extent,
-    norm=LogNorm(vmin=max(pos_density.min(), peak_density * 1e-12), vmax=peak_density),
-)
-ax.set_xlabel("y [cm]")
-ax.set_ylabel("x [cm]")
-ax.set_title(f"Photon number density, t = {t_phys:.2e} s  "
-             f"(ct = {c_cgs*t_phys/dx_phys_cgs:.0f} cells)")
-cbar = fig.colorbar(im, ax=ax)
-cbar.set_label(r"$n_\gamma$  [photons cm$^{-3}$]")
-plt.tight_layout()
-out = os.path.join(BASE_OUTPUT_DIR, f"field_test_density_cm3_{run_tag}.png")
-plt.savefig(out, dpi=150, bbox_inches="tight")
-plt.show()
-print("wrote", out)
+if pos_density.size == 0:
+    print("  !! WARNING: E_slice_density has no positive values -- skipping this plot.")
+else:
+    peak_density = pos_density.max()
+    fig, ax = plt.subplots(figsize=(6, 5))
+    im = ax.imshow(
+        np.ma.masked_less_equal(E_slice_density, 0.0),
+        origin="lower", cmap="hot",
+        extent=extent,
+        norm=LogNorm(vmin=max(pos_density.min(), peak_density * 1e-12), vmax=peak_density),
+    )
+    ax.set_xlabel("y [cm]")
+    ax.set_ylabel("x [cm]")
+    ax.set_title(f"Photon number density, t = {t_phys:.2e} s")
+    cbar = fig.colorbar(im, ax=ax)
+    cbar.set_label(r"$n_\gamma$  [photons cm$^{-3}$]")
+    plt.tight_layout()
+    out = os.path.join(BASE_OUTPUT_DIR, f"field_test_density_cm3_{run_tag}.png")
+    plt.savefig(out, dpi=150, bbox_inches="tight")
+    plt.show()
+    print("wrote", out)
 
 # ============================================================================
 # SPHERICAL AVERAGE + POWER-LAW (log-log linear) REGRESSION

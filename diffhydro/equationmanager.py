@@ -38,6 +38,7 @@ class EquationManager:
     eps: float = 1e-20
     isothermal: bool = False
     isothermal_sound_speed: float = 1.0
+    mesh_shape: tuple[int, int, int] = (100, 100, 100)
 
     # Active variable names/order (single source of truth)
     active_names: tuple[str, ...] = ("rho", "vx", "vy", "vz", "p")

@@ -26,7 +26,7 @@ class EquationManager:
       - using active_slice/passive_slice everywhere else.
     """
     gamma: float = 1.6
-    n_cons: int = 4 #avant c etait 5
+    n_cons: int = 5 #avant c etait 5
     eps: float = 1e-10
     isothermal: bool = False
     light_speed: float = 1#3e8 #en m.s-1
@@ -37,7 +37,7 @@ class EquationManager:
     # star_metallicity: float = 1.0
     mesh_shape: tuple[int, int, int] = (100, 100, 100)
     # Active variable names/order (single source of truth)
-    active_names: tuple[str, ...] = ("E_gamma", "F_gamma_x", "F_gamma_y", "F_gamma_z")#,"p" 
+    active_names: tuple[str, ...] = ("E_gamma", "F_gamma_x", "F_gamma_y", "F_gamma_z", "ionization_rate")#,"p" 
     # passive_names: tuple[str, ...] = ("E_gamma",) #new
     debug: bool = False
     # Derived index maps (filled in __post_init__)

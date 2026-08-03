@@ -19,7 +19,7 @@ class CodeUnits:
     mu: float = 0.6
     kB_cgs: float = 1.380649e-16
     mH_cgs: float = 1.6735575e-24
-
+    N_avogadro_cgs: float = 6.02214076e23
     @property
     def T_cgs(self) -> float:
         return self.L_cgs / self.V_cgs
