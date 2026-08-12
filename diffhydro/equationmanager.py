@@ -43,8 +43,26 @@ class EquationManager:
     # Active variable names/order (single source of truth)
     active_names: tuple[str, ...] = ("rho", "vx", "vy", "vz", "p")
 
+    # Passive scalar names/order (single source of truth). Any slot beyond
+    # the 5 active ones is a passive scalar s_k, whose CONSERVED form is
+    # rho * s_k and which is upwinded with the GAS mass flux (see
+    # get_fluxes_xi and ConvectiveFlux). This is where a gas property such
+    # as the ionization fraction x_HII belongs: it must travel with the gas,
+    # not with the radiation field.
+    #
+    #   dh.EquationManager(gamma=5/3, n_cons=6, passive_names=("x_HII",))
+    passive_names: tuple[str, ...] = ()
+
+    # Bounds re-imposed on named passive scalars after every primitive
+    # reconstruction. Nothing in the upwind transport of a passive scalar
+    # guarantees x_HII stays in [0, 1] across a sharp ionization front.
+    passive_bounds: dict[str, tuple[float, float]] = field(
+        default_factory=lambda: {"x_HII": (0.0, 1.0)}
+    )
+
     # Derived index maps (filled in __post_init__)
     active_map: dict[str, int] = field(init=False, repr=False)
+    passive_map: dict[str, int] = field(init=False, repr=False)
     mass_ids: int = field(init=False)
     vel_ids: tuple[int, int, int] = field(init=False)
     energy_ids: int = field(init=False)  # p in primitives, Etot in conservatives
@@ -52,16 +70,20 @@ class EquationManager:
 
     def __post_init__(self):
         self.n_active = len(self.active_names)
-        if self.n_active != self.n_cons:
+        n_passive_declared = len(self.passive_names)
+        if self.n_active != 5:
             raise ValueError(
-                f"Expected {self.n_cons} active vars (rho,vx,vy,vz,p). Got {self.n_active}."
+                f"Expected 5 active vars (rho,vx,vy,vz,p). Got {self.n_active}."
             )
-        if self.n_cons < self.n_active:
+        if self.n_active + n_passive_declared > self.n_cons:
             raise ValueError(
-                f"n_cons={self.n_cons} must be >= n_active={self.n_active}."
+                f"active_names ({self.n_active}) + passive_names "
+                f"({n_passive_declared}) exceeds n_cons ({self.n_cons})."
             )
 
         self.active_map = {name: i for i, name in enumerate(self.active_names)}
+        # position of each passive scalar WITHIN the passive block
+        self.passive_map = {name: i for i, name in enumerate(self.passive_names)}
         self.mass_ids = self.active_map["rho"]
         self.vel_ids = (
             self.active_map["vx"],
@@ -75,7 +97,9 @@ class EquationManager:
         self.thermal_conductivity_model = "SUTHERLAND"
         self.sutherland_parameters = [0.1, 1.0, 1.0]
         self.cfl = 0.4
-        self.mesh_shape = [100,100,100]
+        # NOTE: this used to be hard-reset to [100, 100, 100], silently
+        # discarding the mesh_shape passed by the caller.
+        self.mesh_shape = tuple(self.mesh_shape)
         self.R = 1.0
         self.cp = self.gamma / (self.gamma - 1.0) * self.R
         self.isothermal_sound_speed = float(self.isothermal_sound_speed)
@@ -96,6 +120,23 @@ class EquationManager:
     @property
     def n_passive(self) -> int:
         return max(0, self.n_cons - self.n_active)
+
+    def get_passive_index(self, name: str) -> int:
+        """Absolute index of a named passive scalar in the FULL state array."""
+        if name not in self.passive_map:
+            raise KeyError(
+                f"Unknown passive scalar '{name}'. Known: {list(self.passive_map)}"
+            )
+        return self.n_active + self.passive_map[name]
+
+    @property
+    def xHII_id(self) -> int:
+        """Absolute index of rho*x_HII (conservatives) / x_HII (primitives)."""
+        return self.get_passive_index("x_HII")
+
+    def get_xHII_grid(self, primitives: Array) -> Array:
+        """x_HII on the whole grid, from a PRIMITIVE state."""
+        return primitives[self.xHII_id]
 
     def get_isothermal_pressure(self, rho):
         rho_safe = jnp.maximum(rho, self.eps)
@@ -187,6 +228,16 @@ class EquationManager:
         if conservatives.shape[0] > self.n_active:
             cons_p = conservatives[self.passive_slice]              # (n_passive,...)
             prim_p = cons_p * inv_rho[jnp.newaxis, ...]             # s_k
+
+            # Re-impose physical bounds on named passive scalars: upwind
+            # transport of x_HII across a sharp ionization front overshoots
+            # [0, 1] otherwise, and the chemistry then evaluates rate
+            # coefficients on n_HI < 0.
+            for name, (lo, hi) in self.passive_bounds.items():
+                if name in self.passive_map:
+                    k = self.passive_map[name]
+                    prim_p = prim_p.at[k].set(jnp.clip(prim_p[k], lo, hi))
+
             return jnp.concatenate([prim_a, prim_p], axis=0)
 
         return prim_a

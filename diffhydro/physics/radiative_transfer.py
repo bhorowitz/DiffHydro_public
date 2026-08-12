@@ -357,7 +357,7 @@ class StellarRadiationForce:
             (yi >= 0) & (yi < self.mesh_shape[1]) &
             (zi >= 0) & (zi < self.mesh_shape[2])
         )
-        s_float = s.astype(jnp.float32)
+        s_float = s.astype(jnp.float64)
         weights = jnp.exp(- (s_float**2) / (2.0 * float(sigma)**2))
         weights = jnp.where(valid, weights, 0.0)
         weights = weights / (jnp.sum(weights) + 1e-30)
@@ -393,7 +393,7 @@ class StellarRadiationForce:
             (yi >= 0) & (yi < self.mesh_shape[1]) &
             (zi >= 0) & (zi < self.mesh_shape[2])
         )
-        s_float = s.astype(jnp.float32)
+        s_float = s.astype(jnp.float64)
         weights = jnp.exp(- (s_float**2) / (2.0 * float(sigma)**2))
         weights = jnp.where(valid, weights, 0.0)
         weights = weights / (jnp.sum(weights) + 1e-30)

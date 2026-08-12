@@ -14,6 +14,8 @@ from ..utils.debug_checks import _check_finite, _check_all_float_variables
 from ..units import CodeUnits, UnitParser, from_code, to_code
 from diffhydro.equationmanager_radiative_transf_no_chat import EquationManager as EquationManager_RT
 from diffhydro.units.convert import temperature_code_from_Prho
+from . import hydrogen_chemistry as hchem
+from .hydrogen_chemistry import HydrogenStateView
 
 
 class RadiativeTransfer:
@@ -99,9 +101,19 @@ class StellarRadiationForce:
         chemistry=False,
         # --- chemistry defaults (used only if injection_mode == "stromgren"
         #     and chemistry-related fields are not supplied through sol) ---
-        default_sigma_HI_cgs=6.3e-18,   # cm^2, HI photoionization cross-section at threshold
+        default_sigma_HI_cgs=hchem.SIGMA_HI_0_CGS,  # cm^2, HI photoionization x-section at threshold
         default_temperature_K=1e4,      # K, fallback gas temperature
+        # --- chemistry conventions ---
+        frequency=hchem.NU_HI_CGS,      # single photon group frequency [Hz]
+        chemistry_case="A",             # must match HydrogenIonizationForce
+        b_rec=None,                     # None -> 1.0 for case A, 0.0 for case B
+        xHII_weighted=False,            # True if sol[idx_xHII] stores N_gamma * x_HII
+        X_H=1.0,                        # hydrogen mass fraction (pure H here)
+        chem_max_frac=0.9,              # positivity limiter: |dN| <= 0.9 N
+        photon_sink_mode="explicit_limited",  # or "exponential" (exact)
+        expansion_factor=1.0,           # 'a' in the Compton term, fixed to 1
     ):
+        self.eps = 1e-30
         self.escape_fraction = escape_fraction
         self.stellar_spectrum_func = stellar_spectrum_func
         self.dx = dx
@@ -134,26 +146,65 @@ class StellarRadiationForce:
         # chemistry fallback defaults
         self.default_sigma_HI_cgs = default_sigma_HI_cgs
         self.default_temperature_K = default_temperature_K
+        # chemistry conventions
+        self.frequency = float(frequency)
+        self.chemistry_case = str(chemistry_case).upper()
+        self.b_rec = (1.0 if self.chemistry_case == "A" else 0.0) if b_rec is None else float(b_rec)
+        self.xHII_weighted = bool(xHII_weighted)
+        self.X_H = float(X_H)
+        self.chem_max_frac = float(chem_max_frac)
+        self.photon_sink_mode = str(photon_sink_mode)
+        self.expansion_factor = float(expansion_factor)
+        # cgs cross-section of the single transported group; with
+        # frequency == NU_HI_CGS this is sigma_0 = 6.35e-18 cm^2.
+        self.sigma_HI_cgs = float(
+            hchem.sigma_HI_powerlaw_cgs(nu=self.frequency, nu0=hchem.NU_HI_CGS)
+        )
 
         # ── Layout of the combined sol array (RT | hydro | chemistry) ──
+
+        # Absolute indices into the combined sol tensor. The radiative state
+        # keeps only the photon moments; x_HII now belongs to the gas block.
         self.n_rt_cons = eq.n_cons if eq is not None else 4
         self.n_hydro_cons = hydro_eq.n_cons if hydro_eq is not None else 0
 
-        # Absolute indices into the combined sol tensor. When the force is
-        # applied to an RT-only block, fall back to local RT indices so the
-        # adapter can safely pass a slice of the full state.
         if self.n_hydro_cons > 0:
-            self.idx_rho = self.n_rt_cons + 0
+            self.idx_rho = self.n_rt_cons
             self.idx_mom = slice(self.n_rt_cons + 1, self.n_rt_cons + 4)
-            self.idx_energy = self.n_rt_cons + 4
-            self.idx_pressure = self.n_rt_cons + 5 if self.n_hydro_cons > 5 else self.idx_energy
-            self.idx_xHII = self.n_rt_cons + self.n_hydro_cons
+            self.idx_pressure = self.n_rt_cons + 4 if self.n_hydro_cons >= 5 else self.idx_rho
+            self.idx_energy = self.idx_pressure
+            self.idx_xHII = self.n_rt_cons + getattr(hydro_eq, "xHII_id", self.n_hydro_cons - 1)
         else:
             self.idx_rho = 0
             self.idx_mom = slice(1, 4)
             self.idx_energy = 0
             self.idx_pressure = 0
-            self.idx_xHII = self.n_rt_cons
+            self.idx_xHII = 0
+
+        # ── Unit-safe view of the CONSERVATIVE state used by the chemistry ──
+        # This is the only object allowed to translate between the solver's
+        # code units and the cgs rate coefficients of hydrogen_chemistry.
+        self.view = None
+        if self.cu is not None and self.n_hydro_cons > 0:
+            self.view = HydrogenStateView(
+                cu=self.cu,
+                gamma=getattr(hydro_eq, "gamma", 5.0 / 3.0),
+                idx_N=0,
+                idx_F=(1, 2, 3),
+                idx_xHII=self.idx_xHII,
+                idx_rho=self.idx_rho,
+                idx_mom=tuple(range(self.idx_mom.start, self.idx_mom.stop)),
+                idx_Etot=self.idx_energy,
+                xHII_weight_idx=self.idx_rho,
+                X_H=self.X_H,
+                light_speed_code=self.light_speed,
+            )
+        if self.chemistry and self.view is None:
+            raise ValueError(
+                "chemistry=True requires both `cu` (CodeUnits) and `hydro_eq`: "
+                "the hydrogen chemistry needs rho, E_tot and x_HII from the "
+                "combined state, plus the unit system to convert to cgs."
+            )
 
     def set_code_units(self, cu: CodeUnits, parser: "UnitParser | None" = None):
         """Configure the unit system used by the radiative source helpers."""
@@ -183,11 +234,21 @@ class StellarRadiationForce:
             T_phys_K = float(T_phys)  # assumed already in Kelvin (cgs)
         return T_phys_K / self.cu.Temp_cgs
 
+    def get_temperature_K(self, sol):
+        """Gas temperature [K] from the CONSERVATIVE state.
+
+        ``sol[self.idx_pressure]`` is NOT the pressure: forces are applied
+        by ``hydro._hydrostep`` on the conservative array, so that slot
+        holds the TOTAL energy E_tot = rho e + 0.5 rho v^2. The pressure is
+        recovered as p = (gamma - 1)(E_tot - 0.5 rho v^2) and the
+        temperature uses n_tot = n_H (1 + x_HII) for a pure-H plasma.
+        """
+        return self.view.temperature_K(sol)
+
     def get_temp_code(self, sol):
-        """Compute the gas temperature field (code units) from rho and p in sol."""
-        rho_code = sol[self.idx_rho]
-        p_code   = sol[self.idx_pressure]
-        return temperature_code_from_Prho(p_code, rho_code, self.cu)
+        """Same as :meth:`get_temperature_K`, expressed in code temperature
+        units (kept for backward compatibility with existing call sites)."""
+        return self.get_temperature_K(sol) / self.cu.Temp_cgs
 
     def get_stellar_emission(self, star_age, star_metallicity):
         if self.stellar_spectrum_func is not None:
@@ -382,7 +443,7 @@ class StellarRadiationForce:
             (yi >= 0) & (yi < self.mesh_shape[1]) &
             (zi >= 0) & (zi < self.mesh_shape[2])
         )
-        s_float = s.astype(jnp.float32)
+        s_float = s.astype(jnp.float64)
         weights = jnp.exp(-(s_float**2) / (2.0 * float(sigma)**2))
         weights = jnp.where(valid, weights, 0.0)
         weights = weights / (jnp.sum(weights) + 1e-30)
@@ -418,7 +479,7 @@ class StellarRadiationForce:
             (yi >= 0) & (yi < self.mesh_shape[1]) &
             (zi >= 0) & (zi < self.mesh_shape[2])
         )
-        s_float = s.astype(jnp.float32)
+        s_float = s.astype(jnp.float64)
         weights = jnp.exp(-(s_float**2) / (2.0 * float(sigma)**2))
         weights = jnp.where(valid, weights, 0.0)
         weights = weights / (jnp.sum(weights) + 1e-30)
@@ -523,17 +584,21 @@ class StellarRadiationForce:
         return weights3, sol
 
     def _clip_to_m1_cone(self, sol):
-        c = self.light_speed
-        E = sol[0]
-        Fx = sol[1]
-        Fy = sol[2]
-        Fz = sol[3]
-        Fnorm = jnp.sqrt(Fx**2 + Fy**2 + Fz**2 + 1e-30)
-        Fmax = self.beam_reduced_flux * c * E
-        scale = jnp.minimum(1.0, Fmax / (Fnorm + 1e-30))
-        sol = sol.at[1].set(Fx * scale)
-        sol = sol.at[2].set(Fy * scale)
-        sol = sol.at[3].set(Fz * scale)
+        """Renormalize F_gamma onto the M1 causality cone |F| <= f_max c N.
+
+        This is the flux renormalization requested for the chemistry: after
+        an absorption sink (or an injection) the direction of F is kept and
+        only its magnitude is rescaled by (f_max c N) / |F| when |F| exceeds
+        the cone, which is the condition for the M1 Eddington factor
+        chi(f) to remain defined (f = |F|/(cN) must be in [0, 1]).
+        """
+        Fx, Fy, Fz = hchem.limit_m1_flux_cone(
+            sol[0], sol[1], sol[2], sol[3],
+            c=self.light_speed, f_max=self.beam_reduced_flux, eps=1e-30,
+        )
+        sol = sol.at[1].set(Fx)
+        sol = sol.at[2].set(Fy)
+        sol = sol.at[3].set(Fz)
         return sol
 
     def _debug_stromgren_units_jax(self, dt, per_star_source):
@@ -555,7 +620,11 @@ class StellarRadiationForce:
             return
 
         T_cgs = jnp.asarray(self.cu.T_cgs, dtype=dt.dtype)
-        photon_rate_cgs = jnp.asarray(self.cu.PhotonRate_cgs, dtype=dt.dtype)
+        # rate_code is a photon density rate [ph / code-volume / code-time];
+        # CodeUnits has no PhotonRate_cgs attribute, the physical rate is
+        # rate_code * cell_volume_code / T_cgs.
+        cell_volume_code = self.dx ** len(self.mesh_shape)
+        photon_rate_cgs = jnp.asarray(cell_volume_code / self.cu.T_cgs, dtype=dt.dtype)
 
         dt_phys_s = dt * T_cgs
         rate_phys = rate_code * photon_rate_cgs
@@ -587,6 +656,11 @@ class StellarRadiationForce:
 
     def force(self, i, sol, params, dt):
         if "star_masses" not in params or params["star_masses"] is None:
+            # No stars: no injection, but the chemistry sink still applies
+            # to whatever radiation is already in the box.
+            if self.chemistry == True:
+                sol = self.apply_photon_chemistry_sink(sol, dt)
+                sol = self.apply_flux_chemistry_sink(sol, dt)
             return sol, params
         if self.debug:
             self.debug_grid_stats(sol, self.eq, "sol before injection", 0)
@@ -596,29 +670,31 @@ class StellarRadiationForce:
         star_ages_new = star_ages_old + dt
         star_metallicities = jnp.asarray(params["star_metallicities"])
 
-        if self.injection_mode == "stromgren":
-            if self.chemistry:
-                rho_gas = sol[self.idx_rho]
-                fraction_HI = sol[self.idx_xHII]
-                T_code = self.get_temp_code(sol)
-                sigma_HI_code = self.get_sigma_HI(T_code)
-                chem_term = self.get_N_chemistry(
-                    rho_gas=rho_gas,
-                    sigma_HI=sigma_HI_code,
-                    caseA=self.caseA,
-                    caseB=self.caseB,
-                    fraction_HI=fraction_HI,
-                    T=T_code,
+        # ── Chemistry sink/source on the radiation field (eq. 25' and 26') ──
+        # Applied BEFORE the stellar injection so that the freshly injected
+        # photons are not immediately absorbed within the same half step,
+        # and with the positivity limiter |Delta N| <= 0.9 N.
+        if self.chemistry == True:
+            sol = self.apply_photon_chemistry_sink(sol, dt)
+            sol = self.apply_flux_chemistry_sink(sol, dt)
+            if self.debug:  # forcer temporairement
+                jax.debug.print(
+                "DEBUG_CHEM sigma_HI_cgs={} n_HI_max={} N_gamma_max={} chem_term_min={} chem_term_max={}",
+                self.sigma_HI_cgs,
+                jnp.max(self.get_number_density_HI(sol)),
+                jnp.max(self.view.photon_density_cgs(sol)),
+                jnp.min(self.get_N_chemistry(sol)),
+                jnp.max(self.get_N_chemistry(sol)),
                 )
-            else:
-                chem_term = 0.0
-            per_star_source = self.get_N_gamma_stromgen_sphere() * dt + chem_term
+        if self.injection_mode == "stromgren":
+            per_star_source = self.get_N_gamma_stromgen_sphere() * dt
             if self.debug:
                 self._debug_stromgren_units_jax(dt, per_star_source)
+
         elif self.injection_mode == "physical":
             per_star_source = self.get_N_gamma(
                 star_masses, star_ages_old, star_ages_new, star_metallicities, sol
-            ) * dt
+            )
         else:
             raise ValueError(f"Unknown injection_mode: {self.injection_mode}")
 
@@ -666,9 +742,9 @@ class StellarRadiationForce:
             else:
                 for s in range(star_positions.shape[0]):
                     x0, y0, z0 = ix[s], iy[s], iz[s]
-                    if self.injection_geometry == "2D":
+                    if self.injection_geometry in ("2D", "radial_2D"):
                         sol = self._inject_energy_2d(sol, x0, y0, z0, per_star_source[s], offsets, sigma)
-                    elif self.injection_geometry == "3D":
+                    elif self.injection_geometry in ("3D", "radial_3D"):
                         sol = self._inject_energy_3d(sol, x0, y0, z0, per_star_source[s], offsets, sigma)
                     elif self.injection_geometry == "beam_x":
                         sol = self._inject_energy_beam_x(sol, x0, y0, z0, per_star_source[s], sigma, beam_len)
@@ -691,34 +767,40 @@ class StellarRadiationForce:
                     )
                     sol = sol.at[0, x_safe, y_safe, z_safe].add(jnp.where(in_bounds, per_star_source[s], 0.0))
             else:
+                # NOTE: this branch used to be guarded by `if not
+                # self.chemistry`, so enabling chemistry silently disabled
+                # the whole momentum (F_gamma) injection and replaced it by
+                # a second call to the flux sink. The sink now lives at the
+                # top of force(), and the injection always runs.
                 for s in range(star_positions.shape[0]):
                     x0, y0, z0 = ix[s], iy[s], iz[s]
-                    if not self.chemistry:
-                        if self.injection_geometry == "2D":
-                            wdbg, sol = self._inject_momentum_x_2d(sol, x0, y0, z0, per_star_source[s], offsets, sigma)
-                            if self.debug:
-                                bad_E = jnp.any(~jnp.isfinite(sol[0]))
-                                bad_F = jnp.any(~jnp.isfinite(sol[1:]))
-                                jax.debug.print(
-                                    "NaN/Inf after injection? Egamma={E_bad}, Fgamma={F_bad}",
-                                    E_bad=bad_E, F_bad=bad_F,
-                                )
-                                jax.debug.print("sum weight = 1? {}", wdbg.sum())
-                        elif self.injection_geometry == "3D":
-                            wdbg, sol = self._inject_momentum_x_3d(sol, x0, y0, z0, per_star_source[s], offsets, sigma)
-                        elif self.injection_geometry == "beam_x":
-                            wdbg, sol = self._inject_momentum_beam_x(sol, x0, y0, z0, per_star_source[s], sigma, beam_len)
-                            if self.debug:
-                                self.debug_grid_stats(sol, self.eq, "momentum injection beam (after)", 0)
-                        else:
-                            raise ValueError(f"Unknown injection_geometry: {self.injection_geometry}")
-                    if self.chemistry:
-                        rho_gas = sol[4]
-                        fraction_HI = sol[8]
-                        T_code = self.get_temp_code(sol)
-                        sigma_HI_code = self.get_sigma_HI(T_code)
-                        sol = self.apply_flux_chemistry_sink(sol, rho_gas, sigma_HI_code, fraction_HI, dt)
-                        
+                    if self.injection_geometry == "2D":
+                        wdbg, sol = self._inject_momentum_x_2d(sol, x0, y0, z0, per_star_source[s], offsets, sigma)
+                        if self.debug:
+                            bad_E = jnp.any(~jnp.isfinite(sol[0]))
+                            bad_F = jnp.any(~jnp.isfinite(sol[1:]))
+                            jax.debug.print(
+                                "NaN/Inf after injection? Egamma={E_bad}, Fgamma={F_bad}",
+                                E_bad=bad_E, F_bad=bad_F,
+                            )
+                            jax.debug.print("sum weight = 1? {}", wdbg.sum())
+                    elif self.injection_geometry == "3D":
+                        # WARNING: "_x_3d" injects F along +x ONLY, so a
+                        # "stromgren" point source is in fact a collimated
+                        # source. Use injection_geometry="radial_3D" for a
+                        # genuinely isotropic star.
+                        wdbg, sol = self._inject_momentum_x_3d(sol, x0, y0, z0, per_star_source[s], offsets, sigma)
+                    elif self.injection_geometry == "radial_2D":
+                        wdbg, sol = self._inject_momentum_radial_2d(sol, x0, y0, z0, per_star_source[s], offsets, sigma)
+                    elif self.injection_geometry == "radial_3D":
+                        wdbg, sol = self._inject_momentum_radial_3d(sol, x0, y0, z0, per_star_source[s], offsets, sigma)
+                    elif self.injection_geometry == "beam_x":
+                        wdbg, sol = self._inject_momentum_beam_x(sol, x0, y0, z0, per_star_source[s], sigma, beam_len)
+                        if self.debug:
+                            self.debug_grid_stats(sol, self.eq, "momentum injection beam (after)", 0)
+                    else:
+                        raise ValueError(f"Unknown injection_geometry: {self.injection_geometry}")
+
         # Safety limiter: enforce the M1 causality cone |F| <= beam_reduced_flux * c * E
         sol = self._clip_to_m1_cone(sol)
 
@@ -757,59 +839,229 @@ class StellarRadiationForce:
         unit_scale = cu.L_cgs**3 / cu.T_cgs
         return value_cgs / unit_scale
 
-    def caseA(self, T):
-        """Case A recombination coefficient (code units), alpha_A ~ T^-0.5."""
-        return self.rate_coeff_to_code(4.2e-13, self.cu) * (T / 1e4) ** -0.5
+    def _lambda_HI(self, T_K):
+        """Hui & Gnedin (1997) dimensionless variable for HI recombination fits.
+        T_K must be in Kelvin."""
+        return 315614.0 / jnp.maximum(T_K, self.eps)
 
-    def caseB(self, T):
-        """Case B recombination coefficient (code units), alpha_B ~ T^-0.7."""
-        return self.rate_coeff_to_code(2.6e-13, self.cu) * (T / 1e4) ** -0.7
+    def caseA(self, T_K):
+        """Case A recombination coefficient alpha^A_HII [cm^3 s^-1].
 
-    def get_number_density_gas(self, rho_gas, M_molaire=2.3e-26):
-        """Number density n = rho * N_A / M (code units).
-        rho_gas is expected in code density units; M_molaire in g/mol."""
-        N_avogadro_cgs = getattr(self.cu, "N_avogadro_cgs", 6.02214076e23)
-        M_molar_code = self.molar_mass_to_code(M_molaire, self.cu)
-        return rho_gas * N_avogadro_cgs / M_molar_code
+        Hui & Gnedin (1997). NOTE: the argument is now in KELVIN, not in
+        code temperature units -- the whole chemistry is evaluated in cgs
+        and converted once, in HydrogenStateView.
+        """
+        return hchem.alpha_A_HII_cgs(T_K)
 
-    def get_sigma_HI(self, T):
-        """HI photoionization cross-section, converted to code units (length^2).
-        Uses a fixed threshold cross-section (cm^2) independent of T by default;
-        override default_sigma_HI_cgs at construction time if a T-dependent
-        cross-section is required."""
-        L_cgs = getattr(self.cu, "L_cgs", 1.0)
-        return self.default_sigma_HI_cgs / L_cgs**2
+    def caseB(self, T_K):
+        """Case B recombination coefficient alpha^B_HII [cm^3 s^-1] (Kelvin in)."""
+        return hchem.alpha_B_HII_cgs(T_K)
 
-    def get_N_chemistry(self, rho_gas, sigma_HI, caseA, caseB, fraction_HI, T):
-        n = self.get_number_density_gas(rho_gas)
-        ionization_loss = (
-            self.get_N_gamma_stromgen_sphere()
-            * n * sigma_HI * self.light_speed * (1.0 - fraction_HI)
-        )
-        recombination_gain = (
-            (caseA(T) - caseB(T)) * n**2 * fraction_HI * (1.0 - fraction_HI)
-        )
+    def get_number_density_gas(self, rho_gas, proton_mass_cgs=hchem.MH_CGS,
+                               mean_molecular_weight=None):
+        """Hydrogen nucleus number density n_H [cm^-3] from rho in CODE units.
+
+            n_H = rho_code * rho_cgs * X_H / m_H
+
+        Previously this divided by ``cu.mu = 0.61``, the mean molecular
+        weight of a fully ionized primordial gas: for a pure-hydrogen run
+        that overestimates n_H by a factor 1/0.61 = 1.64 and therefore
+        n_HI, n_HII, n_e, every recombination rate and the whole cooling
+        function. For hydrogen nuclei the correct divisor is m_H alone.
+        """
+        if self.cu is None:
+            raise ValueError("CodeUnits not configured.")
+        mu = 1.0 if mean_molecular_weight is None else mean_molecular_weight
+        return jnp.asarray(rho_gas) * self.cu.rho_cgs * self.X_H / (mu * proton_mass_cgs)
+
+    def get_number_density_HI(self, sol):
+        """n_HI [cm^-3], reading x_HII through the state view (so the
+        conservative/primitive convention is handled in one place)."""
+        _, n_HI, _, _ = self.view.number_densities_cgs(sol)
+        return n_HI
+
+
+    # def get_sigma_HI(self, energies, T):
+    #     """HI photoionization cross-section, converted to code units (length^2).
+    #     Uses a fixed threshold cross-section (cm^2) independent of T by default;
+    #     override default_sigma_HI_cgs at construction time if a T-dependent
+    #     cross-section is required."""
+    #     L_cgs = getattr(self.cu, "L_cgs", 1.0)
+    #     x = energies /13.6
+    #     y = jnp.sqrt(x**2 - 0)
+    #     sigma_0 = 5.475e-14  # cm^2
+    #     P = 2.963
+    #     ya = 32.88
+    #     energy_0 = 0.4298
+    #     energy_ionization = 13.6
+    #     if energies >= energy_ionization:
+    #         sigma_mono_lambda = sigma_0 * (x - 1)**2 * (((energy_ionization / energy_0)**2 + 0)**0.5)**(0.5*P-5.5) / (1 + ((((energy_ionization / energy_0 )**2)**0.5) / ya)**0.5  )**P
+    #     else:
+    #         sigma_mono_lambda = 0.0
+    #     return sigma_mono_lambda / L_cgs**2
+    def get_sigma_HI(self, frequency=None):
+        """HI photoionization cross-section [cm^2] for the transported group.
+
+            sigma_HI(nu) = sigma_HI(nu_0) * (nu / nu_0)^-3,  nu >= nu_0
+
+        with sigma_HI(nu_0) = 6.35e-18 cm^2 obtained from the Verner et al.
+        (1996) fit evaluated at 13.6 eV.
+
+        Previous version returned ``5.475e-14 / L_cgs^2``. 5.475e-14 is the
+        Verner *fit parameter* sigma_0, not the threshold cross-section:
+        it overestimated sigma_HI by a factor ~8600, i.e. the gas was
+        optically thick over ~1e-4 of the intended distance. The extra
+        1/L_cgs^2 also made the result depend on the arbitrary code length
+        unit; the chemistry is now done entirely in cgs.
+        """
+        nu = self.frequency if frequency is None else frequency
+        return hchem.sigma_HI_powerlaw_cgs(nu=nu, nu0=hchem.NU_HI_CGS)
+
+    def get_N_chemistry(self, sol, caseA=None, caseB=None, T=None):
+        """dN_gamma/dt in cm^-3 s^-1 (eq. 25'), from the CONSERVATIVE state.
+
+            dN/dt = -n_HI sigma_HI c N
+                    + b_rec (alpha^A_HII - alpha^B_HII) n_HII n_e
+
+        The second term is the diffuse recombination photons: b_rec = 1 in
+        case A (they are put back into the radiation field, which is what
+        the ionization equation assumes when it uses alpha^A) and b_rec = 0
+        in case B (on-the-spot: they are assumed absorbed locally).
+
+        ``caseA`` / ``caseB`` / ``T`` are accepted for backward
+        compatibility; if given, T MUST be in Kelvin.
+        """
+        view = self.view
+        x = view.xHII(sol)
+        T_K = view.temperature_K(sol, x) if T is None else T
+        _, n_HI, n_HII, n_e = view.number_densities_cgs(sol, x)
+        N_cgs = view.photon_density_cgs(sol)
+
+        alpha_A = hchem.alpha_A_HII_cgs(T_K) if caseA is None else caseA(T_K)
+        alpha_B = hchem.alpha_B_HII_cgs(T_K) if caseB is None else caseB(T_K)
+
+        ionization_loss = N_cgs * n_HI * self.sigma_HI_cgs * view.c_interaction_cgs
+        recombination_gain = self.b_rec * (alpha_A - alpha_B) * n_HII * n_e
         return -ionization_loss + recombination_gain
 
-    def get_flux_source_decay(self, rho_gas, sigma_HI, fraction_HI, dt):
-        """
-        Implicit (exact) decay factor for the radiative flux absorption sink,
-        symmetric to the energy sink term but with the extra factor of c:
-            dF/dt = -c * n_HI * sigma_HI * F
-        Solved analytically over dt to remain stable for stiff opacities
-        (avoids explicit update F += -c*kappa*F*dt blowing up when
-        c*kappa*dt >> 1).
-        """
-        n = self.get_number_density_gas(rho_gas)
-        n_HI = n * fraction_HI
-        kappa = n_HI * sigma_HI  # code units: 1 / length
-        decay = jnp.exp(-kappa * self.light_speed * dt)
-        return decay
+    # def apply_photon_chemistry_sink(self, sol, dt):
+    #     """Update N_gamma with the absorption sink / recombination source.
 
-    def apply_flux_chemistry_sink(self, sol, rho_gas, sigma_HI, fraction_HI, dt):
-        """Apply the M1 flux absorption sink to Fx, Fy, Fz (sol[1:4])."""
-        decay = self.get_flux_source_decay(rho_gas, sigma_HI, fraction_HI, dt)
+    #     ``photon_sink_mode``:
+
+    #     * ``"explicit_limited"`` (default, the requested scheme)
+    #           Delta N = dN/dt Delta t, clipped to -max_frac * N when
+    #           negative, so N stays strictly positive whatever the value of
+    #           n_HI sigma c dt. Beware: when n_HI sigma c dt >> 1 the
+    #           limiter under-absorbs (it removes 90 % where the exact
+    #           solution removes ~100 %), which makes an optically thick
+    #           ionization front propagate slightly too fast.
+    #     * ``"exponential"``
+    #           exact solution of dN/dt = -k N + S over dt,
+    #           N <- N e^{-k dt} + (S/k)(1 - e^{-k dt}).
+    #           No limiter needed, positivity guaranteed, correct in the
+    #           stiff limit. Use it if the front speed matters.
+    #     """
+    #     view = self.view
+    #     dt_s = view.dt_cgs(dt) #version chat 
+    #     N_cgs = view.photon_density_cgs(sol)
+
+    #     if self.photon_sink_mode == "exponential":
+    #         x = view.xHII(sol)
+    #         T_K = view.temperature_K(sol, x)
+    #         _, n_HI, n_HII, n_e = view.number_densities_cgs(sol, x)
+    #         k = n_HI * self.sigma_HI_cgs * view.c_interaction_cgs     # s^-1
+    #         S = self.b_rec * (hchem.alpha_A_HII_cgs(T_K)
+    #                           - hchem.alpha_B_HII_cgs(T_K)) * n_HII * n_e
+    #         decay = -k * dt_s
+    #         k_safe = jnp.maximum(k, hchem.tiny_like(sol))
+    #         N_new = N_cgs * decay + S 
+    #         # k -> 0 limit: N + S dt
+    #         # N_new = jnp.where(k * dt_s < 1e-8, N_cgs + S * dt_s, N_new)
+    #         dN_cgs = N_new - N_cgs
+    #     else:
+    #         rate_cgs = self.get_N_chemistry(sol) * dt_s
+    #         dN_cgs = hchem.limited_explicit_update(
+    #             N_cgs, rate_cgs, dt_s, max_frac=self.chem_max_frac
+    #         )
+    #     return view.add_photons_cgs(sol, dN_cgs)
+    def apply_photon_chemistry_sink(self, sol, dt):
+        """Update N_gamma with the absorption sink / recombination source.
+
+        ``photon_sink_mode``:
+
+        * ``"explicit_limited"`` (default, the requested scheme)
+            Delta N = dN/dt Delta t, clipped to -max_frac * N when
+            negative, so N stays strictly positive whatever the value of
+            n_HI sigma c dt. Beware: when n_HI sigma c dt >> 1 the
+            limiter under-absorbs (it removes 90 % where the exact
+            solution removes ~100 %), which makes an optically thick
+            ionization front propagate slightly too fast.
+        * ``"exponential"``
+            exact solution of dN/dt = -k N + S over dt,
+            N <- N e^{-k dt} + (S/k)(1 - e^{-k dt}).
+            No limiter needed, positivity guaranteed, correct in the
+            stiff limit. Use it if the front speed matters.
+        """
+        view = self.view
+        dt_s = view.dt_cgs(dt)
+        N_cgs = view.photon_density_cgs(sol)
+
+        if self.photon_sink_mode == "exponential":
+            x = view.xHII(sol)
+            T_K = view.temperature_K(sol, x)
+            _, n_HI, n_HII, n_e = view.number_densities_cgs(sol, x)
+            k = n_HI * self.sigma_HI_cgs * view.c_interaction_cgs     # s^-1
+            S = self.b_rec * (hchem.alpha_A_HII_cgs(T_K)
+                            - hchem.alpha_B_HII_cgs(T_K)) * n_HII * n_e
+
+            k_safe = jnp.maximum(k, hchem.tiny_like(sol))
+            decay = jnp.exp(-k * dt_s)
+
+            # Exact solution of dN/dt = -k N + S over dt:
+            # N_new = N_cgs * e^{-k dt} + (S / k) * (1 - e^{-k dt})
+            N_new = N_cgs * decay + (S / k_safe) * (1.0 - decay)
+
+            # k -> 0 limit: dN/dt = S, so N_new = N_cgs + S * dt (no decay)
+            N_new = jnp.where(k * dt_s < 1e-8, N_cgs + S * dt_s, N_new)
+
+            dN_cgs = N_new - N_cgs
+        else:
+            rate_cgs = self.get_N_chemistry(sol) * dt_s
+            dN_cgs = hchem.limited_explicit_update(
+                N_cgs, rate_cgs, dt_s, max_frac=self.chem_max_frac
+            )
+        return view.add_photons_cgs(sol, dN_cgs)
+    
+    def get_flux_source_decay(self, sol, dt):
+        """Exponent of the exact decay factor for the flux absorption sink.
+
+            dF/dt = -n_HI sigma_HI c F   ->   F(t+dt) = F(t) exp(-kappa c dt)
+
+        Returns the (negative, dimensionless) exponent -kappa c dt, where
+        kappa = n_HI sigma_HI [cm^-1] and everything is evaluated in cgs.
+        """
+        n_HI = self.get_number_density_HI(sol)
+        kappa = n_HI * self.sigma_HI_cgs                # cm^-1
+        return -kappa * self.view.c_interaction_cgs * self.view.dt_cgs(dt)
+
+    def apply_flux_chemistry_sink(self, sol, dt):
+        """Apply the M1 flux absorption sink to Fx, Fy, Fz (sol[1:4]).
+
+        The previous version did ``sol.at[1].add(decay)``: it ADDED a
+        dimensionless number to the flux instead of scaling it, which
+        (a) has the wrong units, (b) added the same value to Fx, Fy and Fz
+        and so destroyed the isotropy of a point source, and (c) could
+        drive F negative. The exact solution of dF/dt = -kappa c F is a
+        MULTIPLICATIVE exponential decay, which is also unconditionally
+        stable for stiff opacities.
+
+        The M1 causality cone |F| <= f_max c N is re-imposed afterwards,
+        because N and F are damped by different amounts once the photon
+        update is limited.
+        """
+        decay = self.get_flux_source_decay(sol, dt)
         sol = sol.at[1].multiply(decay)
         sol = sol.at[2].multiply(decay)
         sol = sol.at[3].multiply(decay)
-        return sol
+        return self._clip_to_m1_cone(sol)

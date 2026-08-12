@@ -100,6 +100,22 @@ class UnitParser:
         except KeyError as exc:
             raise ValueError(f"Unknown dimension '{dim}'.") from exc
 
+    def units_for_dimension(self, dim: str) -> list[tuple[str, float]]:
+        """Return [(unit_name, cgs_factor), ...] for every known unit of
+        the given dimension, sorted by increasing cgs factor.
+
+        Used by callers that need to auto-select a human-readable display
+        unit (e.g. picking 'km' instead of 'cm' for a large box, or 'cm'
+        instead of 'km' for a small one) without hardcoding a unit list
+        that could drift out of sync with _UNIT_TABLE.
+        """
+        entries = [
+            (unit, factor)
+            for unit, (factor, d) in self._UNIT_TABLE.items()
+            if d == dim
+        ]
+        return sorted(entries, key=lambda item: item[1])
+
     def _unit_info(self, unit: str) -> tuple[float, str]:
         try:
             return self._UNIT_TABLE[unit]

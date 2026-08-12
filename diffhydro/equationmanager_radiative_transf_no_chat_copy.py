@@ -18,25 +18,19 @@ class EquationManager:
         primitives active:    [E_gamma, F_gamma_x, F_gamma_y, F_gamma_z]
         conservatives active: [E_gamma, F_gamma_x, F_gamma_y, F_gamma_z]
 
-    Passive variables (any extra slots beyond active):
-        primitives passive:    s_k              (e.g. x_HII)
-        conservatives passive: E_gamma * s_k
+    Passive variables: none by default.
 
-    NEW: a dedicated ionization-fraction passive scalar x_HII is tracked
-    as a passive scalar transported with the *radiative* state. Note:
-    if x_HII is meant to be advected with the *gas* (density-weighted,
-    rho * x_HII), it should instead be added as a passive scalar on the
-    HYDRO EquationManager (equationmanager.py), not here. This version
-    adds it here because E_gamma * x_HII is also a well posed
-    conservative quantity (photon-number-weighted ionization state) if
-    that is the coupling you want. See the discussion below the code.
+    The ionization fraction x_HII now belongs to the gas equation manager
+    (:mod:`diffhydro.equationmanager`), where it is advected with the gas
+    density as a passive scalar. The radiative manager only carries the
+    photon moments [E_gamma, F_gamma_x, F_gamma_y, F_gamma_z].
 
     The code below avoids hard-coded indices in the numerics by:
       - defining active indices once in __post_init__
       - using active_slice/passive_slice everywhere else.
     """
     gamma: float = 1.6
-    n_cons: int = 5          # 4 active (E,Fx,Fy,Fz) + 1 passive (x_HII)
+    n_cons: int = 4          # 4 active (E,Fx,Fy,Fz)
     eps: float = 1e-10
     isothermal: bool = False
     light_speed: float = 1  # reduced/physical speed of light, code units
@@ -45,8 +39,7 @@ class EquationManager:
     # Active variable names/order (single source of truth)
     active_names: tuple[str, ...] = ("E_gamma", "F_gamma_x", "F_gamma_y", "F_gamma_z")
 
-    # NEW: passive scalar names/order (single source of truth)
-    passive_names: tuple[str, ...] = ("x_HII",)
+    passive_names: tuple[str, ...] = ()
 
     debug: bool = False
 
@@ -61,9 +54,27 @@ class EquationManager:
     # NEW: bounds applied to specific passive scalars after every
     # primitive reconstruction (name -> (lo, hi)). x_HII must stay in
     # [0, 1] by physical definition of an ionized fraction.
-    passive_bounds: dict[str, tuple[float, float]] = field(
-        default_factory=lambda: {"x_HII": (0.0, 1.0)}
-    )
+    passive_bounds: dict[str, tuple[float, float]] = field(default_factory=dict)
+
+    # NEW: how the passive block is stored and transported.
+    #
+    # passive_weighted = True  -> conserved variable is E_gamma * s_k
+    #                    False -> the slot stores s_k itself (raw)
+    # passive_advected = True  -> s_k is upwinded with the PHOTON flux,
+    #                             i.e. it travels at ~c
+    #                    False -> zero flux, s_k only evolves through forces
+    #
+    # PHYSICS WARNING. x_HII is a property of the GAS, so the physically
+    # correct conserved quantity is rho * x_HII advected with the gas
+    # velocity (that is what RAMSES-RT does, and what
+    # coupled_rhd.ChemBlockFlux implements). Keeping it in the RT block
+    # with (True, True) advects the ionization state at the speed of light,
+    # which makes the ionization front follow the photon front instead of
+    # the chemistry. Use (False, False) for a static-gas Stromgren test:
+    # x_HII then becomes a purely local variable, exact when v = 0 and a
+    # good approximation while v << c.
+    passive_weighted: bool = True
+    passive_advected: bool = True
 
     def __post_init__(self):
         self.debug = bool(self.debug)
@@ -89,6 +100,9 @@ class EquationManager:
             self.active_map["F_gamma_y"],
             self.active_map["F_gamma_z"],
         )
+
+        self.passive_weighted = bool(self.passive_weighted)
+        self.passive_advected = bool(self.passive_advected)
 
         self.velocity_minor_axes = ((2, 3), (3, 1), (1, 2))
         self.equation_type = "SINGLE-PHASE"
@@ -129,11 +143,6 @@ class EquationManager:
             )
         return self.n_active + self.passive_map[name]
 
-    # Handy shortcut used a lot in forces / diagnostics
-    @property
-    def xHII_id(self) -> int:
-        return self.get_passive_index("x_HII")
-
     # ---------------------------
     # Primitive <-> Conservative
     # ---------------------------
@@ -150,7 +159,10 @@ class EquationManager:
 
         if primitives.shape[0] > self.n_active:
             prim_p = primitives[self.passive_slice]           # (n_passive,...)
-            cons_p = E_gamma[jnp.newaxis, ...] * prim_p        # E_gamma * s_k
+            if self.passive_weighted:
+                cons_p = E_gamma[jnp.newaxis, ...] * prim_p    # E_gamma * s_k
+            else:
+                cons_p = prim_p                                # raw scalar
             out = jnp.concatenate([cons_a, cons_p], axis=0)
         else:
             out = cons_a
@@ -181,20 +193,10 @@ class EquationManager:
 
         if conservatives.shape[0] > self.n_active:
             cons_p = conservatives[self.passive_slice]
-            prim_p = cons_p * (1.0 / E_gamma[jnp.newaxis, ...])
-
-            # --- NEW: enforce physical bounds on passive scalars ---
-            # This is the critical numerical-hygiene step: nothing in
-            # the upwind transport of a passive scalar guarantees that
-            # x_HII stays in [0, 1] after reconstruction/limiting
-            # (overshoots near sharp fronts are the classic failure
-            # mode). We clip HERE, once per full primitive
-            # reconstruction, so every downstream consumer (chemistry
-            # force, diagnostics, CFL) sees a physically valid value.
-            for name, (lo, hi) in self.passive_bounds.items():
-                if name in self.passive_map:
-                    k = self.passive_map[name]
-                    prim_p = prim_p.at[k].set(jnp.clip(prim_p[k], lo, hi))
+            if self.passive_weighted:
+                prim_p = cons_p * (1.0 / E_gamma[jnp.newaxis, ...])
+            else:
+                prim_p = cons_p
 
             return jnp.concatenate([prim_a, prim_p], axis=0)
 
@@ -283,10 +285,8 @@ class EquationManager:
         State:      U = [E_gamma, F_gamma_x, F_gamma_y, F_gamma_z]
         Flux:       F_i(U) = [F_i, c^2 P_{i,x}, c^2 P_{i,y}, c^2 P_{i,z}]
 
-        Passive scalars (e.g. x_HII) are advected upwind via
-        (E_gamma * x_HII) * (F_i / E_gamma) in ConvectiveFlux, matching
-        the standard passive-scalar treatment for the active variable
-        they are weighted by (here E_gamma, NOT rho).
+        No passive scalars are transported here; the gas equation manager
+        carries x_HII as a gas-side passive scalar.
         """
         del primitives
         if self.normalization:
@@ -306,9 +306,6 @@ class EquationManager:
             axis=0,
         )
 
-        if conservatives.shape[0] > self.n_active:
-            # Passive block transported in an upwind manner in ConvectiveFlux
-            return jnp.concatenate([flux_a, conservatives[self.passive_slice]], axis=0)
         return flux_a
 
     # ---------------------------
@@ -336,16 +333,3 @@ class EquationManager:
         return self.get_F_over_E_norm_grid(primitives) / self.light_speed
 
     # NEW: direct grid accessor for the ionization fraction
-    def get_xHII_grid(self, primitives: Array) -> Array:
-        """
-        Returns x_HII on the whole grid, shape (Nx, Ny, Nz).
-        Requires that 'x_HII' be declared in passive_names and that
-        primitives has at least n_active + 1 rows.
-        """
-        idx = self.get_passive_index("x_HII")
-        if primitives.shape[0] <= idx:
-            raise ValueError(
-                "primitives array does not contain the x_HII slot; "
-                "check n_cons and passive_names configuration."
-            )
-        return primitives[idx]

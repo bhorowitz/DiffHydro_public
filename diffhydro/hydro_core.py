@@ -183,8 +183,8 @@ class hydro:
         self.snapshot_prefix: str = snapshot_prefix
         
         # Dtypes explicites pour stabiliser la compilation et les conversions.
-        self.compute_dtype = jnp.float32
-        self.state_dtype = jnp.float32
+        self.compute_dtype = jnp.float64
+        self.state_dtype = jnp.float64
         
         # Make snapshot dir on host 0 (safe if it already exists)
         # Avoids concurrent folder creations on all hosts.

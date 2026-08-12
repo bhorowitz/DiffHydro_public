@@ -871,20 +871,27 @@ class ConvectiveFlux_Radiative_transfer:
             # print("caca boucle passive start no glm")
 
         if conservative_xi_L.shape[0] > passive_start:  # calculation of passive fluxes
-            # mass flux from active solver (row 0 always rho*u_n)
-            mass_flux = F_act[eq.mass_ids]  # shape (...)
+            if not getattr(eq, "passive_advected", True):
+                # Passive scalars declared non-advected (e.g. x_HII kept as a
+                # purely local gas property instead of being swept along with
+                # the photon flux at ~c). Zero flux -> they evolve only
+                # through the source terms.
+                F_passive = jnp.zeros_like(conservative_xi_L[passive_start:])
+            else:
+                # mass flux from active solver (row 0 always rho*u_n; here the
+                # RT "mass flux" is the photon-number flux F_gamma)
+                mass_flux = F_act[eq.mass_ids]  # shape (...)
 
-            passive_L = primitives_xi_L[passive_start:]
-            passive_R = primitives_xi_R[passive_start:]
+                passive_L = primitives_xi_L[passive_start:]
+                passive_R = primitives_xi_R[passive_start:]
 
-            passive_face = jnp.where(
-                mass_flux[jnp.newaxis, ...] >= 0.0,
-                passive_L, passive_R
-            )
+                passive_face = jnp.where(
+                    mass_flux[jnp.newaxis, ...] >= 0.0,
+                    passive_L, passive_R
+                )
 
-            F_passive = mass_flux[jnp.newaxis, ...] * passive_face
+                F_passive = mass_flux[jnp.newaxis, ...] * passive_face
             F = jnp.concatenate([F, F_passive], axis=0)
-            # print("caca conservative")
         # DEBUG: flux returned on the entire grid after Riemann
         self._debug_grid_stats(F, eq, "GRID AFTER RIEMANN", ax)
         # jax.debug.print('min dans flux de E apres{}', jnp.min(primitives[0]))
