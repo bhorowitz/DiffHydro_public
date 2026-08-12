@@ -56,7 +56,7 @@ print("Backend:", jax.default_backend())
 # ---------------------------------------------------------------------------
 # Iliev+2006 Test 1 parameters
 # ---------------------------------------------------------------------------
-N = int(os.environ.get("N", 200))
+N = int(os.environ.get("N", 50))
 n_H_cgs = 1.0e-3                 # cm^-3
 T_K = 1.0e4                      # K, isothermal
 Q_phot = 5.0e48                  # ionizing photons / s
