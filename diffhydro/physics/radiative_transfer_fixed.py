@@ -70,8 +70,13 @@ RADIATIVE_CONFIG = {
 # new version
 class StellarRadiationForce:
     """
-    Radiative source term from stellar populations.
-    Updates the E_gamma field based on stellar mass, age and metallicity.
+    Stellar injection source for the radiative photon moments.
+
+    In the standard pipeline this class *only* injects ``N_gamma`` and
+    ``F_gamma``.  Photon absorption, ionization and thermal coupling belong
+    to :class:`HydrogenPhotoChemistryForce`, which can update the two sides
+    of a photon absorption event atomically.  ``chemistry=True`` remains a
+    legacy split-mode option; do not combine it with that coupled force.
     """
 
     def __init__(
@@ -124,6 +129,10 @@ class StellarRadiationForce:
         self.injection_momentum = injection_momentum
         self.momentum_only = momentum_only
         self.chemistry = chemistry
+        # Used by hydro's setup-time validation.  New simulations should
+        # leave this False and delegate the reaction to
+        # HydrogenPhotoChemistryForce.
+        self.handles_photon_chemistry = bool(chemistry)
         self.debug = debug
         self.light_speed = eq.light_speed if eq is not None else 1.0
         self.mesh_shape = eq.mesh_shape if eq is not None else (100, 100, 100)
@@ -654,14 +663,172 @@ class StellarRadiationForce:
             ordered=True,
         )
 
+    # def force(self, i, sol, params, dt):
+    #     if "star_masses" not in params or params["star_masses"] is None:
+    #         # No stars: no injection, but the chemistry sink still applies
+    #         # to whatever radiation is already in the box.
+    #         if self.chemistry == True:
+    #             sol = self.apply_photon_chemistry_sink(sol, dt)
+    #             sol = self.apply_flux_chemistry_sink(sol, dt)
+    #         return sol, params
+    #     if self.debug:
+    #         self.debug_grid_stats(sol, self.eq, "sol before injection", 0)
+
+    #     star_masses = jnp.asarray(params["star_masses"])
+    #     star_ages_old = jnp.asarray(params["star_ages"])
+    #     star_ages_new = star_ages_old + dt
+    #     star_metallicities = jnp.asarray(params["star_metallicities"])
+
+    #     # ── Chemistry sink/source on the radiation field (eq. 25' and 26') ──
+    #     # Applied BEFORE the stellar injection so that the freshly injected
+    #     # photons are not immediately absorbed within the same half step,
+    #     # and with the positivity limiter |Delta N| <= 0.9 N.
+    #     if self.chemistry == True:
+    #         sol = self.apply_photon_chemistry_sink(sol, dt)
+    #         sol = self.apply_flux_chemistry_sink(sol, dt)
+    #         if self.debug:  # forcer temporairement
+    #             jax.debug.print(
+    #             "DEBUG_CHEM sigma_HI_cgs={} n_HI_max={} N_gamma_max={} chem_term_min={} chem_term_max={}",
+    #             self.sigma_HI_cgs,
+    #             jnp.max(self.get_number_density_HI(sol)),
+    #             jnp.max(self.view.photon_density_cgs(sol)),
+    #             jnp.min(self.get_N_chemistry(sol)),
+    #             jnp.max(self.get_N_chemistry(sol)),
+    #             )
+    #     if self.injection_mode == "stromgren":
+    #         per_star_source = self.get_N_gamma_stromgen_sphere() * dt
+    #         if self.debug:
+    #             self._debug_stromgren_units_jax(dt, per_star_source)
+
+    #     elif self.injection_mode == "physical":
+    #         per_star_source = self.get_N_gamma(
+    #             star_masses, star_ages_old, star_ages_new, star_metallicities, sol
+    #         ) * dt
+    #     else:
+    #         raise ValueError(f"Unknown injection_mode: {self.injection_mode}")
+
+    #     if self.one_injection:
+    #         inject_now = jnp.equal(i, 0)
+    #         per_star_source = jnp.where(inject_now, per_star_source, 0.0)
+
+    #     if "star_positions" not in params or params["star_positions"] is None:
+    #         star_positions = jnp.asarray(
+    #             [[self.mesh_shape[0] // 2, self.mesh_shape[1] // 2, self.mesh_shape[2] // 2]],
+    #             dtype=jnp.int32,
+    #         )
+    #         if jnp.ndim(per_star_source) == 0:
+    #             per_star_source = jnp.asarray([per_star_source])
+    #         else:
+    #             per_star_source = jnp.asarray([jnp.sum(per_star_source)])
+    #     else:
+    #         star_positions = jnp.asarray(params["star_positions"], dtype=jnp.int32)
+    #         if jnp.ndim(per_star_source) == 0:
+    #             per_star_source = jnp.full((star_positions.shape[0],), per_star_source)
+
+    #     ix = star_positions[:, 0]
+    #     iy = star_positions[:, 1]
+    #     iz = star_positions[:, 2]
+
+    #     sigma = max(1, round(self.mesh_shape[0] // 100))
+    #     offsets = jnp.arange(-3 * sigma, 3 * sigma + 1)
+    #     beam_len = int(self.beam_length_cells)
+
+    #     # ── Photon injection ──
+    #     if not self.momentum_only:
+    #         if not self.gaussian_star:
+    #             for s in range(star_positions.shape[0]):
+    #                 x0, y0, z0 = ix[s], iy[s], iz[s]
+    #                 x_safe = jnp.clip(x0, 0, self.mesh_shape[0] - 1)
+    #                 y_safe = jnp.clip(y0, 0, self.mesh_shape[1] - 1)
+    #                 z_safe = jnp.clip(z0, 0, self.mesh_shape[2] - 1)
+
+    #                 in_bounds = (
+    #                     (0 <= x0) & (x0 < self.mesh_shape[0]) &
+    #                     (0 <= y0) & (y0 < self.mesh_shape[1]) &
+    #                     (0 <= z0) & (z0 < self.mesh_shape[2])
+    #                 )
+    #                 sol = sol.at[0, x_safe, y_safe, z_safe].add(jnp.where(in_bounds, per_star_source[s], 0.0))
+    #         else:
+    #             for s in range(star_positions.shape[0]):
+    #                 x0, y0, z0 = ix[s], iy[s], iz[s]
+    #                 if self.injection_geometry in ("2D", "radial_2D"):
+    #                     sol = self._inject_energy_2d(sol, x0, y0, z0, per_star_source[s], offsets, sigma)
+    #                 elif self.injection_geometry in ("3D", "radial_3D"):
+    #                     sol = self._inject_energy_3d(sol, x0, y0, z0, per_star_source[s], offsets, sigma)
+    #                 elif self.injection_geometry == "beam_x":
+    #                     sol = self._inject_energy_beam_x(sol, x0, y0, z0, per_star_source[s], sigma, beam_len)
+    #                 else:
+    #                     raise ValueError(f"Unknown injection_geometry: {self.injection_geometry}")
+
+    #     # ── Momentum injection ──
+    #     if self.injection_momentum:
+    #         if not self.gaussian_star:
+    #             for s in range(star_positions.shape[0]):
+    #                 x0, y0, z0 = ix[s], iy[s], iz[s]
+    #                 x_safe = jnp.clip(x0, 0, self.mesh_shape[0] - 1)
+    #                 y_safe = jnp.clip(y0, 0, self.mesh_shape[1] - 1)
+    #                 z_safe = jnp.clip(z0, 0, self.mesh_shape[2] - 1)
+
+    #                 in_bounds = (
+    #                     (0 <= x0) & (x0 < self.mesh_shape[0]) &
+    #                     (0 <= y0) & (y0 < self.mesh_shape[1]) &
+    #                     (0 <= z0) & (z0 < self.mesh_shape[2])
+    #                 )
+    #                 sol = sol.at[0, x_safe, y_safe, z_safe].add(jnp.where(in_bounds, per_star_source[s], 0.0))
+    #         else:
+    #             # NOTE: this branch used to be guarded by `if not
+    #             # self.chemistry`, so enabling chemistry silently disabled
+    #             # the whole momentum (F_gamma) injection and replaced it by
+    #             # a second call to the flux sink. The sink now lives at the
+    #             # top of force(), and the injection always runs.
+    #             for s in range(star_positions.shape[0]):
+    #                 x0, y0, z0 = ix[s], iy[s], iz[s]
+    #                 if self.injection_geometry == "2D":
+    #                     wdbg, sol = self._inject_momentum_x_2d(sol, x0, y0, z0, per_star_source[s], offsets, sigma)
+    #                     if self.debug:
+    #                         bad_E = jnp.any(~jnp.isfinite(sol[0]))
+    #                         bad_F = jnp.any(~jnp.isfinite(sol[1:]))
+    #                         jax.debug.print(
+    #                             "NaN/Inf after injection? Egamma={E_bad}, Fgamma={F_bad}",
+    #                             E_bad=bad_E, F_bad=bad_F,
+    #                         )
+    #                         jax.debug.print("sum weight = 1? {}", wdbg.sum())
+    #                 elif self.injection_geometry == "3D":
+    #                     # WARNING: "_x_3d" injects F along +x ONLY, so a
+    #                     # "stromgren" point source is in fact a collimated
+    #                     # source. Use injection_geometry="radial_3D" for a
+    #                     # genuinely isotropic star.
+    #                     wdbg, sol = self._inject_momentum_x_3d(sol, x0, y0, z0, per_star_source[s], offsets, sigma)
+    #                 elif self.injection_geometry == "radial_2D":
+    #                     wdbg, sol = self._inject_momentum_radial_2d(sol, x0, y0, z0, per_star_source[s], offsets, sigma)
+    #                 elif self.injection_geometry == "radial_3D":
+    #                     wdbg, sol = self._inject_momentum_radial_3d(sol, x0, y0, z0, per_star_source[s], offsets, sigma)
+    #                 elif self.injection_geometry == "beam_x":
+    #                     wdbg, sol = self._inject_momentum_beam_x(sol, x0, y0, z0, per_star_source[s], sigma, beam_len)
+    #                     if self.debug:
+    #                         self.debug_grid_stats(sol, self.eq, "momentum injection beam (after)", 0)
+    #                 else:
+    #                     raise ValueError(f"Unknown injection_geometry: {self.injection_geometry}")
+
+    #     # Safety limiter: enforce the M1 causality cone |F| <= beam_reduced_flux * c * E
+    #     sol = self._clip_to_m1_cone(sol)
+
+    #     if self.debug:
+    #         self.debug_grid_stats(sol, self.eq, "sol after injection + clip", 0)
+
+    #     params_out = dict(params)
+    #     params_out["star_ages"] = star_ages_new
+    #     self.sol = sol
+    #     return sol, params_out
     def force(self, i, sol, params, dt):
         if "star_masses" not in params or params["star_masses"] is None:
             # No stars: no injection, but the chemistry sink still applies
             # to whatever radiation is already in the box.
-            if self.chemistry == True:
+            if self.chemistry:
                 sol = self.apply_photon_chemistry_sink(sol, dt)
                 sol = self.apply_flux_chemistry_sink(sol, dt)
             return sol, params
+
         if self.debug:
             self.debug_grid_stats(sol, self.eq, "sol before injection", 0)
 
@@ -671,30 +838,27 @@ class StellarRadiationForce:
         star_metallicities = jnp.asarray(params["star_metallicities"])
 
         # ── Chemistry sink/source on the radiation field (eq. 25' and 26') ──
-        # Applied BEFORE the stellar injection so that the freshly injected
-        # photons are not immediately absorbed within the same half step,
-        # and with the positivity limiter |Delta N| <= 0.9 N.
-        if self.chemistry == True:
+        if self.chemistry:
             sol = self.apply_photon_chemistry_sink(sol, dt)
             sol = self.apply_flux_chemistry_sink(sol, dt)
-            if self.debug:  # forcer temporairement
+            if self.debug:
                 jax.debug.print(
-                "DEBUG_CHEM sigma_HI_cgs={} n_HI_max={} N_gamma_max={} chem_term_min={} chem_term_max={}",
-                self.sigma_HI_cgs,
-                jnp.max(self.get_number_density_HI(sol)),
-                jnp.max(self.view.photon_density_cgs(sol)),
-                jnp.min(self.get_N_chemistry(sol)),
-                jnp.max(self.get_N_chemistry(sol)),
+                    "DEBUG_CHEM sigma_HI_cgs={} n_HI_max={} N_gamma_max={} "
+                    "chem_term_min={} chem_term_max={}",
+                    self.sigma_HI_cgs,
+                    jnp.max(self.get_number_density_HI(sol)),
+                    jnp.max(self.view.photon_density_cgs(sol)),
+                    jnp.min(self.get_N_chemistry(sol)),
+                    jnp.max(self.get_N_chemistry(sol)),
                 )
+
+        # ── Emission rate per star : depend UNIQUEMENT de injection_mode ──
         if self.injection_mode == "stromgren":
             per_star_source = self.get_N_gamma_stromgen_sphere() * dt
-            if self.debug:
-                self._debug_stromgren_units_jax(dt, per_star_source)
-
         elif self.injection_mode == "physical":
             per_star_source = self.get_N_gamma(
                 star_masses, star_ages_old, star_ages_new, star_metallicities, sol
-            )
+            ) * dt
         else:
             raise ValueError(f"Unknown injection_mode: {self.injection_mode}")
 
@@ -702,44 +866,59 @@ class StellarRadiationForce:
             inject_now = jnp.equal(i, 0)
             per_star_source = jnp.where(inject_now, per_star_source, 0.0)
 
+        # ── Positions des etoiles + diffusion de per_star_source vers 1/etoile ──
         if "star_positions" not in params or params["star_positions"] is None:
             star_positions = jnp.asarray(
                 [[self.mesh_shape[0] // 2, self.mesh_shape[1] // 2, self.mesh_shape[2] // 2]],
                 dtype=jnp.int32,
             )
-            if jnp.ndim(per_star_source) == 0:
-                per_star_source = jnp.asarray([per_star_source])
-            else:
-                per_star_source = jnp.asarray([jnp.sum(per_star_source)])
+            per_star_source = (
+                jnp.asarray([per_star_source]) if jnp.ndim(per_star_source) == 0
+                else jnp.asarray([jnp.sum(per_star_source)])
+            )
         else:
             star_positions = jnp.asarray(params["star_positions"], dtype=jnp.int32)
             if jnp.ndim(per_star_source) == 0:
                 per_star_source = jnp.full((star_positions.shape[0],), per_star_source)
 
-        ix = star_positions[:, 0]
-        iy = star_positions[:, 1]
-        iz = star_positions[:, 2]
+        ix, iy, iz = star_positions[:, 0], star_positions[:, 1], star_positions[:, 2]
 
-        sigma = max(1, round(self.mesh_shape[0] // 100))
+        sigma = max(1, round(self.mesh_shape[0] / 100))
         offsets = jnp.arange(-3 * sigma, 3 * sigma + 1)
         beam_len = int(self.beam_length_cells)
 
-        # ── Photon injection ──
-        if not self.momentum_only:
+        if self.debug and self.injection_mode == "stromgren":
+            self._debug_stromgren_units_jax(dt, per_star_source)
+
+        # ── Injection de photons : self.gaussian_star choisit la geometrie ──
+        # En mode "stromgren" avec gaussian_star=True, l'injection de photons
+        # reste active MEME si momentum_only=True -- momentum_only ne doit
+        # desactiver que l'injection point-source classique, pas le test de
+        # Stromgren gaussien qui a besoin du champ de photons independamment
+        # du moment.
+        inject_photons = (
+            not self.momentum_only
+            or (self.injection_mode == "stromgren" and self.gaussian_star)
+        )
+
+        if inject_photons:
             if not self.gaussian_star:
+                # Point source : tout le debit dans UNE seule cellule
                 for s in range(star_positions.shape[0]):
                     x0, y0, z0 = ix[s], iy[s], iz[s]
                     x_safe = jnp.clip(x0, 0, self.mesh_shape[0] - 1)
                     y_safe = jnp.clip(y0, 0, self.mesh_shape[1] - 1)
                     z_safe = jnp.clip(z0, 0, self.mesh_shape[2] - 1)
-
                     in_bounds = (
                         (0 <= x0) & (x0 < self.mesh_shape[0]) &
                         (0 <= y0) & (y0 < self.mesh_shape[1]) &
                         (0 <= z0) & (z0 < self.mesh_shape[2])
                     )
-                    sol = sol.at[0, x_safe, y_safe, z_safe].add(jnp.where(in_bounds, per_star_source[s], 0.0))
+                    sol = sol.at[0, x_safe, y_safe, z_safe].add(
+                        jnp.where(in_bounds, per_star_source[s], 0.0)
+                    )
             else:
+                # Etoile gaussienne : debit reparti sur un voisinage pondere
                 for s in range(star_positions.shape[0]):
                     x0, y0, z0 = ix[s], iy[s], iz[s]
                     if self.injection_geometry in ("2D", "radial_2D"):
@@ -751,7 +930,7 @@ class StellarRadiationForce:
                     else:
                         raise ValueError(f"Unknown injection_geometry: {self.injection_geometry}")
 
-        # ── Momentum injection ──
+        # ── Injection de moment (inchangee, meme switch gaussian_star) ──
         if self.injection_momentum:
             if not self.gaussian_star:
                 for s in range(star_positions.shape[0]):
@@ -759,19 +938,15 @@ class StellarRadiationForce:
                     x_safe = jnp.clip(x0, 0, self.mesh_shape[0] - 1)
                     y_safe = jnp.clip(y0, 0, self.mesh_shape[1] - 1)
                     z_safe = jnp.clip(z0, 0, self.mesh_shape[2] - 1)
-
                     in_bounds = (
                         (0 <= x0) & (x0 < self.mesh_shape[0]) &
                         (0 <= y0) & (y0 < self.mesh_shape[1]) &
                         (0 <= z0) & (z0 < self.mesh_shape[2])
                     )
-                    sol = sol.at[0, x_safe, y_safe, z_safe].add(jnp.where(in_bounds, per_star_source[s], 0.0))
+                    sol = sol.at[0, x_safe, y_safe, z_safe].add(
+                        jnp.where(in_bounds, per_star_source[s], 0.0)
+                    )
             else:
-                # NOTE: this branch used to be guarded by `if not
-                # self.chemistry`, so enabling chemistry silently disabled
-                # the whole momentum (F_gamma) injection and replaced it by
-                # a second call to the flux sink. The sink now lives at the
-                # top of force(), and the injection always runs.
                 for s in range(star_positions.shape[0]):
                     x0, y0, z0 = ix[s], iy[s], iz[s]
                     if self.injection_geometry == "2D":
@@ -785,10 +960,9 @@ class StellarRadiationForce:
                             )
                             jax.debug.print("sum weight = 1? {}", wdbg.sum())
                     elif self.injection_geometry == "3D":
-                        # WARNING: "_x_3d" injects F along +x ONLY, so a
-                        # "stromgren" point source is in fact a collimated
-                        # source. Use injection_geometry="radial_3D" for a
-                        # genuinely isotropic star.
+                        # ATTENTION: "_x_3d" injecte F uniquement selon +x, donc
+                        # ce n'est PAS une etoile isotrope. Utilise "radial_3D"
+                        # pour une vraie source isotrope.
                         wdbg, sol = self._inject_momentum_x_3d(sol, x0, y0, z0, per_star_source[s], offsets, sigma)
                     elif self.injection_geometry == "radial_2D":
                         wdbg, sol = self._inject_momentum_radial_2d(sol, x0, y0, z0, per_star_source[s], offsets, sigma)
@@ -1027,7 +1201,10 @@ class StellarRadiationForce:
 
             dN_cgs = N_new - N_cgs
         else:
-            rate_cgs = self.get_N_chemistry(sol) * dt_s
+            # ``limited_explicit_update`` performs rate * dt itself.
+            # Passing an already time-integrated rate here would introduce a
+            # spurious second factor of dt.
+            rate_cgs = self.get_N_chemistry(sol)*dt
             dN_cgs = hchem.limited_explicit_update(
                 N_cgs, rate_cgs, dt_s, max_frac=self.chem_max_frac
             )
@@ -1060,7 +1237,8 @@ class StellarRadiationForce:
         because N and F are damped by different amounts once the photon
         update is limited.
         """
-        decay = self.get_flux_source_decay(sol, dt)
+        # decay = jnp.exp(self.get_flux_source_decay(sol, dt)) # chat gpt version
+        decay = jnp.exp(self.get_flux_source_decay(sol, dt))
         sol = sol.at[1].multiply(decay)
         sol = sol.at[2].multiply(decay)
         sol = sol.at[3].multiply(decay)

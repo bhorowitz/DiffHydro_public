@@ -154,7 +154,26 @@ class hydro:
         # Liste d'objets responsables des flux numeriques.
         self.fluxes = fluxes
         # Liste d'objets responsables des termes sources / forces.
-        self.forces = forces
+        self.forces = list(forces or ())
+
+        # A reaction source must have a single owner.  In particular,
+        # HydrogenPhotoChemistryForce updates N_gamma, x_HII and E_tot in one
+        # photon-conserving operation.  Combining it with the legacy photon
+        # sink in StellarRadiationForce or with HeatCoolForce_basic would
+        # silently destroy photon/energy bookkeeping by applying the same
+        # source twice.
+        for channel, label in (
+            ("handles_photon_chemistry", "photon chemistry"),
+            ("handles_thermal_source", "photo-heating/cooling"),
+        ):
+            owners = [force.__class__.__name__ for force in self.forces
+                      if getattr(force, channel, False)]
+            if len(owners) > 1:
+                raise ValueError(
+                    f"More than one force owns {label}: {owners}. "
+                    "Use HydrogenPhotoChemistryForce by itself for the "
+                    "coupled source update."
+                )
         # Reference spatial step (assumed uniform here).
         self.dx_o = dx
         self.use_mol = use_mol

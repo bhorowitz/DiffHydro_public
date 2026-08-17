@@ -45,9 +45,7 @@ from diffhydro.equationmanager_radiative_transf_no_chat_copy import (
     EquationManager as EquationManagerRT,
 )
 from diffhydro.physics import hydrogen_chemistry as hchem
-from diffhydro.physics.fraction_xHII import (
-    HydrogenIonizationForce, HydrogenPhotoChemistryForce,
-)
+from diffhydro.physics.fraction_xHII import HydrogenPhotoChemistryForce
 from diffhydro.physics.radiative_transfer_fixed import StellarRadiationForce
 from diffhydro.units import CodeUnits
 
@@ -56,7 +54,7 @@ print("Backend:", jax.default_backend())
 # ---------------------------------------------------------------------------
 # Iliev+2006 Test 1 parameters
 # ---------------------------------------------------------------------------
-N = int(os.environ.get("N", 50))
+N = int(os.environ.get("N", 150))
 n_H_cgs = 1.0e-3                 # cm^-3
 T_K = 1.0e4                      # K, isothermal
 Q_phot = 5.0e48                  # ionizing photons / s
@@ -69,11 +67,12 @@ t_rec = 1.0 / (alpha_B * n_H_cgs)
 
 box_cgs = 4.0 * R_S / 1.4        # box comfortably larger than 2 R_S
 dx_cgs = box_cgs / N
-t_end = float(os.environ.get("TEND", 3.0)) * t_rec    # in units of t_rec
-
-# RSLA: c_red must stay above the ionization front speed
-# dR/dt|max ~ Q / (4 pi R^2 n_H) evaluated at ~1 cell
-rsla = float(os.environ.get("RSLA", 1.0e-3))
+t_end = float(os.environ.get("TEND", 5.0)) * t_rec    # in units of t_rec
+print(t_end)
+# RSLA: c_red must stay above the early ionization-front speed.  The old
+# 1e-3 default was slower than the front at one cell for this setup, which
+# adds an artificial early-time delay before any chemistry issue is involved.
+rsla = float(os.environ.get("RSLA", 2.0e-2))
 c_red_cgs = rsla * hchem.C_LIGHT_CGS
 v_front_typ = Q_phot / (4.0 * np.pi * (0.5 * R_S) ** 2 * n_H_cgs)
 
@@ -94,6 +93,7 @@ c_code = c_red_cgs / cu.V_cgs          # == 1
 cfl = 0.4
 dt_code = cfl / (3.0 * c_code / dx_code)
 n_steps = int(math.ceil((t_end / cu.T_cgs) / dt_code))
+v_front_cell = Q_phot / (4.0 * np.pi * dx_cgs ** 2 * n_H_cgs)
 
 print("=" * 72)
 print(f"  N              = {N},  dx = {dx_cgs:.4e} cm = {dx_cgs / 3.0857e18:.3f} pc")
@@ -106,6 +106,11 @@ print(f"  tau per cell   = {n_H_cgs * hchem.SIGMA_HI_0_CGS * dx_cgs:.3e}")
 print(f"  RSLA           = {rsla:.1e}  ->  c_red = {c_red_cgs:.3e} cm/s")
 print(f"                   v_front(R_S/2) = {v_front_typ:.3e} cm/s "
       f"(margin x{c_red_cgs / v_front_typ:.1f})")
+print(f"                   v_front(dx) = {v_front_cell:.3e} cm/s "
+      f"(margin x{c_red_cgs / v_front_cell:.1f})")
+if c_red_cgs < v_front_cell:
+    print("  !! WARNING: RSLA is slower than the early ionization front; "
+          "the analytic early-time curve cannot be recovered.")
 print(f"  dt             = {dt_code * cu.T_cgs:.3e} s,  n_steps = {n_steps}")
 print("=" * 72)
 
@@ -148,30 +153,30 @@ hydro_flux = StateBlockFlux(
     slice(eq_rt.n_cons, eq_rt.n_cons + eq_hydro.n_cons),
 )
 
-# SPLIT   : StellarRadiationForce absorbs photons, then HydrogenIonizationForce
-#           ionizes with the already-depleted N  -> not photon conserving
-# COUPLED : HydrogenPhotoChemistryForce does both at once, one absorbed photon
-#           = one ionization
-scheme = os.environ.get("SCHEME", "coupled").lower()
-
 stellar = StellarRadiationForce(
     dx=dx_code,
     injection_mode="stromgren",
     stromgren_rate=Q_phot * cu.T_cgs,       # photons per code time
-    injection_momentum=True,
+    injection_momentum=False,
     injection_geometry="radial_3D",         # isotropic star, not a +x beam
     gaussian_star=True,
+    beam_momentum_scaling="legacy_c2_source2",
     eq=eq_rt, hydro_eq=eq_hydro, cu=cu,
-    chemistry=False, chemistry_case="B",         # tau_cell > 1: exact sink
+    chemistry=False,                       # injection only
 )
-if scheme == "split":
-    chem_force = HydrogenIonizationForce(
-        stellar, case="B", collisional=False, max_frac=0.9)
-else:
-    chem_force = HydrogenPhotoChemistryForce(
-        stellar, case="B", collisional=False, max_frac=0.9)
-print(f"  chemistry scheme = {scheme}  ({type(chem_force).__name__})")
-# # no HeatCoolForce: the reference solution is isothermal at 1e4 K
+chem_force = HydrogenPhotoChemistryForce(   
+    stellar,
+    case="B",
+    collisional=False,
+    max_frac=0.9,
+    # Iliev Test 1 is isothermal.  The coupled force is still responsible
+    # for the energy slot, but projects it so T stays exactly 10^4 K after
+    # x_HII changes; H-L is deliberately disabled for this analytic test.
+    include_heating=False,
+    include_cooling=False,
+    # fixed_temperature_K=T_K,
+)
+print(f"  chemistry scheme = coupled ({type(chem_force).__name__})")
 
 sim = dh.hydro(
     n_super_step=n_steps + 10,
@@ -181,47 +186,6 @@ sim = dh.hydro(
     max_dt=2.0 * dt_code,
 )
 
-# stellar_force = StellarRadiationForce(
-#     escape_fraction=0.1,
-#     dx=dx_code,
-#     injection_mode="stromgren",
-#     stromgren_rate=Q_phot * cu.T_cgs,
-#     injection_momentum=True,
-#     gaussian_star=True,
-#     injection_geometry="3D",
-#     eq=eq_rt,
-#     hydro_eq=eq_hydro,
-#     debug=False,
-#     momentum_only=False,
-#     chemistry=True,
-#     cu=cu,
-#     photon_sink_mode = "exponential",
-# )
-
-# heatcool_force = dh.physics.cooling.HeatCoolForce_basic(
-#     eq=eq_rt,
-#     hydro_eq=eq_hydro,
-#     cu=cu,
-#     light_speed=c_code,
-#     case="A",
-#     expansion_factor=1.0,
-#     X_H=1.0,
-#     mean_photon_energy_eV=13.6,
-# )
-# ionization_force = HydrogenIonizationForce(
-#     stellar_force,
-#     case="A",
-#     collisional=True,
-#     max_frac=0.9,
-# )
-
-# sim = dh.hydro(
-#     n_super_step=n_steps + 10,
-#     fluxes=[hydro_flux, rt_flux],
-#     forces=[stellar_force, heatcool_force, ionization_force],
-#     dx=dx_code,
-#     max_dt=2.0 * dt_code,
-# )
 # ---------------------------------------------------------------------------
 # Initial conditions (CONSERVATIVE state)
 # ---------------------------------------------------------------------------
@@ -252,6 +216,11 @@ def ionized_radius(x3d):
     return (3.0 * V_ion / (4.0 * np.pi)) ** (1.0 / 3.0)
 
 
+def xHII_from_conservative(sol):
+    """Recover x_HII from the conserved rho*x_HII field for diagnostics."""
+    return np.asarray(chem_force.view.xHII(sol), dtype=np.float64)
+
+
 @jax.jit
 def run_chunk(sol, params, k0):
     """`snap_every` fixed-dt steps, compiled once."""
@@ -269,7 +238,7 @@ for chunk in range(n_chunks):
     t_code += snap_every * dt_code
     k = (chunk + 1) * snap_every - 1
     if True:
-        x3d = np.clip(np.asarray(sol[9], dtype=np.float64), 0.0, 1.0)
+        x3d = xHII_from_conservative(sol)
         t_s = t_code * cu.T_cgs
         times.append(t_s)
         radii.append(ionized_radius(x3d))
@@ -308,7 +277,7 @@ axes[0].set_title("R-type expansion of the HII region")
 axes[0].legend()
 axes[0].grid(alpha=0.3)
 
-x_slice = np.clip(np.asarray(sol[9], dtype=np.float64)[:, :, c_idx], 0, 1)
+x_slice = xHII_from_conservative(sol)[:, :, c_idx]
 extent = [-0.5 * box_cgs / 3.0857e18, 0.5 * box_cgs / 3.0857e18] * 2
 im = axes[1].imshow(x_slice.T, origin="lower", cmap="magma", vmin=0, vmax=1,
                     extent=extent)

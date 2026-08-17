@@ -63,6 +63,7 @@ from diffhydro.equationmanager_radiative_transf_no_chat_copy import EquationMana
 from diffhydro.physics.radiative_transfer_fixed import StellarRadiationForce
 from diffhydro.physics.fraction_xHII import HydrogenIonizationForce as HydrogenIonizationForce
 from diffhydro.physics import hydrogen_chemistry as hchem
+from diffhydro.physics.fraction_xHII import HydrogenIonizationForce, HydrogenPhotoChemistryForce
 jax.config.update("jax_enable_x64", True)
 
 # ============================================================================
@@ -71,7 +72,7 @@ jax.config.update("jax_enable_x64", True)
 # ============================================================================
 GPU_ID = "0"
 
-N = 100
+N = 50
 
 # Une unité de longueur code = une cellule physique
 ULEN = "4.7536191406e20 cm"
@@ -87,7 +88,7 @@ BOXCODE = None
 SRC = 5e48
 
 # TPHYS = 3 t_rec
-TPHYS = "1.1574897190e16 s"
+TPHYS = "1.92915e16 s"#"1.1574897190e16 s"
 
 EPS = 1e-30
 MAXDT = None
@@ -96,8 +97,8 @@ NSTEP = None
 N_H_CGS = 1.0e-3
 T_AMBIENT_K = 1.0e4
 
-MAKE_GIFS = False
-GIF_FRAMES = 30
+MAKE_GIFS = True
+GIF_FRAMES = 100
 
 print("Backend:", jax.default_backend(), jax.devices())
 
@@ -206,6 +207,7 @@ run_tag = (
     f"_uvel{sanitize_tag(unit_velocity_str)}"
     f"_src{source_rate_phys:.2e}phs"
     f"_t{sanitize_tag(tphys_str)}"
+    # f"_HLL"
 )
 
 BASE_OUTPUT_DIR = os.path.join(REPO_ROOT, "examples/RT/Images", run_tag)
@@ -238,6 +240,9 @@ print("=" * 70)
 # ============================================================================
 # SOLVER
 # ============================================================================
+# ============================================================================
+# SOLVER
+# ============================================================================
 eps_code = float(EPS)
 eq_test = EquationManager_RT(
     light_speed=light_speed_code,
@@ -262,13 +267,6 @@ print(f"  eps_code              = {eps_code:.3e}   "
       f"(source/step = {source_density_per_step:.3e} [ph/vol code], "
       f"ratio = {source_density_per_step / eps_code:.2e})")
 
-solver_test = dh.LaxFriedrichs_Radiative_transfer(
-    equation_manager=eq_test, signal_speed=dh.signal_speed_Rusanov
-)
-solver_test_hydro = dh.LaxFriedrichs(
-    equation_manager=eq_test_hydro, signal_speed=dh.signal_speed_Rusanov
-)
-
 
 class StateBlockFlux:
     def __init__(self, base_flux, state_slice):
@@ -277,10 +275,8 @@ class StateBlockFlux:
         self.dx_o = base_flux.dx_o
 
     def flux(self, sol, ax, params, flux):
-        local_sol = sol[self.state_slice]
-        local_flux = self.base_flux.flux(local_sol, ax, params, flux)
-        full_flux = jnp.zeros_like(sol)
-        return full_flux.at[self.state_slice].set(local_flux)
+        local = self.base_flux.flux(sol[self.state_slice], ax, params, flux)
+        return jnp.zeros_like(sol).at[self.state_slice].set(local)
 
     def timestep(self, sol):
         return self.base_flux.timestep(sol[self.state_slice])
@@ -288,61 +284,53 @@ class StateBlockFlux:
 
 rt_flux = StateBlockFlux(
     dh.ConvectiveFlux_Radiative_transfer(
-        eq_test, solver_test, dh.PLM(limiter="VANLEER"), dx=dx_code,
-    ),
+        eq_test, dh.HLL_Radiative_transfer_Local(eq_test, dh.signal_speed_Rusanov),
+        dh.PLM(limiter="VANLEER"), dx=dx_code),
     slice(0, eq_test.n_cons),
 )
 hydro_flux = StateBlockFlux(
     dh.ConvectiveFlux(
-        eq_test_hydro, solver_test_hydro, dh.PLM(limiter="VANLEER"), dx=dx_code,
-    ),
+        eq_test_hydro, dh.LaxFriedrichs(eq_test_hydro, dh.signal_speed_Rusanov),
+        dh.PLM(limiter="VANLEER"), dx=dx_code),
     slice(eq_test.n_cons, eq_test.n_cons + eq_test_hydro.n_cons),
 )
 
+# --- Meme pipeline chimie que stromgren_validation.py : injection SEULE
+#     (chemistry=False) puis chimie/ionisation couplee (photon-conserving)
+#     via HydrogenPhotoChemistryForce, PLUS de HeatCoolForce_basic ni de
+#     HydrogenIonizationForce separee.
 stellar_force = StellarRadiationForce(
-    escape_fraction=0.1,
     dx=dx_code,
     injection_mode="stromgren",
     stromgren_rate=source_rate_code,
-    injection_momentum=True,
+    injection_momentum=False,
+    injection_geometry="radial_3D",
     gaussian_star=True,
-    injection_geometry="3D",
-    eq=eq_test,
-    hydro_eq=eq_test_hydro,
-    debug=False,
-    momentum_only=False,
-    chemistry=True,
-    cu=cu,
+    beam_momentum_scaling="legacy_c2_source2",
+    eq=eq_test, hydro_eq=eq_test_hydro, cu=cu,
+    chemistry=False,                       # injection only
 )
-
-heatcool_force = dh.physics.cooling.HeatCoolForce_basic(
-    eq=eq_test,
-    hydro_eq=eq_test_hydro,
-    cu=cu,
-    light_speed=light_speed_code,
-    case="A",
-    expansion_factor=1.0,
-    X_H=1.0,
-    mean_photon_energy_eV=13.6,
-)
-ionization_force = HydrogenIonizationForce(
+chem_force = HydrogenPhotoChemistryForce(
     stellar_force,
-    case="A",
-    collisional=True,
+    case="B",
+    collisional=False,
     max_frac=0.9,
+    include_heating=False,
+    include_cooling=False,
+    # fixed_temperature_K=T_AMBIENT_K,
 )
+print(f"  chemistry scheme = coupled ({type(chem_force).__name__})")
 
 hydrosim_test = dh.hydro(
     n_super_step=n_super_step,
     fluxes=[hydro_flux, rt_flux],
-    forces=[stellar_force, heatcool_force, ionization_force],
+    forces=[stellar_force, chem_force],
     dx=dx_code,
     max_dt=max_dt,
 )
 assert hydrosim_test.dx_o == rt_flux.dx_o == stellar_force.dx, "desynchronized dx !"
 print("hydrosim_test.dx_o =", hydrosim_test.dx_o, " rt_flux.dx_o =", rt_flux.dx_o,
       " force.dx =", stellar_force.dx, " cfl =", eq_test.cfl)
-
 # ============================================================================
 # STARS: single central source (Stromgren test). To use a random population
 # instead, comment this block and uncomment the "STAR GENERATION" block below.
@@ -668,10 +656,26 @@ if MAKE_GIFS:
     gif_field_names = ["E_gamma", "Fx", "Fy", "Fz", "rho", "vx", "vy", "vz", "p", "x_HII"]
     DIVERGING_FIELDS = {"Fx", "Fy", "Fz", "vx", "vy", "vz"}
     BOUNDED_FIELDS = {"x_HII"}
+    LOG_FIELDS = {"E_gamma_log"}  # champ derive, ajoute apres collecte
 
+    # --- Texte des conditions initiales, affiche sur la PREMIERE image
+    #     (frame 0 = etat initial, avant tout pas de temps) de chaque GIF.
+    ic_text = (
+        f"Initial conditions\n"
+        f"N={size_shape}^3   dx={dx_phys_cgs:.3e} cm ({dx_phys_cgs / axis_unit_scale:.3f} {axis_unit_name})\n"
+        f"n_H={N_H_CGS:.3e} cm^-3   T_amb={T_AMBIENT_K:.3e} K\n"
+        f"Q={source_rate_phys:.3e} ph/s   R_S={R_stromgren_cgs / axis_unit_scale:.3f} {axis_unit_name}\n"
+        f"t_rec={t_rec_cgs:.3e} s   c_red={c_red_cgs:.3e} cm/s\n"
+        f"x_HII(t=0)=0   E_gamma seed={1e-20:.0e}"
+    )
+
+    # --- Frame 0 = sol_test tel quel, AVANT le premier pas de temps.
     sol_current = cp.deepcopy(sol_test)
-    frame_slices = {name: [] for name in gif_field_names}
-    t_accum_list = []
+    frame_slices = {
+        name: [np.asarray(sol_current[k, :, :, c], dtype=np.float64)]
+        for k, name in enumerate(gif_field_names)
+    }
+    t_accum_list = [0.0]
     t_accum_code = 0.0
 
     print(f"\nRunning {GIF_FRAMES} incremental steps for field GIFs "
@@ -691,13 +695,29 @@ if MAKE_GIFS:
         print(f"  frame {frame_i + 1}/{GIF_FRAMES} computed "
               f"(t = {t_accum_list[-1]:.4e} s)")
 
+    n_frames_total = GIF_FRAMES + 1  # IC + GIF_FRAMES pas evolues
+
+    # --- Champ derive : log10(E_gamma), a partir des frames deja collectees.
+    frame_slices["E_gamma_log"] = [
+        np.log10(np.maximum(arr, 1e-100)) for arr in frame_slices["E_gamma"]
+    ]
+    render_field_names = gif_field_names + ["E_gamma_log"]
+
     gif_dir = os.path.join(BASE_OUTPUT_DIR, "field_gifs")
     os.makedirs(gif_dir, exist_ok=True)
 
-    for name in gif_field_names:
+    field_labels = {"E_gamma_log": "log10 photons per code volume"}
+
+    for name in render_field_names:
         stack = np.stack(frame_slices[name], axis=0)
 
-        if name in BOUNDED_FIELDS:
+        if name in LOG_FIELDS:
+            cmap = "hot"
+            # ignore le plancher log10(1e-100)=-100 pour ne pas ecraser l'echelle
+            signal = stack[stack > -50.0]
+            vmin = float(signal.min()) if signal.size else float(stack.min())
+            vmax = float(stack.max())
+        elif name in BOUNDED_FIELDS:
             cmap, vmin, vmax = "viridis", 0.0, 1.0
         elif name in DIVERGING_FIELDS:
             cmap = "coolwarm"
@@ -711,14 +731,26 @@ if MAKE_GIFS:
         os.makedirs(frames_subdir, exist_ok=True)
         frame_paths = []
 
-        for frame_i in range(GIF_FRAMES):
+        for frame_i in range(n_frames_total):
             fig, ax = plt.subplots(figsize=(6, 5))
             im = ax.imshow(stack[frame_i], origin="lower", cmap=cmap,
                             extent=extent, vmin=vmin, vmax=vmax)
             ax.set_xlabel(f"y [{axis_unit_name}]"); ax.set_ylabel(f"x [{axis_unit_name}]")
-            ax.set_title(f"{name}, iter {frame_i + 1}/{GIF_FRAMES}, "
-                         f"t = {t_accum_list[frame_i] / time_axis_scale:.2e} {time_axis_unit}")
-            fig.colorbar(im, ax=ax, label=name)
+
+            if frame_i == 0:
+                ax.set_title(f"{name}, INITIAL CONDITIONS (t=0)")
+                ax.text(
+                    0.02, 0.98, ic_text,
+                    transform=ax.transAxes, ha="left", va="top",
+                    fontsize=7, color="white",
+                    bbox=dict(boxstyle="round", facecolor="black",
+                              alpha=0.65, edgecolor="white"),
+                )
+            else:
+                ax.set_title(f"{name}, iter {frame_i}/{GIF_FRAMES}, "
+                             f"t = {t_accum_list[frame_i] / time_axis_scale:.2e} {time_axis_unit}")
+
+            fig.colorbar(im, ax=ax, label=field_labels.get(name, name))
             plt.tight_layout()
 
             frame_path = os.path.join(frames_subdir, f"frame_{frame_i:04d}.png")
@@ -728,11 +760,12 @@ if MAKE_GIFS:
 
         gif_out = os.path.join(gif_dir, f"{name}_evolution_{run_tag}.gif")
         images = [Image.open(p) for p in frame_paths]
+        durations = [800] + [200] * (len(images) - 1)
         images[0].save(
-            gif_out, save_all=True, append_images=images[1:], duration=200, loop=0,
+            gif_out, save_all=True, append_images=images[1:],
+            duration=durations, loop=0,
         )
         print("wrote", gif_out)
-
 # ============================================================================
 # Per-field slices + CSV dumps
 # ============================================================================

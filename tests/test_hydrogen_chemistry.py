@@ -46,7 +46,10 @@ def setup():
         light_speed=c_code, mesh_shape=(N, N, N), eps=1e-20,
         passive_weighted=False, passive_advected=False,
     )
-    hydro_eq = dh.EquationManager(gamma=GAMMA, mesh_shape=(N, N, N), eps=1e-20)
+    hydro_eq = dh.EquationManager(
+        gamma=GAMMA, n_cons=6, passive_names=("x_HII",),
+        mesh_shape=(N, N, N), eps=1e-20,
+    )
     sf = StellarRadiationForce(
         dx=1.0, injection_mode="stromgren", stromgren_rate=0.0,
         eq=rt_eq, hydro_eq=hydro_eq, cu=cu, chemistry=True,
@@ -54,7 +57,7 @@ def setup():
     )
     hc = HeatCoolForce_basic(
         eq=rt_eq, hydro_eq=hydro_eq, cu=cu, light_speed=c_code,
-        xHII_weighted=False, X_H=1.0,
+        X_H=1.0,
     )
     ion = HydrogenIonizationForce(sf)
     return cu, c_code, sf, hc, ion
@@ -66,9 +69,11 @@ def make_state(cu, n_H_cgs=1.0, T_K=1.0e4, x_HII=0.1, N_gamma_cgs=0.0, dtype=jnp
     p_code = n_H_cgs * (1.0 + x_HII) * hchem.KB_CGS * T_K / cu.P_cgs
     sol = jnp.zeros((10, N, N, N), dtype=dtype)
     sol = sol.at[0].set(N_gamma_cgs * cu.L_cgs ** 3)
-    sol = sol.at[4].set(x_HII)
-    sol = sol.at[5].set(rho_code)
-    sol = sol.at[9].set(p_code / (GAMMA - 1.0))   # v = 0 -> E_tot = e_th
+    # Combined conservative layout: RT [N,Fx,Fy,Fz] then hydro
+    # [rho,rho*vx,rho*vy,rho*vz,E_tot,rho*x_HII].
+    sol = sol.at[4].set(rho_code)
+    sol = sol.at[8].set(p_code / (GAMMA - 1.0))   # v = 0 -> E_tot = e_th
+    sol = sol.at[9].set(rho_code * x_HII)
     return sol
 
 
@@ -120,9 +125,9 @@ def test_state_view_accounts_for_kinetic_energy(setup):
     """T must be computed from E_tot - 0.5 rho v^2, not from E_tot."""
     cu, _, sf, _, _ = setup
     sol = make_state(cu, 1.0, 1.0e4, 0.1)
-    rho = sol[5]
+    rho = sol[4]
     v_code = 1.0e-3
-    sol_moving = sol.at[6].set(rho * v_code).at[9].add(0.5 * rho * v_code ** 2)
+    sol_moving = sol.at[5].set(rho * v_code).at[8].add(0.5 * rho * v_code ** 2)
     T0 = float(sf.view.temperature_K(sol)[0, 0, 0])
     T1 = float(sf.view.temperature_K(sol_moving)[0, 0, 0])
     assert T1 == pytest.approx(T0, rel=1e-6)
@@ -170,7 +175,7 @@ def test_photoionization_equilibrium(setup):
     def step_fn(k, s):
         s, _ = ion.force(k, s, {}, dt_code)
         # keep T and N_gamma fixed: only the chemistry is under test here
-        return s.at[9].set((1.0 + sf.view.xHII(s)) * e_scale)
+        return s.at[8].set((1.0 + sf.view.xHII(s)) * e_scale)
 
     sol = jax.jit(lambda s: jax.lax.fori_loop(0, 2000, step_fn, s))(sol)
 
@@ -318,6 +323,38 @@ def test_coupled_and_split_agree_in_the_optically_thin_limit(setup):
     dx_coupled = float(coupled.view.xHII(sol_c)[0, 0, 0]) - x0
 
     assert dx_coupled == pytest.approx(dx_split, rel=1e-3), (dx_coupled, dx_split)
+
+
+def test_coupled_force_deposits_excess_photon_energy_once(setup):
+    """The coupled source must heat by N_abs * (h nu - 13.6 eV), once."""
+    cu, _, sf, _, _ = setup
+    coupled = HydrogenPhotoChemistryForce(
+        sf, case="B", collisional=False, b_rec=0.0,
+        include_cooling=False, mean_photon_energy_eV=20.0,
+    )
+    sol = make_state(cu, 1.0, 1.0e4, x_HII=0.0, N_gamma_cgs=1.0)
+    E0 = np.asarray(coupled.view.thermal_energy_code(sol), dtype=np.float64)
+    N0 = np.asarray(coupled.view.photon_density_cgs(sol), dtype=np.float64)
+
+    # Use a measurable but optically thin step: a tiny 1e-8 s step makes
+    # N0-N1 itself cancellation-limited even in float64.
+    sol2, _ = coupled.force(0, sol, {}, 1.0e4 / cu.T_cgs)
+    E1 = np.asarray(coupled.view.thermal_energy_code(sol2), dtype=np.float64)
+    N1 = np.asarray(coupled.view.photon_density_cgs(sol2), dtype=np.float64)
+
+    expected = (N0 - N1) * (20.0 - hchem.E_HI_EV) * hchem.EV_CGS
+    np.testing.assert_allclose((E1 - E0) * cu.P_cgs, expected, rtol=1e-8, atol=0.0)
+
+
+def test_coupled_isothermal_mode_preserves_temperature(setup):
+    cu, _, sf, _, _ = setup
+    coupled = HydrogenPhotoChemistryForce(
+        sf, case="B", collisional=False,
+        include_heating=False, include_cooling=False, fixed_temperature_K=1.0e4,
+    )
+    sol = make_state(cu, 1.0, 1.0e4, x_HII=0.0, N_gamma_cgs=1.0)
+    sol2, _ = coupled.force(0, sol, {}, 1.0e8 / cu.T_cgs)
+    assert float(coupled.view.temperature_K(sol2)[0, 0, 0]) == pytest.approx(1.0e4, rel=1e-12)
 
 
 # ---------------------------------------------------------------------------

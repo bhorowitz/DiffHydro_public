@@ -594,6 +594,12 @@ class HeatCoolForce_basic:
     """
     Hydrogen-only photoheating / radiative cooling source term.
 
+    This is the standalone thermal-source option.  When
+    ``HydrogenPhotoChemistryForce`` is used, its photon-conserving update
+    already deposits photoheating and applies the same cooling terms; adding
+    this force as well would count the thermal source twice.  Use one or the
+    other, never both in ``hydro(..., forces=[...])``.
+
     Solves, per cell and per (half) timestep, with explicit Euler as
     requested (Delta E = Edot Delta t):
 
@@ -646,6 +652,7 @@ class HeatCoolForce_basic:
         self.hydro_eq = hydro_eq
         self.include_heating = include_heating
         self.include_cooling = include_cooling
+        self.handles_thermal_source = True
         self.eps = eps
         self.cu = cu
         self.sol = None

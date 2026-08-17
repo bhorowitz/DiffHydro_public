@@ -276,7 +276,7 @@ def limit_m1_flux_cone(N, Fx, Fy, Fz, c, f_max=1.0, eps=1e-30):
         + (Fy / component_scale_safe) ** 2
         + (Fz / component_scale_safe) ** 2
     )
-    Fmax = f_max * c * jnp.maximum(N, 0.0)
+    Fmax = f_max * c**2 * jnp.maximum(N**2, 0.0)
     scale = jnp.where(
         component_scale > 0.0,
         jnp.minimum(1.0, Fmax / jnp.maximum(Fnorm, eps)),
@@ -432,7 +432,7 @@ class HydrogenStateView:
         """
         x = self.xHII(sol) if x_HII is None else jnp.clip(x_HII, 0.0, 1.0)
         n_H = self.rho_code(sol) * self.rho_cgs * self.X_H / MH_CGS
-        n_tot = jnp.maximum(n_H * (1.0 + x), tiny_like(sol))
+        n_tot = jnp.maximum(n_H * (1.0 + x), tiny_like(sol))#### weird there 
         p_cgs = self.pressure_code(sol) * self.P_cgs
         return jnp.clip(p_cgs / (n_tot * KB_CGS), self.T_floor_K, self.T_ceil_K)
 
@@ -440,6 +440,35 @@ class HydrogenStateView:
     def add_thermal_energy_cgs(self, sol, dE_cgs):
         """Add an energy DENSITY given in erg cm^-3 to the total energy slot."""
         return sol.at[self.idx_Etot].add(dE_cgs / self.P_cgs)
+
+    def set_thermal_energy_cgs(self, sol, e_th_cgs):
+        """Set thermal energy density while preserving the gas kinetic energy.
+
+        Source terms evolve the thermal part of the conservative gas energy,
+        whereas the state stores ``E_tot``.  Centralising this conversion
+        prevents an isothermal validation mode from accidentally erasing the
+        kinetic energy once the gas is allowed to move.
+        """
+        rho = self.rho_code(sol)
+        mom2 = sum(sol[i] ** 2 for i in self.idx_mom)
+        kinetic = 0.5 * mom2 / rho
+        e_floor_cgs = self.thermal_energy_floor_code(sol) * self.P_cgs
+        e_th_code = jnp.maximum(jnp.asarray(e_th_cgs), e_floor_cgs) / self.P_cgs
+        return sol.at[self.idx_Etot].set(e_th_code + kinetic)
+
+    def set_temperature_K(self, sol, temperature_K, x_HII=None):
+        """Project the gas onto a prescribed pure-hydrogen temperature.
+
+        This is intentionally a benchmark helper, not a cooling model.  It
+        is useful for the classical isothermal Stromgren test, whose analytic
+        solution assumes that the recombination coefficient remains evaluated
+        at a fixed temperature even as the electron fraction changes.
+        """
+        x = self.xHII(sol) if x_HII is None else jnp.clip(x_HII, 0.0, 1.0)
+        n_H = self.rho_code(sol) * self.rho_cgs * self.X_H / MH_CGS
+        n_tot = n_H * (1.0 + x)
+        e_th_cgs = n_tot * KB_CGS * jnp.asarray(temperature_K) / (self.gamma - 1.0)
+        return self.set_thermal_energy_cgs(sol, e_th_cgs)
 
     def add_photons_cgs(self, sol, dN_cgs):
         """Add a photon number DENSITY given in cm^-3 to the N_gamma slot."""
