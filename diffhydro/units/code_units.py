@@ -19,7 +19,7 @@ class CodeUnits:
     mu: float = 0.6
     kB_cgs: float = 1.380649e-16
     mH_cgs: float = 1.6735575e-24
-
+    N_avogadro_cgs: float = 6.02214076e23
     @property
     def T_cgs(self) -> float:
         return self.L_cgs / self.V_cgs
@@ -40,6 +40,10 @@ class CodeUnits:
     def Temp_cgs(self) -> float:
         return self.mu * self.mH_cgs * (self.V_cgs**2) / self.kB_cgs
 
+    @property
+    def RadFlux_cgs(self) -> float:
+        return self.P_cgs * self.V_cgs
+
     def scale(self, dim: str) -> float:
         scales = {
             "length": self.L_cgs,
@@ -50,6 +54,7 @@ class CodeUnits:
             "pressure": self.P_cgs,
             "energy_density": self.Eden_cgs,
             "temperature": self.Temp_cgs,
+            "radiation_flux": self.RadFlux_cgs,
         }
         try:
             return scales[dim]
@@ -86,4 +91,3 @@ def _parse_base_scale(value: Any, expected_dim: str, parser: UnitParser) -> floa
         parsed = parser.parse(value, expected_dim=expected_dim)
         return parsed.cgs_value
     return float(value)
-

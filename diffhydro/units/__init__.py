@@ -25,4 +25,3 @@ __all__ = [
     "to_code",
     "to_code_fields",
 ]
-

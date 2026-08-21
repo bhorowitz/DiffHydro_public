@@ -1,10 +1,12 @@
 import jax
 import jax.numpy as jnp
-
+import sys
+import matplotlib.pyplot as plt
 
 def init_turbulent_velocity(eq, Lbox, rho0, p0,
                             kmin=1, kmax=3, solenoidal_frac=1.0,
                             pslope=-2.0, target_M=1.0, seed=123):
+    
     nx, ny, nz = eq.mesh_shape
     # k-grid (fundamental k0 = 2π/L)
     k0 = 2.0 * jnp.pi / Lbox
@@ -12,6 +14,8 @@ def init_turbulent_velocity(eq, Lbox, rho0, p0,
     ky = k0 * jnp.fft.fftfreq(ny) * ny
     kz = k0 * jnp.fft.fftfreq(nz) * nz
     KX, KY, KZ = jnp.meshgrid(kx, ky, kz, indexing="ij")
+    # print(nx,k0,jnp.fft.fftfreq(nx),kx)
+    
     K2 = KX**2 + KY**2 + KZ**2
     K = jnp.sqrt(jnp.maximum(K2, 1e-30))
 
@@ -28,11 +32,10 @@ def init_turbulent_velocity(eq, Lbox, rho0, p0,
     g1 = rand_complex(key); key = jax.random.split(key)[0]
     g2 = rand_complex(key); key = jax.random.split(key)[0]
     g3 = rand_complex(key)
-
     G = jnp.stack([g1, g2, g3], axis=0)
 
     # amplitude spectrum ~ k^{pslope}
-    Amp = (K**(0.5*pslope)) * band
+    Amp = (K**(0.5*pslope)) * band 
     Amp = Amp / jnp.sqrt(jnp.mean(Amp**2) + 1e-30)  # stabilize scaling
 
     # project to solenoidal/compressive mix
@@ -45,10 +48,8 @@ def init_turbulent_velocity(eq, Lbox, rho0, p0,
     Proj = zeta * P + (1.0 - zeta) * C
 
     Uhat = jnp.einsum("ij...,j...->i...", Proj, G) * Amp
-
     # enforce Hermitian symmetry for real IFFT (simple way: zero Nyquist, rely on ifftn real)
     u = jnp.fft.ifftn(Uhat, axes=(1,2,3)).real  # shape (3, nx, ny, nz)
-
     # normalize to target Mach
     rho = rho0 * jnp.ones((nx, ny, nz))
     p = p0 * jnp.ones_like(rho)
@@ -65,7 +66,6 @@ def init_turbulent_velocity(eq, Lbox, rho0, p0,
     E_kin = 0.5 * rho * (v**2).sum(axis=0)
     U = U.at[4].set(E_th + E_kin)
     return U
-
 def init_turbulent_velocity_cpu(eq, Lbox, rho0, p0,
                                 kmin=1, kmax=3, solenoidal_frac=1.0,
                                 pslope=-2.0, target_M=1.0, seed=123):

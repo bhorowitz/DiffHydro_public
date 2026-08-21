@@ -1,27 +1,33 @@
-from functools import partial
 import jax
 import jax.numpy as jnp
 from jax import lax
 from functools import partial
-import jax
-import jax.numpy as jnp
-from jax import lax
 
-def pressure_from_cons(U, gamma=None, eps=1e-30):
+from diffhydro.units.convert import temperature_code_from_Prho
+from . import hydrogen_chemistry as hchem
+from .hydrogen_chemistry import HydrogenStateView
+
+
+def pressure_from_cons(U, eq=None, gamma=None, eps=1e-30):
+    """Compute pressure from conservative variables.
+
+    Accepts either an explicit `gamma` or an `eq` object providing `gamma`.
+    Falls back to ideal gas gamma=5/3 when neither is provided.
+    """
     if gamma is None:
-        gamma = eq.gamma  # or pass eq in explicitly
+        gamma = getattr(eq, "gamma", 5.0 / 3.0)
 
     rho = U[0]
-    mom = U[1:-1]                 # <-- only the momentum components
-    E   = U[-1]
+    mom = U[1:-1]  # <-- only the momentum components
+    E = U[-1]
 
     rho_safe = jnp.maximum(rho, eps)
-    v2  = (mom**2).sum(axis=0) / (rho_safe**2)
-    KE  = 0.5 * rho_safe * v2
-    Emag = 0.0                     # add magnetic energy here if/when needed
+    v2 = (mom**2).sum(axis=0) / (rho_safe**2)
+    KE = 0.5 * rho_safe * v2
+    Emag = 0.0  # add magnetic energy here if/when needed
 
     Et = E - KE - Emag
-    Et = jnp.maximum(Et, eps)      # numerical floor; avoids negative p from roundoff
+    Et = jnp.maximum(Et, eps)  # numerical floor; avoids negative p from roundoff
 
     return (gamma - 1.0) * Et
 
@@ -560,4 +566,246 @@ class HeatCoolForce_old:
     
         dE = Et_new - Et0
         return U.at[self.i_E].add(dE)
-    
+
+from functools import partial
+import jax
+import jax.numpy as jnp
+from jax import lax
+
+
+def pressure_from_cons(U, eq, eps=1e-30):
+    """Compute pressure from conservative variables using eq.gamma."""
+    gamma = eq.gamma
+    rho = U[0]
+    mom = U[1:-1]
+    E = U[-1]
+
+    rho_safe = jnp.maximum(rho, eps)
+    v2 = (mom**2).sum(axis=0) / (rho_safe**2)
+    KE = 0.5 * rho_safe * v2
+    Emag = 0.0  # add magnetic energy here if/when needed
+
+    Et = jnp.maximum(E - KE - Emag, eps)
+    return (gamma - 1.0) * Et
+
+
+
+class HeatCoolForce_basic:
+    """
+    Hydrogen-only photoheating / radiative cooling source term.
+
+    This is the standalone thermal-source option.  When
+    ``HydrogenPhotoChemistryForce`` is used, its photon-conserving update
+    already deposits photoheating and applies the same cooling terms; adding
+    this force as well would count the thermal source twice.  Use one or the
+    other, never both in ``hydro(..., forces=[...])``.
+
+    Solves, per cell and per (half) timestep, with explicit Euler as
+    requested (Delta E = Edot Delta t):
+
+        dE_th/dt = H - L
+
+        H = n_HI c sigma_HI N_gamma (<h nu> - h nu_0)         photoheating
+        L = [zeta_HI + psi_HI] n_e n_HI
+          + eta^{A|B}_HII       n_e n_HII
+          + theta_HII           n_e n_HII                      bremsstrahlung
+          + varpi(T, a)         n_e                            Compton (a = 1)
+
+    i.e. eq. (A17) of the RAMSES-RT appendix with every HeI/HeII/HeIII term
+    dropped. All coefficients live in :mod:`hydrogen_chemistry` and are
+    evaluated in cgs; the single conversion to code units happens through
+    :class:`HydrogenStateView`.
+
+    Notes on what changed w.r.t. the previous version
+    -------------------------------------------------
+    * the rate coefficients were evaluated with ``*_cgs`` formulas but fed
+      CODE-unit number densities, and the resulting erg cm^-3 s^-1 rate was
+      added directly to a code-unit energy slot: three inconsistent unit
+      systems in one expression;
+    * the temperature came from ``_temp_from_rhoP(rho, sol[idx_pressure])``
+      with the Athena constant ``MHKB = 115.985``, while ``sol[idx_pressure]``
+      actually holds the TOTAL energy (forces see the conservative state);
+    * ``heating()`` returned ``... * (frequency - frequency_ground)``, i.e.
+      a frequency difference instead of an energy, and with nu = nu_0 it is
+      identically zero anyway (see ``mean_photon_energy_eV`` below).
+    """
+
+    def __init__(
+        self,
+        include_heating=True,
+        include_cooling=True,
+        eps=1e-30,
+        eq=None,
+        hydro_eq=None,
+        cu=None,
+        light_speed=1.0,
+        case="A",
+        expansion_factor=1.0,
+        frequency=hchem.NU_HI_CGS,
+        mean_photon_energy_eV=hchem.E_HI_EV,
+        # xHII_weighted=False,
+        X_H=1.0,
+        max_frac=0.5,
+        T_floor_K=1.0,
+    ):
+        self.eq = eq
+        self.hydro_eq = hydro_eq
+        self.include_heating = include_heating
+        self.include_cooling = include_cooling
+        self.handles_thermal_source = True
+        self.eps = eps
+        self.cu = cu
+        self.sol = None
+        self.light_speed = light_speed
+        self.case = str(case).upper()
+        self.expansion_factor = float(expansion_factor)
+        self.frequency = float(frequency)
+        self.mean_photon_energy_eV = float(mean_photon_energy_eV)
+        self.max_frac = float(max_frac)
+        self.T_floor_K = float(T_floor_K)
+        self.X_H = float(X_H)
+
+        self.gamma = getattr(self.hydro_eq, "gamma", 5.0 / 3.0)
+        self.sigma_HI_cgs = float(
+            hchem.sigma_HI_powerlaw_cgs(nu=self.frequency, nu0=hchem.NU_HI_CGS)
+        )
+
+        # -- Layout of the combined sol array (RT | hydro) -----------------
+        self.n_rt_cons = eq.n_cons if eq is not None else 4
+        self.n_hydro_cons = hydro_eq.n_cons if hydro_eq is not None else 0
+
+        if self.n_hydro_cons > 0:
+            # self.idx_xHII = getattr(hydro_eq, "xHII_id", self.n_rt_cons + self.n_hydro_cons - 1) #before
+            self.idx_xHII = self.n_rt_cons + hydro_eq.xHII_id #gpt version
+            self.idx_rho = self.n_rt_cons
+            self.idx_mom = slice(self.n_rt_cons + 1, self.n_rt_cons + 4)
+            self.idx_pressure = self.n_rt_cons + 4 if self.n_hydro_cons >= 5 else self.idx_rho
+            self.idx_energy = self.idx_pressure
+        else:
+            self.idx_rho = 0
+            self.idx_mom = slice(1, 4)
+            self.idx_energy = 0
+            self.idx_pressure = 0
+            self.idx_xHII = self.n_rt_cons
+
+        self.view = None
+        if self.cu is not None and self.n_hydro_cons > 0:
+            self.view = HydrogenStateView(
+                cu=self.cu,
+                gamma=self.gamma,
+                idx_N=0,
+                idx_F=(1, 2, 3),
+                idx_xHII=self.idx_xHII,
+                idx_rho=self.idx_rho,
+                idx_mom=tuple(range(self.idx_mom.start, self.idx_mom.stop)),
+                idx_Etot=self.idx_energy,
+                xHII_weight_idx=self.idx_rho,
+                X_H=self.X_H,
+                T_floor_K=self.T_floor_K,
+                light_speed_code=self.light_speed,
+            )
+
+    # ------------------------------------------------------------------
+    # Rate coefficients -- Kelvin in, cgs out. Thin wrappers around the
+    # shared hydrogen_chemistry module so there is exactly one definition
+    # of each fit in the code base.
+    # ------------------------------------------------------------------
+    lambda_HI = staticmethod(hchem.lambda_HI)
+    beta_HI_cgs = staticmethod(hchem.beta_HI_cgs)
+    zeta_HI_cgs = staticmethod(hchem.zeta_HI_cgs)
+    psi_HI_cgs = staticmethod(hchem.psi_HI_cgs)
+    caseA_cgs = staticmethod(hchem.alpha_A_HII_cgs)
+    caseB_cgs = staticmethod(hchem.alpha_B_HII_cgs)
+    eta_A_HII_cgs = staticmethod(hchem.eta_A_HII_cgs)
+    eta_B_HII_cgs = staticmethod(hchem.eta_B_HII_cgs)
+    theta_HII_cgs = staticmethod(hchem.theta_HII_cgs)
+
+    def varpi_cgs(self, T, a=None):
+        return hchem.varpi_cgs(T, self.expansion_factor if a is None else a)
+
+    # ------------------------------------------------------------------
+    # State accessors
+    # ------------------------------------------------------------------
+    def get_temperature_K(self, sol):
+        """Gas temperature [K] from the CONSERVATIVE state."""
+        return self.view.temperature_K(sol)
+
+    def get_temp_code(self, sol):
+        return self.get_temperature_K(sol) / self.cu.Temp_cgs
+
+    def get_number_density_gas(self, rho_gas, proton_mass_cgs=hchem.MH_CGS,
+                               mean_molecular_weight=None):
+        """n_H [cm^-3] from a CODE density (pure hydrogen: divide by m_H)."""
+        mu = 1.0 if mean_molecular_weight is None else mean_molecular_weight
+        return jnp.asarray(rho_gas) * self.cu.rho_cgs * self.X_H / (mu * proton_mass_cgs)
+
+    def get_number_density_HI(self, sol):
+        _, n_HI, _, _ = self.view.number_densities_cgs(sol)
+        return n_HI
+
+    def get_sigma_HI(self, frequency=None):
+        """HI photoionization cross-section [cm^2] (6.35e-18 at nu_0)."""
+        nu = self.frequency if frequency is None else frequency
+        return hchem.sigma_HI_powerlaw_cgs(nu=nu, nu0=hchem.NU_HI_CGS)
+
+    # ------------------------------------------------------------------
+    # Physics
+    # ------------------------------------------------------------------
+    def cooling(self, T_K, sol, a=None, case=None):
+        """Total cooling L [erg cm^-3 s^-1], eq. (A17) restricted to H."""
+        _, n_HI, n_HII, n_e = self.view.number_densities_cgs(sol)
+        return hchem.cooling_rate_cgs(
+            T_K, n_HI, n_HII, n_e,
+            a=self.expansion_factor if a is None else a,
+            case=self.case if case is None else case,
+        )
+
+    def heating(self, sol, T_K=None):
+        """Photoheating H [erg cm^-3 s^-1].
+
+        With a single group AT the threshold (<h nu> = 13.6 eV) this is
+        exactly 0: a monochromatic threshold spectrum ionizes but cannot
+        heat. Raise ``mean_photon_energy_eV`` (e.g. ~18 eV for a 1e5 K
+        blackbody weighted over the HI group) to get a physical Stromgren
+        sphere at ~1e4 K.
+        """
+        _, n_HI, _, _ = self.view.number_densities_cgs(sol)
+        N_cgs = self.view.photon_density_cgs(sol)
+        return hchem.photoheating_rate_cgs(
+            n_HI, N_cgs,
+            sigma_HI=self.sigma_HI_cgs,
+            mean_photon_energy_eV=self.mean_photon_energy_eV,
+            c_cgs=self.view.c_interaction_cgs,
+        )
+
+    def net_rate_cgs(self, sol):
+        """H - L in erg cm^-3 s^-1 (positive = net heating)."""
+        T_K = self.get_temperature_K(sol)
+        rate = 0.0
+        if self.include_heating:
+            rate = rate + self.heating(sol, T_K)
+        if self.include_cooling:
+            rate = rate - self.cooling(T_K, sol)
+        return rate
+
+    def timestep(self, sol):
+        # Explicit Euler with a fractional limiter on E_th: no hard CFL
+        # constraint, but see max_frac below.
+        return jnp.inf
+
+    def force(self, i_step, sol, params, dt):
+        view = self.view
+        E_th_code = view.thermal_energy_code(sol)
+        E_th_cgs = E_th_code * view.P_cgs
+
+        rate_cgs = self.net_rate_cgs(sol)
+
+        # Explicit Euler, limited so that a cooling step can never remove
+        # more than max_frac of the thermal energy (keeps p > 0), and never
+        # more than the margin down to the temperature floor.
+        dE_cgs = hchem.limited_explicit_update(
+            E_th_cgs, rate_cgs, view.dt_cgs(dt), max_frac=self.max_frac
+        )
+        sol = view.add_thermal_energy_cgs(sol, dE_cgs)
+        self.sol = sol
+        return sol, params

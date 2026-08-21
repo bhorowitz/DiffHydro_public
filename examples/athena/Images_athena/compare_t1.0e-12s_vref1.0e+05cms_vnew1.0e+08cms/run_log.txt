@@ -1,0 +1,1581 @@
+Backend: gpu
+Devices: [CudaDevice(id=0)]
+Master output folder: examples/athena/Images_athena/compare_t1.0e-12s_vref1.0e+05cms_vnew1.0e+08cms
+Run ref output folder: examples/athena/Images_athena/compare_t1.0e-12s_vref1.0e+05cms_vnew1.0e+08cms/t1.0e-12s_v1.0e+05cms
+Run new output folder: examples/athena/Images_athena/compare_t1.0e-12s_vref1.0e+05cms_vnew1.0e+08cms/t1.0e-12s_v1.0e+08cms
+
+================================================================================
+RUN PIPELINE: run_ref_1.0e-12s | velocity = 1.000000e+05 cm/s
+Length unit = 1.000000e+00 cm
+Output dir  = examples/athena/Images_athena/compare_t1.0e-12s_vref1.0e+05cms_vnew1.0e+08cms/t1.0e-12s_v1.0e+05cms
+================================================================================
+Snapshot time: 1.00e-12 s
+
+Code unit scales:
+  L_cgs = 1.000000e+00 cm
+  V_cgs = 1.000000e+05 cm/s
+  T_cgs = 1.000000e-05 s
+  light_speed_code = 3.000000e+05
+
+Grid geometry:
+  box_width_phys = 1.000000e+00 cm
+  size_shape = 256
+  cell_size_phys = 3.906250e-03 cm
+  cell_size_code = 3.906250e-03
+
+Code values:
+  source_rate_phys = 1e10 photons/s
+  source_rate_code = 1.0000e+05
+  time_code = 1.0000e-07
+
+Physical light-crossing time of box = 3.3333e-11 s
+
+                [stromgren debug]
+                dt_code = 8.68055571867643e-10
+                rate_code = 100000.0
+                per_star_source_code = 8.680555765749887e-05
+                
+
+                [stromgren debug]
+                dt_code = 8.68055571867643e-10
+                rate_code = 100000.0
+                per_star_source_code = 8.680555765749887e-05
+                
+Light speed: 300000.0
+
+                [stromgren debug]
+                dt_code = 8.68055571867643e-10
+                rate_code = 100000.0
+                per_star_source_code = 8.680555765749887e-05
+                
+
+                [stromgren debug]
+                dt_code = 8.68055571867643e-10
+                rate_code = 100000.0
+                per_star_source_code = 8.680555765749887e-05
+                
+Light speed: 300000.0
+
+                [stromgren debug]
+                dt_code = 8.68055571867643e-10
+                rate_code = 100000.0
+                per_star_source_code = 8.680555765749887e-05
+                
+
+                [stromgren debug]
+                dt_code = 8.68055571867643e-10
+                rate_code = 100000.0
+                per_star_source_code = 8.680555765749887e-05
+                
+Light speed: 300000.0
+
+                [stromgren debug]
+                dt_code = 8.68055571867643e-10
+                rate_code = 100000.0
+                per_star_source_code = 8.680555765749887e-05
+                
+
+                [stromgren debug]
+                dt_code = 8.68055571867643e-10
+                rate_code = 100000.0
+                per_star_source_code = 8.680555765749887e-05
+                
+Light speed: 300000.0
+
+                [stromgren debug]
+                dt_code = 8.68055571867643e-10
+                rate_code = 100000.0
+                per_star_source_code = 8.680555765749887e-05
+                
+
+                [stromgren debug]
+                dt_code = 8.68055571867643e-10
+                rate_code = 100000.0
+                per_star_source_code = 8.680555765749887e-05
+                
+Light speed: 300000.0
+
+                [stromgren debug]
+                dt_code = 8.68055571867643e-10
+                rate_code = 100000.0
+                per_star_source_code = 8.680555765749887e-05
+                
+
+                [stromgren debug]
+                dt_code = 8.68055571867643e-10
+                rate_code = 100000.0
+                per_star_source_code = 8.680555765749887e-05
+                
+Light speed: 300000.0
+
+                [stromgren debug]
+                dt_code = 8.68055571867643e-10
+                rate_code = 100000.0
+                per_star_source_code = 8.680555765749887e-05
+                
+
+                [stromgren debug]
+                dt_code = 8.68055571867643e-10
+                rate_code = 100000.0
+                per_star_source_code = 8.680555765749887e-05
+                
+Light speed: 300000.0
+
+                [stromgren debug]
+                dt_code = 8.68055571867643e-10
+                rate_code = 100000.0
+                per_star_source_code = 8.680555765749887e-05
+                
+
+                [stromgren debug]
+                dt_code = 8.68055571867643e-10
+                rate_code = 100000.0
+                per_star_source_code = 8.680555765749887e-05
+                
+Light speed: 300000.0
+
+                [stromgren debug]
+                dt_code = 8.68055571867643e-10
+                rate_code = 100000.0
+                per_star_source_code = 8.680555765749887e-05
+                
+
+                [stromgren debug]
+                dt_code = 8.68055571867643e-10
+                rate_code = 100000.0
+                per_star_source_code = 8.680555765749887e-05
+                
+Light speed: 300000.0
+
+                [stromgren debug]
+                dt_code = 8.68055571867643e-10
+                rate_code = 100000.0
+                per_star_source_code = 8.680555765749887e-05
+                
+
+                [stromgren debug]
+                dt_code = 8.68055571867643e-10
+                rate_code = 100000.0
+                per_star_source_code = 8.680555765749887e-05
+                
+Light speed: 300000.0
+
+                [stromgren debug]
+                dt_code = 8.68055571867643e-10
+                rate_code = 100000.0
+                per_star_source_code = 8.680555765749887e-05
+                
+
+                [stromgren debug]
+                dt_code = 8.68055571867643e-10
+                rate_code = 100000.0
+                per_star_source_code = 8.680555765749887e-05
+                
+Light speed: 300000.0
+
+                [stromgren debug]
+                dt_code = 8.68055571867643e-10
+                rate_code = 100000.0
+                per_star_source_code = 8.680555765749887e-05
+                
+
+                [stromgren debug]
+                dt_code = 8.68055571867643e-10
+                rate_code = 100000.0
+                per_star_source_code = 8.680555765749887e-05
+                
+Light speed: 300000.0
+
+                [stromgren debug]
+                dt_code = 8.68055571867643e-10
+                rate_code = 100000.0
+                per_star_source_code = 8.680555765749887e-05
+                
+
+                [stromgren debug]
+                dt_code = 8.68055571867643e-10
+                rate_code = 100000.0
+                per_star_source_code = 8.680555765749887e-05
+                
+Light speed: 300000.0
+
+                [stromgren debug]
+                dt_code = 8.68055571867643e-10
+                rate_code = 100000.0
+                per_star_source_code = 8.680555765749887e-05
+                
+
+                [stromgren debug]
+                dt_code = 8.68055571867643e-10
+                rate_code = 100000.0
+                per_star_source_code = 8.680555765749887e-05
+                
+Light speed: 300000.0
+
+                [stromgren debug]
+                dt_code = 8.68055571867643e-10
+                rate_code = 100000.0
+                per_star_source_code = 8.680555765749887e-05
+                
+
+                [stromgren debug]
+                dt_code = 8.68055571867643e-10
+                rate_code = 100000.0
+                per_star_source_code = 8.680555765749887e-05
+                
+Light speed: 300000.0
+
+                [stromgren debug]
+                dt_code = 8.68055571867643e-10
+                rate_code = 100000.0
+                per_star_source_code = 8.680555765749887e-05
+                
+
+                [stromgren debug]
+                dt_code = 8.68055571867643e-10
+                rate_code = 100000.0
+                per_star_source_code = 8.680555765749887e-05
+                
+Light speed: 300000.0
+
+                [stromgren debug]
+                dt_code = 8.68055571867643e-10
+                rate_code = 100000.0
+                per_star_source_code = 8.680555765749887e-05
+                
+
+                [stromgren debug]
+                dt_code = 8.68055571867643e-10
+                rate_code = 100000.0
+                per_star_source_code = 8.680555765749887e-05
+                
+Light speed: 300000.0
+
+                [stromgren debug]
+                dt_code = 8.68055571867643e-10
+                rate_code = 100000.0
+                per_star_source_code = 8.680555765749887e-05
+                
+
+                [stromgren debug]
+                dt_code = 8.68055571867643e-10
+                rate_code = 100000.0
+                per_star_source_code = 8.680555765749887e-05
+                
+Light speed: 300000.0
+
+                [stromgren debug]
+                dt_code = 8.68055571867643e-10
+                rate_code = 100000.0
+                per_star_source_code = 8.680555765749887e-05
+                
+
+                [stromgren debug]
+                dt_code = 8.68055571867643e-10
+                rate_code = 100000.0
+                per_star_source_code = 8.680555765749887e-05
+                
+Light speed: 300000.0
+
+                [stromgren debug]
+                dt_code = 8.68055571867643e-10
+                rate_code = 100000.0
+                per_star_source_code = 8.680555765749887e-05
+                
+
+                [stromgren debug]
+                dt_code = 8.68055571867643e-10
+                rate_code = 100000.0
+                per_star_source_code = 8.680555765749887e-05
+                
+Light speed: 300000.0
+
+                [stromgren debug]
+                dt_code = 8.68055571867643e-10
+                rate_code = 100000.0
+                per_star_source_code = 8.680555765749887e-05
+                
+
+                [stromgren debug]
+                dt_code = 8.68055571867643e-10
+                rate_code = 100000.0
+                per_star_source_code = 8.680555765749887e-05
+                
+Light speed: 300000.0
+
+                [stromgren debug]
+                dt_code = 8.68055571867643e-10
+                rate_code = 100000.0
+                per_star_source_code = 8.680555765749887e-05
+                
+
+                [stromgren debug]
+                dt_code = 8.68055571867643e-10
+                rate_code = 100000.0
+                per_star_source_code = 8.680555765749887e-05
+                
+Light speed: 300000.0
+
+                [stromgren debug]
+                dt_code = 8.68055571867643e-10
+                rate_code = 100000.0
+                per_star_source_code = 8.680555765749887e-05
+                
+
+                [stromgren debug]
+                dt_code = 8.68055571867643e-10
+                rate_code = 100000.0
+                per_star_source_code = 8.680555765749887e-05
+                
+Light speed: 300000.0
+
+                [stromgren debug]
+                dt_code = 8.68055571867643e-10
+                rate_code = 100000.0
+                per_star_source_code = 8.680555765749887e-05
+                
+
+                [stromgren debug]
+                dt_code = 8.68055571867643e-10
+                rate_code = 100000.0
+                per_star_source_code = 8.680555765749887e-05
+                
+Light speed: 300000.0
+
+                [stromgren debug]
+                dt_code = 8.68055571867643e-10
+                rate_code = 100000.0
+                per_star_source_code = 8.680555765749887e-05
+                
+
+                [stromgren debug]
+                dt_code = 8.68055571867643e-10
+                rate_code = 100000.0
+                per_star_source_code = 8.680555765749887e-05
+                
+Light speed: 300000.0
+
+                [stromgren debug]
+                dt_code = 8.68055571867643e-10
+                rate_code = 100000.0
+                per_star_source_code = 8.680555765749887e-05
+                
+
+                [stromgren debug]
+                dt_code = 8.68055571867643e-10
+                rate_code = 100000.0
+                per_star_source_code = 8.680555765749887e-05
+                
+Light speed: 300000.0
+
+                [stromgren debug]
+                dt_code = 8.68055571867643e-10
+                rate_code = 100000.0
+                per_star_source_code = 8.680555765749887e-05
+                
+
+                [stromgren debug]
+                dt_code = 8.68055571867643e-10
+                rate_code = 100000.0
+                per_star_source_code = 8.680555765749887e-05
+                
+Light speed: 300000.0
+
+                [stromgren debug]
+                dt_code = 8.68055571867643e-10
+                rate_code = 100000.0
+                per_star_source_code = 8.680555765749887e-05
+                
+
+                [stromgren debug]
+                dt_code = 8.68055571867643e-10
+                rate_code = 100000.0
+                per_star_source_code = 8.680555765749887e-05
+                
+Light speed: 300000.0
+
+                [stromgren debug]
+                dt_code = 8.68055571867643e-10
+                rate_code = 100000.0
+                per_star_source_code = 8.680555765749887e-05
+                
+
+                [stromgren debug]
+                dt_code = 8.68055571867643e-10
+                rate_code = 100000.0
+                per_star_source_code = 8.680555765749887e-05
+                
+Light speed: 300000.0
+
+                [stromgren debug]
+                dt_code = 8.68055571867643e-10
+                rate_code = 100000.0
+                per_star_source_code = 8.680555765749887e-05
+                
+
+                [stromgren debug]
+                dt_code = 8.68055571867643e-10
+                rate_code = 100000.0
+                per_star_source_code = 8.680555765749887e-05
+                
+Light speed: 300000.0
+
+                [stromgren debug]
+                dt_code = 8.68055571867643e-10
+                rate_code = 100000.0
+                per_star_source_code = 8.680555765749887e-05
+                
+
+                [stromgren debug]
+                dt_code = 8.68055571867643e-10
+                rate_code = 100000.0
+                per_star_source_code = 8.680555765749887e-05
+                
+Light speed: 300000.0
+
+                [stromgren debug]
+                dt_code = 8.68055571867643e-10
+                rate_code = 100000.0
+                per_star_source_code = 8.680555765749887e-05
+                
+
+                [stromgren debug]
+                dt_code = 8.68055571867643e-10
+                rate_code = 100000.0
+                per_star_source_code = 8.680555765749887e-05
+                
+Light speed: 300000.0
+
+                [stromgren debug]
+                dt_code = 8.68055571867643e-10
+                rate_code = 100000.0
+                per_star_source_code = 8.680555765749887e-05
+                
+
+                [stromgren debug]
+                dt_code = 8.68055571867643e-10
+                rate_code = 100000.0
+                per_star_source_code = 8.680555765749887e-05
+                
+Light speed: 300000.0
+
+                [stromgren debug]
+                dt_code = 8.68055571867643e-10
+                rate_code = 100000.0
+                per_star_source_code = 8.680555765749887e-05
+                
+
+                [stromgren debug]
+                dt_code = 8.68055571867643e-10
+                rate_code = 100000.0
+                per_star_source_code = 8.680555765749887e-05
+                
+Light speed: 300000.0
+
+                [stromgren debug]
+                dt_code = 8.68055571867643e-10
+                rate_code = 100000.0
+                per_star_source_code = 8.680555765749887e-05
+                
+
+                [stromgren debug]
+                dt_code = 8.68055571867643e-10
+                rate_code = 100000.0
+                per_star_source_code = 8.680555765749887e-05
+                
+Light speed: 300000.0
+
+                [stromgren debug]
+                dt_code = 8.68055571867643e-10
+                rate_code = 100000.0
+                per_star_source_code = 8.680555765749887e-05
+                
+
+                [stromgren debug]
+                dt_code = 8.68055571867643e-10
+                rate_code = 100000.0
+                per_star_source_code = 8.680555765749887e-05
+                
+Light speed: 300000.0
+
+                [stromgren debug]
+                dt_code = 8.68055571867643e-10
+                rate_code = 100000.0
+                per_star_source_code = 8.680555765749887e-05
+                
+
+                [stromgren debug]
+                dt_code = 8.68055571867643e-10
+                rate_code = 100000.0
+                per_star_source_code = 8.680555765749887e-05
+                
+Light speed: 300000.0
+
+                [stromgren debug]
+                dt_code = 8.68055571867643e-10
+                rate_code = 100000.0
+                per_star_source_code = 8.680555765749887e-05
+                
+
+                [stromgren debug]
+                dt_code = 8.68055571867643e-10
+                rate_code = 100000.0
+                per_star_source_code = 8.680555765749887e-05
+                
+Light speed: 300000.0
+
+                [stromgren debug]
+                dt_code = 8.68055571867643e-10
+                rate_code = 100000.0
+                per_star_source_code = 8.680555765749887e-05
+                
+
+                [stromgren debug]
+                dt_code = 8.68055571867643e-10
+                rate_code = 100000.0
+                per_star_source_code = 8.680555765749887e-05
+                
+Light speed: 300000.0
+
+                [stromgren debug]
+                dt_code = 8.68055571867643e-10
+                rate_code = 100000.0
+                per_star_source_code = 8.680555765749887e-05
+                
+
+                [stromgren debug]
+                dt_code = 8.68055571867643e-10
+                rate_code = 100000.0
+                per_star_source_code = 8.680555765749887e-05
+                
+Light speed: 300000.0
+
+                [stromgren debug]
+                dt_code = 8.68055571867643e-10
+                rate_code = 100000.0
+                per_star_source_code = 8.680555765749887e-05
+                
+
+                [stromgren debug]
+                dt_code = 8.68055571867643e-10
+                rate_code = 100000.0
+                per_star_source_code = 8.680555765749887e-05
+                
+Light speed: 300000.0
+
+                [stromgren debug]
+                dt_code = 8.68055571867643e-10
+                rate_code = 100000.0
+                per_star_source_code = 8.680555765749887e-05
+                
+
+                [stromgren debug]
+                dt_code = 8.68055571867643e-10
+                rate_code = 100000.0
+                per_star_source_code = 8.680555765749887e-05
+                
+Light speed: 300000.0
+
+                [stromgren debug]
+                dt_code = 8.68055571867643e-10
+                rate_code = 100000.0
+                per_star_source_code = 8.680555765749887e-05
+                
+
+                [stromgren debug]
+                dt_code = 8.68055571867643e-10
+                rate_code = 100000.0
+                per_star_source_code = 8.680555765749887e-05
+                
+Light speed: 300000.0
+
+                [stromgren debug]
+                dt_code = 8.68055571867643e-10
+                rate_code = 100000.0
+                per_star_source_code = 8.680555765749887e-05
+                
+
+                [stromgren debug]
+                dt_code = 8.68055571867643e-10
+                rate_code = 100000.0
+                per_star_source_code = 8.680555765749887e-05
+                
+Light speed: 300000.0
+
+                [stromgren debug]
+                dt_code = 8.68055571867643e-10
+                rate_code = 100000.0
+                per_star_source_code = 8.680555765749887e-05
+                
+
+                [stromgren debug]
+                dt_code = 8.68055571867643e-10
+                rate_code = 100000.0
+                per_star_source_code = 8.680555765749887e-05
+                
+Light speed: 300000.0
+
+                [stromgren debug]
+                dt_code = 8.68055571867643e-10
+                rate_code = 100000.0
+                per_star_source_code = 8.680555765749887e-05
+                
+
+                [stromgren debug]
+                dt_code = 8.68055571867643e-10
+                rate_code = 100000.0
+                per_star_source_code = 8.680555765749887e-05
+                
+Light speed: 300000.0
+
+                [stromgren debug]
+                dt_code = 8.68055571867643e-10
+                rate_code = 100000.0
+                per_star_source_code = 8.680555765749887e-05
+                
+
+                [stromgren debug]
+                dt_code = 8.68055571867643e-10
+                rate_code = 100000.0
+                per_star_source_code = 8.680555765749887e-05
+                
+Light speed: 300000.0
+
+                [stromgren debug]
+                dt_code = 8.68055571867643e-10
+                rate_code = 100000.0
+                per_star_source_code = 8.680555765749887e-05
+                
+
+                [stromgren debug]
+                dt_code = 8.68055571867643e-10
+                rate_code = 100000.0
+                per_star_source_code = 8.680555765749887e-05
+                
+Light speed: 300000.0
+
+                [stromgren debug]
+                dt_code = 8.68055571867643e-10
+                rate_code = 100000.0
+                per_star_source_code = 8.680555765749887e-05
+                
+
+                [stromgren debug]
+                dt_code = 8.68055571867643e-10
+                rate_code = 100000.0
+                per_star_source_code = 8.680555765749887e-05
+                
+Light speed: 300000.0
+
+                [stromgren debug]
+                dt_code = 8.68055571867643e-10
+                rate_code = 100000.0
+                per_star_source_code = 8.680555765749887e-05
+                
+
+                [stromgren debug]
+                dt_code = 8.68055571867643e-10
+                rate_code = 100000.0
+                per_star_source_code = 8.680555765749887e-05
+                
+Light speed: 300000.0
+
+                [stromgren debug]
+                dt_code = 8.68055571867643e-10
+                rate_code = 100000.0
+                per_star_source_code = 8.680555765749887e-05
+                
+
+                [stromgren debug]
+                dt_code = 8.68055571867643e-10
+                rate_code = 100000.0
+                per_star_source_code = 8.680555765749887e-05
+                
+Light speed: 300000.0
+
+                [stromgren debug]
+                dt_code = 8.68055571867643e-10
+                rate_code = 100000.0
+                per_star_source_code = 8.680555765749887e-05
+                
+
+                [stromgren debug]
+                dt_code = 8.68055571867643e-10
+                rate_code = 100000.0
+                per_star_source_code = 8.680555765749887e-05
+                
+Light speed: 300000.0
+
+                [stromgren debug]
+                dt_code = 8.68055571867643e-10
+                rate_code = 100000.0
+                per_star_source_code = 8.680555765749887e-05
+                
+
+                [stromgren debug]
+                dt_code = 8.68055571867643e-10
+                rate_code = 100000.0
+                per_star_source_code = 8.680555765749887e-05
+                
+Light speed: 300000.0
+
+                [stromgren debug]
+                dt_code = 8.68055571867643e-10
+                rate_code = 100000.0
+                per_star_source_code = 8.680555765749887e-05
+                
+
+                [stromgren debug]
+                dt_code = 8.68055571867643e-10
+                rate_code = 100000.0
+                per_star_source_code = 8.680555765749887e-05
+                
+Light speed: 300000.0
+
+                [stromgren debug]
+                dt_code = 8.68055571867643e-10
+                rate_code = 100000.0
+                per_star_source_code = 8.680555765749887e-05
+                
+
+                [stromgren debug]
+                dt_code = 8.68055571867643e-10
+                rate_code = 100000.0
+                per_star_source_code = 8.680555765749887e-05
+                
+Light speed: 300000.0
+
+                [stromgren debug]
+                dt_code = 8.68055571867643e-10
+                rate_code = 100000.0
+                per_star_source_code = 8.680555765749887e-05
+                
+
+                [stromgren debug]
+                dt_code = 8.68055571867643e-10
+                rate_code = 100000.0
+                per_star_source_code = 8.680555765749887e-05
+                
+Light speed: 300000.0
+
+                [stromgren debug]
+                dt_code = 8.68055571867643e-10
+                rate_code = 100000.0
+                per_star_source_code = 8.680555765749887e-05
+                
+
+                [stromgren debug]
+                dt_code = 8.68055571867643e-10
+                rate_code = 100000.0
+                per_star_source_code = 8.680555765749887e-05
+                
+Light speed: 300000.0
+
+                [stromgren debug]
+                dt_code = 8.68055571867643e-10
+                rate_code = 100000.0
+                per_star_source_code = 8.680555765749887e-05
+                
+
+                [stromgren debug]
+                dt_code = 8.68055571867643e-10
+                rate_code = 100000.0
+                per_star_source_code = 8.680555765749887e-05
+                
+Light speed: 300000.0
+Simulation completed!
+  Number of steps: 58
+  Time step history physical: 1.0069e-12 s
+Expected injected photons = 1.0069e-02 photons
+Total photons in domain   = 1.0069e-02 photons
+Difference                = -1.1669e-09 photons
+[run_ref_1.0e-12s] c=154.173969  b=80.215788 (+/- 5.36e+00)
+[run_ref_1.0e-12s] injection_radius=6, fit_range=[7.0, 21.0] cells
+
+================================================================================
+RUN PIPELINE: run_new_1.0e-12s | velocity = 1.000000e+08 cm/s
+Length unit = 1.000000e+04 cm
+Output dir  = examples/athena/Images_athena/compare_t1.0e-12s_vref1.0e+05cms_vnew1.0e+08cms/t1.0e-12s_v1.0e+08cms
+================================================================================
+Snapshot time: 1.00e-12 s
+
+Code unit scales:
+  L_cgs = 1.000000e+00 cm
+  V_cgs = 1.000000e+08 cm/s
+  T_cgs = 1.000000e-08 s
+  light_speed_code = 3.000000e+02
+
+Grid geometry:
+  box_width_phys = 1.000000e+00 cm
+  size_shape = 256
+  cell_size_phys = 3.906250e-03 cm
+  cell_size_code = 3.906250e-03
+
+Code values:
+  source_rate_phys = 1e10 photons/s
+  source_rate_code = 1.0000e+02
+  time_code = 1.0000e-04
+
+Physical light-crossing time of box = 3.3333e-11 s
+
+                [stromgren debug]
+                dt_code = 8.680555652063049e-07
+                rate_code = 100.0
+                per_star_source_code = 8.680555765749887e-05
+                
+
+                [stromgren debug]
+                dt_code = 8.680555652063049e-07
+                rate_code = 100.0
+                per_star_source_code = 8.680555765749887e-05
+                
+Light speed: 300.0
+
+                [stromgren debug]
+                dt_code = 8.680555652063049e-07
+                rate_code = 100.0
+                per_star_source_code = 8.680555765749887e-05
+                
+
+                [stromgren debug]
+                dt_code = 8.680555652063049e-07
+                rate_code = 100.0
+                per_star_source_code = 8.680555765749887e-05
+                
+Light speed: 300.0
+
+                [stromgren debug]
+                dt_code = 8.680555652063049e-07
+                rate_code = 100.0
+                per_star_source_code = 8.680555765749887e-05
+                
+
+                [stromgren debug]
+                dt_code = 8.680555652063049e-07
+                rate_code = 100.0
+                per_star_source_code = 8.680555765749887e-05
+                
+Light speed: 300.0
+
+                [stromgren debug]
+                dt_code = 8.680555652063049e-07
+                rate_code = 100.0
+                per_star_source_code = 8.680555765749887e-05
+                
+
+                [stromgren debug]
+                dt_code = 8.680555652063049e-07
+                rate_code = 100.0
+                per_star_source_code = 8.680555765749887e-05
+                
+Light speed: 300.0
+
+                [stromgren debug]
+                dt_code = 8.680555652063049e-07
+                rate_code = 100.0
+                per_star_source_code = 8.680555765749887e-05
+                
+
+                [stromgren debug]
+                dt_code = 8.680555652063049e-07
+                rate_code = 100.0
+                per_star_source_code = 8.680555765749887e-05
+                
+Light speed: 300.0
+
+                [stromgren debug]
+                dt_code = 8.680555652063049e-07
+                rate_code = 100.0
+                per_star_source_code = 8.680555765749887e-05
+                
+
+                [stromgren debug]
+                dt_code = 8.680555652063049e-07
+                rate_code = 100.0
+                per_star_source_code = 8.680555765749887e-05
+                
+Light speed: 300.0
+
+                [stromgren debug]
+                dt_code = 8.680555652063049e-07
+                rate_code = 100.0
+                per_star_source_code = 8.680555765749887e-05
+                
+
+                [stromgren debug]
+                dt_code = 8.680555652063049e-07
+                rate_code = 100.0
+                per_star_source_code = 8.680555765749887e-05
+                
+Light speed: 300.0
+
+                [stromgren debug]
+                dt_code = 8.680555652063049e-07
+                rate_code = 100.0
+                per_star_source_code = 8.680555765749887e-05
+                
+
+                [stromgren debug]
+                dt_code = 8.680555652063049e-07
+                rate_code = 100.0
+                per_star_source_code = 8.680555765749887e-05
+                
+Light speed: 300.0
+
+                [stromgren debug]
+                dt_code = 8.680555652063049e-07
+                rate_code = 100.0
+                per_star_source_code = 8.680555765749887e-05
+                
+
+                [stromgren debug]
+                dt_code = 8.680555652063049e-07
+                rate_code = 100.0
+                per_star_source_code = 8.680555765749887e-05
+                
+Light speed: 300.0
+
+                [stromgren debug]
+                dt_code = 8.680555652063049e-07
+                rate_code = 100.0
+                per_star_source_code = 8.680555765749887e-05
+                
+
+                [stromgren debug]
+                dt_code = 8.680555652063049e-07
+                rate_code = 100.0
+                per_star_source_code = 8.680555765749887e-05
+                
+Light speed: 300.0
+
+                [stromgren debug]
+                dt_code = 8.680555652063049e-07
+                rate_code = 100.0
+                per_star_source_code = 8.680555765749887e-05
+                
+
+                [stromgren debug]
+                dt_code = 8.680555652063049e-07
+                rate_code = 100.0
+                per_star_source_code = 8.680555765749887e-05
+                
+Light speed: 300.0
+
+                [stromgren debug]
+                dt_code = 8.680555652063049e-07
+                rate_code = 100.0
+                per_star_source_code = 8.680555765749887e-05
+                
+
+                [stromgren debug]
+                dt_code = 8.680555652063049e-07
+                rate_code = 100.0
+                per_star_source_code = 8.680555765749887e-05
+                
+Light speed: 300.0
+
+                [stromgren debug]
+                dt_code = 8.680555652063049e-07
+                rate_code = 100.0
+                per_star_source_code = 8.680555765749887e-05
+                
+
+                [stromgren debug]
+                dt_code = 8.680555652063049e-07
+                rate_code = 100.0
+                per_star_source_code = 8.680555765749887e-05
+                
+Light speed: 300.0
+
+                [stromgren debug]
+                dt_code = 8.680555652063049e-07
+                rate_code = 100.0
+                per_star_source_code = 8.680555765749887e-05
+                
+
+                [stromgren debug]
+                dt_code = 8.680555652063049e-07
+                rate_code = 100.0
+                per_star_source_code = 8.680555765749887e-05
+                
+Light speed: 300.0
+
+                [stromgren debug]
+                dt_code = 8.680555652063049e-07
+                rate_code = 100.0
+                per_star_source_code = 8.680555765749887e-05
+                
+
+                [stromgren debug]
+                dt_code = 8.680555652063049e-07
+                rate_code = 100.0
+                per_star_source_code = 8.680555765749887e-05
+                
+Light speed: 300.0
+
+                [stromgren debug]
+                dt_code = 8.680555652063049e-07
+                rate_code = 100.0
+                per_star_source_code = 8.680555765749887e-05
+                
+
+                [stromgren debug]
+                dt_code = 8.680555652063049e-07
+                rate_code = 100.0
+                per_star_source_code = 8.680555765749887e-05
+                
+Light speed: 300.0
+
+                [stromgren debug]
+                dt_code = 8.680555652063049e-07
+                rate_code = 100.0
+                per_star_source_code = 8.680555765749887e-05
+                
+
+                [stromgren debug]
+                dt_code = 8.680555652063049e-07
+                rate_code = 100.0
+                per_star_source_code = 8.680555765749887e-05
+                
+Light speed: 300.0
+
+                [stromgren debug]
+                dt_code = 8.680555652063049e-07
+                rate_code = 100.0
+                per_star_source_code = 8.680555765749887e-05
+                
+
+                [stromgren debug]
+                dt_code = 8.680555652063049e-07
+                rate_code = 100.0
+                per_star_source_code = 8.680555765749887e-05
+                
+Light speed: 300.0
+
+                [stromgren debug]
+                dt_code = 8.680555652063049e-07
+                rate_code = 100.0
+                per_star_source_code = 8.680555765749887e-05
+                
+
+                [stromgren debug]
+                dt_code = 8.680555652063049e-07
+                rate_code = 100.0
+                per_star_source_code = 8.680555765749887e-05
+                
+Light speed: 300.0
+
+                [stromgren debug]
+                dt_code = 8.680555652063049e-07
+                rate_code = 100.0
+                per_star_source_code = 8.680555765749887e-05
+                
+
+                [stromgren debug]
+                dt_code = 8.680555652063049e-07
+                rate_code = 100.0
+                per_star_source_code = 8.680555765749887e-05
+                
+Light speed: 300.0
+
+                [stromgren debug]
+                dt_code = 8.680555652063049e-07
+                rate_code = 100.0
+                per_star_source_code = 8.680555765749887e-05
+                
+
+                [stromgren debug]
+                dt_code = 8.680555652063049e-07
+                rate_code = 100.0
+                per_star_source_code = 8.680555765749887e-05
+                
+Light speed: 300.0
+
+                [stromgren debug]
+                dt_code = 8.680555652063049e-07
+                rate_code = 100.0
+                per_star_source_code = 8.680555765749887e-05
+                
+
+                [stromgren debug]
+                dt_code = 8.680555652063049e-07
+                rate_code = 100.0
+                per_star_source_code = 8.680555765749887e-05
+                
+Light speed: 300.0
+
+                [stromgren debug]
+                dt_code = 8.680555652063049e-07
+                rate_code = 100.0
+                per_star_source_code = 8.680555765749887e-05
+                
+
+                [stromgren debug]
+                dt_code = 8.680555652063049e-07
+                rate_code = 100.0
+                per_star_source_code = 8.680555765749887e-05
+                
+Light speed: 300.0
+
+                [stromgren debug]
+                dt_code = 8.680555652063049e-07
+                rate_code = 100.0
+                per_star_source_code = 8.680555765749887e-05
+                
+
+                [stromgren debug]
+                dt_code = 8.680555652063049e-07
+                rate_code = 100.0
+                per_star_source_code = 8.680555765749887e-05
+                
+Light speed: 300.0
+
+                [stromgren debug]
+                dt_code = 8.680555652063049e-07
+                rate_code = 100.0
+                per_star_source_code = 8.680555765749887e-05
+                
+
+                [stromgren debug]
+                dt_code = 8.680555652063049e-07
+                rate_code = 100.0
+                per_star_source_code = 8.680555765749887e-05
+                
+Light speed: 300.0
+
+                [stromgren debug]
+                dt_code = 8.680555652063049e-07
+                rate_code = 100.0
+                per_star_source_code = 8.680555765749887e-05
+                
+
+                [stromgren debug]
+                dt_code = 8.680555652063049e-07
+                rate_code = 100.0
+                per_star_source_code = 8.680555765749887e-05
+                
+Light speed: 300.0
+
+                [stromgren debug]
+                dt_code = 8.680555652063049e-07
+                rate_code = 100.0
+                per_star_source_code = 8.680555765749887e-05
+                
+
+                [stromgren debug]
+                dt_code = 8.680555652063049e-07
+                rate_code = 100.0
+                per_star_source_code = 8.680555765749887e-05
+                
+Light speed: 300.0
+
+                [stromgren debug]
+                dt_code = 8.680555652063049e-07
+                rate_code = 100.0
+                per_star_source_code = 8.680555765749887e-05
+                
+
+                [stromgren debug]
+                dt_code = 8.680555652063049e-07
+                rate_code = 100.0
+                per_star_source_code = 8.680555765749887e-05
+                
+Light speed: 300.0
+
+                [stromgren debug]
+                dt_code = 8.680555652063049e-07
+                rate_code = 100.0
+                per_star_source_code = 8.680555765749887e-05
+                
+
+                [stromgren debug]
+                dt_code = 8.680555652063049e-07
+                rate_code = 100.0
+                per_star_source_code = 8.680555765749887e-05
+                
+Light speed: 300.0
+
+                [stromgren debug]
+                dt_code = 8.680555652063049e-07
+                rate_code = 100.0
+                per_star_source_code = 8.680555765749887e-05
+                
+
+                [stromgren debug]
+                dt_code = 8.680555652063049e-07
+                rate_code = 100.0
+                per_star_source_code = 8.680555765749887e-05
+                
+Light speed: 300.0
+
+                [stromgren debug]
+                dt_code = 8.680555652063049e-07
+                rate_code = 100.0
+                per_star_source_code = 8.680555765749887e-05
+                
+
+                [stromgren debug]
+                dt_code = 8.680555652063049e-07
+                rate_code = 100.0
+                per_star_source_code = 8.680555765749887e-05
+                
+Light speed: 300.0
+
+                [stromgren debug]
+                dt_code = 8.680555652063049e-07
+                rate_code = 100.0
+                per_star_source_code = 8.680555765749887e-05
+                
+
+                [stromgren debug]
+                dt_code = 8.680555652063049e-07
+                rate_code = 100.0
+                per_star_source_code = 8.680555765749887e-05
+                
+Light speed: 300.0
+
+                [stromgren debug]
+                dt_code = 8.680555652063049e-07
+                rate_code = 100.0
+                per_star_source_code = 8.680555765749887e-05
+                
+
+                [stromgren debug]
+                dt_code = 8.680555652063049e-07
+                rate_code = 100.0
+                per_star_source_code = 8.680555765749887e-05
+                
+Light speed: 300.0
+
+                [stromgren debug]
+                dt_code = 8.680555652063049e-07
+                rate_code = 100.0
+                per_star_source_code = 8.680555765749887e-05
+                
+
+                [stromgren debug]
+                dt_code = 8.680555652063049e-07
+                rate_code = 100.0
+                per_star_source_code = 8.680555765749887e-05
+                
+Light speed: 300.0
+
+                [stromgren debug]
+                dt_code = 8.680555652063049e-07
+                rate_code = 100.0
+                per_star_source_code = 8.680555765749887e-05
+                
+
+                [stromgren debug]
+                dt_code = 8.680555652063049e-07
+                rate_code = 100.0
+                per_star_source_code = 8.680555765749887e-05
+                
+Light speed: 300.0
+
+                [stromgren debug]
+                dt_code = 8.680555652063049e-07
+                rate_code = 100.0
+                per_star_source_code = 8.680555765749887e-05
+                
+
+                [stromgren debug]
+                dt_code = 8.680555652063049e-07
+                rate_code = 100.0
+                per_star_source_code = 8.680555765749887e-05
+                
+Light speed: 300.0
+
+                [stromgren debug]
+                dt_code = 8.680555652063049e-07
+                rate_code = 100.0
+                per_star_source_code = 8.680555765749887e-05
+                
+
+                [stromgren debug]
+                dt_code = 8.680555652063049e-07
+                rate_code = 100.0
+                per_star_source_code = 8.680555765749887e-05
+                
+Light speed: 300.0
+
+                [stromgren debug]
+                dt_code = 8.680555652063049e-07
+                rate_code = 100.0
+                per_star_source_code = 8.680555765749887e-05
+                
+
+                [stromgren debug]
+                dt_code = 8.680555652063049e-07
+                rate_code = 100.0
+                per_star_source_code = 8.680555765749887e-05
+                
+Light speed: 300.0
+
+                [stromgren debug]
+                dt_code = 8.680555652063049e-07
+                rate_code = 100.0
+                per_star_source_code = 8.680555765749887e-05
+                
+
+                [stromgren debug]
+                dt_code = 8.680555652063049e-07
+                rate_code = 100.0
+                per_star_source_code = 8.680555765749887e-05
+                
+Light speed: 300.0
+
+                [stromgren debug]
+                dt_code = 8.680555652063049e-07
+                rate_code = 100.0
+                per_star_source_code = 8.680555765749887e-05
+                
+
+                [stromgren debug]
+                dt_code = 8.680555652063049e-07
+                rate_code = 100.0
+                per_star_source_code = 8.680555765749887e-05
+                
+Light speed: 300.0
+
+                [stromgren debug]
+                dt_code = 8.680555652063049e-07
+                rate_code = 100.0
+                per_star_source_code = 8.680555765749887e-05
+                
+
+                [stromgren debug]
+                dt_code = 8.680555652063049e-07
+                rate_code = 100.0
+                per_star_source_code = 8.680555765749887e-05
+                
+Light speed: 300.0
+
+                [stromgren debug]
+                dt_code = 8.680555652063049e-07
+                rate_code = 100.0
+                per_star_source_code = 8.680555765749887e-05
+                
+
+                [stromgren debug]
+                dt_code = 8.680555652063049e-07
+                rate_code = 100.0
+                per_star_source_code = 8.680555765749887e-05
+                
+Light speed: 300.0
+
+                [stromgren debug]
+                dt_code = 8.680555652063049e-07
+                rate_code = 100.0
+                per_star_source_code = 8.680555765749887e-05
+                
+
+                [stromgren debug]
+                dt_code = 8.680555652063049e-07
+                rate_code = 100.0
+                per_star_source_code = 8.680555765749887e-05
+                
+Light speed: 300.0
+
+                [stromgren debug]
+                dt_code = 8.680555652063049e-07
+                rate_code = 100.0
+                per_star_source_code = 8.680555765749887e-05
+                
+
+                [stromgren debug]
+                dt_code = 8.680555652063049e-07
+                rate_code = 100.0
+                per_star_source_code = 8.680555765749887e-05
+                
+Light speed: 300.0
+
+                [stromgren debug]
+                dt_code = 8.680555652063049e-07
+                rate_code = 100.0
+                per_star_source_code = 8.680555765749887e-05
+                
+
+                [stromgren debug]
+                dt_code = 8.680555652063049e-07
+                rate_code = 100.0
+                per_star_source_code = 8.680555765749887e-05
+                
+Light speed: 300.0
+
+                [stromgren debug]
+                dt_code = 8.680555652063049e-07
+                rate_code = 100.0
+                per_star_source_code = 8.680555765749887e-05
+                
+
+                [stromgren debug]
+                dt_code = 8.680555652063049e-07
+                rate_code = 100.0
+                per_star_source_code = 8.680555765749887e-05
+                
+Light speed: 300.0
+
+                [stromgren debug]
+                dt_code = 8.680555652063049e-07
+                rate_code = 100.0
+                per_star_source_code = 8.680555765749887e-05
+                
+
+                [stromgren debug]
+                dt_code = 8.680555652063049e-07
+                rate_code = 100.0
+                per_star_source_code = 8.680555765749887e-05
+                
+Light speed: 300.0
+
+                [stromgren debug]
+                dt_code = 8.680555652063049e-07
+                rate_code = 100.0
+                per_star_source_code = 8.680555765749887e-05
+                
+
+                [stromgren debug]
+                dt_code = 8.680555652063049e-07
+                rate_code = 100.0
+                per_star_source_code = 8.680555765749887e-05
+                
+Light speed: 300.0
+
+                [stromgren debug]
+                dt_code = 8.680555652063049e-07
+                rate_code = 100.0
+                per_star_source_code = 8.680555765749887e-05
+                
+
+                [stromgren debug]
+                dt_code = 8.680555652063049e-07
+                rate_code = 100.0
+                per_star_source_code = 8.680555765749887e-05
+                
+Light speed: 300.0
+
+                [stromgren debug]
+                dt_code = 8.680555652063049e-07
+                rate_code = 100.0
+                per_star_source_code = 8.680555765749887e-05
+                
+
+                [stromgren debug]
+                dt_code = 8.680555652063049e-07
+                rate_code = 100.0
+                per_star_source_code = 8.680555765749887e-05
+                
+Light speed: 300.0
+
+                [stromgren debug]
+                dt_code = 8.680555652063049e-07
+                rate_code = 100.0
+                per_star_source_code = 8.680555765749887e-05
+                
+
+                [stromgren debug]
+                dt_code = 8.680555652063049e-07
+                rate_code = 100.0
+                per_star_source_code = 8.680555765749887e-05
+                
+Light speed: 300.0
+
+                [stromgren debug]
+                dt_code = 8.680555652063049e-07
+                rate_code = 100.0
+                per_star_source_code = 8.680555765749887e-05
+                
+
+                [stromgren debug]
+                dt_code = 8.680555652063049e-07
+                rate_code = 100.0
+                per_star_source_code = 8.680555765749887e-05
+                
+Light speed: 300.0
+
+                [stromgren debug]
+                dt_code = 8.680555652063049e-07
+                rate_code = 100.0
+                per_star_source_code = 8.680555765749887e-05
+                
+
+                [stromgren debug]
+                dt_code = 8.680555652063049e-07
+                rate_code = 100.0
+                per_star_source_code = 8.680555765749887e-05
+                
+Light speed: 300.0
+
+                [stromgren debug]
+                dt_code = 8.680555652063049e-07
+                rate_code = 100.0
+                per_star_source_code = 8.680555765749887e-05
+                
+
+                [stromgren debug]
+                dt_code = 8.680555652063049e-07
+                rate_code = 100.0
+                per_star_source_code = 8.680555765749887e-05
+                
+Light speed: 300.0
+
+                [stromgren debug]
+                dt_code = 8.680555652063049e-07
+                rate_code = 100.0
+                per_star_source_code = 8.680555765749887e-05
+                
+
+                [stromgren debug]
+                dt_code = 8.680555652063049e-07
+                rate_code = 100.0
+                per_star_source_code = 8.680555765749887e-05
+                
+Light speed: 300.0
+
+                [stromgren debug]
+                dt_code = 8.680555652063049e-07
+                rate_code = 100.0
+                per_star_source_code = 8.680555765749887e-05
+                
+
+                [stromgren debug]
+                dt_code = 8.680555652063049e-07
+                rate_code = 100.0
+                per_star_source_code = 8.680555765749887e-05
+                
+Light speed: 300.0
+
+                [stromgren debug]
+                dt_code = 8.680555652063049e-07
+                rate_code = 100.0
+                per_star_source_code = 8.680555765749887e-05
+                
+
+                [stromgren debug]
+                dt_code = 8.680555652063049e-07
+                rate_code = 100.0
+                per_star_source_code = 8.680555765749887e-05
+                
+Light speed: 300.0
+
+                [stromgren debug]
+                dt_code = 8.680555652063049e-07
+                rate_code = 100.0
+                per_star_source_code = 8.680555765749887e-05
+                
+
+                [stromgren debug]
+                dt_code = 8.680555652063049e-07
+                rate_code = 100.0
+                per_star_source_code = 8.680555765749887e-05
+                
+Light speed: 300.0
+Simulation completed!
+  Number of steps: 58
+  Time step history physical: 1.0069e-12 s
+Expected injected photons = 1.0069e-02 photons
+Total photons in domain   = 1.0069e-02 photons
+Difference                = -3.3469e-09 photons
+[run_new_1.0e-12s] c=155.306664  b=80.705426 (+/- 5.46e+00)
+[run_new_1.0e-12s] injection_radius=6, fit_range=[7.0, 21.0] cells

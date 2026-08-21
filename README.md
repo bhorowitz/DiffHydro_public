@@ -41,13 +41,48 @@ The paper demonstrates several novel use cases:
 * **Solver-in-the-loop ML:** Train neural networks to correct numerical errors while maintaining physical accuracy.
 * **(Less novel) Forward modeling:** Standard hydrodynamics simulations of supernova remnants, turbulence, and self-gravitating systems.
 
+### Recent Additions
+
+#### 🔴 Radiative Transfer Framework (Phase 1 Complete)
+
+We have added **multi-density Euler support** with a **radiative transfer infrastructure** ready for implementation:
+
+- **Multi-density Euler**: Support for N density fields (rho, rho_test, rho_candidate, etc.) all sharing unified velocity and pressure
+- **Conservative approach**: Implemented via separate `*_radiative_transf.py` files - zero breaking changes to original code
+- **Future-ready stub**: Radiative transfer module in place, waiting for physics implementation
+
+**Key Files**:
+- `equationmanager_radiative_transf.py` - Multi-density Euler equations
+- `turbulence_radiative_transf.py` - Multi-density turbulence initialization
+- `radiative_transfer.py` - Radiative transfer physics (stub)
+- See [RADIATIVE_TRANSFER_MIGRATION_SUMMARY.md](./RADIATIVE_TRANSFER_MIGRATION_SUMMARY.md) for details
+
+**Example**:
+```python
+from diffhydro.equationmanager_radiative_transf import EquationManager as EquationManager_RT
+
+# Create multi-density configuration
+eq = EquationManager_RT(density_names=("rho", "rho_test"))
+# Automatically: n_dens=2, n_cons=6
+```
+
 ### Getting Started
 
 Built on the JAX ecosystem for scientific computing, diffhydro provides a Python-first, interactive workflow that integrates naturally with modern data-science tools and machine-learning frameworks.
 
 - [Intro to JAX](https://docs.jax.dev/en/latest/notebooks/thinking_in_jax.html)
+- **Documentation**: See [INDEX_DOCUMENTATION.md](./INDEX_DOCUMENTATION.md) for complete guide
 
-Whether you’re doing traditional forward modeling or cutting-edge simulation-based inference, diffhydro offers a flexible platform that bridges classical computational astrophysics with differentiable programming and machine learning.
+Whether you're doing traditional forward modeling or cutting-edge simulation-based inference, diffhydro offers a flexible platform that bridges classical computational astrophysics with differentiable programming and machine learning.
+
+---
+
+### Documentation
+
+- [INDEX_DOCUMENTATION.md](./INDEX_DOCUMENTATION.md) - Main navigation & overview
+- [RADIATIVE_TRANSFER_MIGRATION_SUMMARY.md](./RADIATIVE_TRANSFER_MIGRATION_SUMMARY.md) - What changed & why
+- [RADIATIVE_TRANSFER_IMPLEMENTATION.md](./RADIATIVE_TRANSFER_IMPLEMENTATION.md) - Implementation strategy
+- [MULTI_DENSITY_ARCHITECTURE.md](./MULTI_DENSITY_ARCHITECTURE.md) - Technical architecture guide
 
 We provide a few examples in this repository, but if you don’t want to wade through the notebooks, there are some basic quick-start examples in this Colab notebook:
 

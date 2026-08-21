@@ -1,1 +1,6 @@
 **/*.ipynb_checkpoints/
+**/*.npy
+**/.vscode/
+**/.pyc
+**/__pycache__/
+examples/RT/Images/
