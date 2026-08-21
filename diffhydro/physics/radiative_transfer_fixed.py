@@ -110,7 +110,7 @@ class StellarRadiationForce:
         default_temperature_K=1e4,      # K, fallback gas temperature
         # --- chemistry conventions ---
         frequency=hchem.NU_HI_CGS,      # single photon group frequency [Hz]
-        chemistry_case="A",             # must match HydrogenIonizationForce
+        chemistry_case="B",             # must match HydrogenIonizationForce
         b_rec=None,                     # None -> 1.0 for case A, 0.0 for case B
         xHII_weighted=False,            # True if sol[idx_xHII] stores N_gamma * x_HII
         X_H=1.0,                        # hydrogen mass fraction (pure H here)

@@ -23,13 +23,21 @@ It prints R_I(t)/R_S against the analytic curve and writes a PNG.
 import math
 import os
 import sys
+import jax
 
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 sys.path.insert(0, REPO_ROOT)
 os.environ.setdefault("CUDA_DEVICE_ORDER", "PCI_BUS_ID")
-os.environ.setdefault("CUDA_VISIBLE_DEVICES", os.environ.get("GPU", "0"))
+if "GPU" in os.environ:
+    os.environ["CUDA_VISIBLE_DEVICES"] = os.environ["GPU"]
+print(f"CUDA_VISIBLE_DEVICES = {os.environ.get('CUDA_VISIBLE_DEVICES', '<non defini, tous les GPU visibles>')}")
+print("jax.devices():", jax.devices())
+assert len(jax.devices()) == 4, (
+    f"Attendu 4 GPU visibles, trouve {len(jax.devices())} -- "
+    f"verifie --gres=gpu:4 dans le script SLURM."
+)
 
-import jax
+
 # float64 is MANDATORY here: sol[0] is a photon density per CODE volume, so it
 # scales as L_cgs^3. With a kpc-sized length unit that is ~1e59 photons per
 # code volume, which overflows float32 (max 3.4e38) and produces NaN.
@@ -54,7 +62,7 @@ print("Backend:", jax.default_backend())
 # ---------------------------------------------------------------------------
 # Iliev+2006 Test 1 parameters
 # ---------------------------------------------------------------------------
-N = int(os.environ.get("N", 50))
+N = int(os.environ.get("N", 150))
 n_H_cgs = 1.0e-3                 # cm^-3
 T_K = 1.0e4                      # K, isothermal
 Q_phot = 5.0e48                  # ionizing photons / s
@@ -90,7 +98,7 @@ cu = CodeUnits.from_config(
 )
 dx_code = 1.0
 c_code = c_red_cgs / cu.V_cgs          # == 1
-cfl = 0.1 # modife 18/08
+cfl = 0.4
 dt_code = cfl / (3.0 * c_code / dx_code)
 n_steps = int(math.ceil((t_end / cu.T_cgs) / dt_code))
 v_front_cell = Q_phot / (4.0 * np.pi * dx_cgs ** 2 * n_H_cgs)
@@ -184,6 +192,7 @@ sim = dh.hydro(
     forces=[stellar, chem_force],
     dx=dx_code,
     max_dt=2.0 * dt_code,
+    pmesh_shape=(2, 2, 1),  # single mesh for this test
 )
 
 # ---------------------------------------------------------------------------

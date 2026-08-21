@@ -276,7 +276,8 @@ def limit_m1_flux_cone(N, Fx, Fy, Fz, c, f_max=1.0, eps=1e-30):
         + (Fy / component_scale_safe) ** 2
         + (Fz / component_scale_safe) ** 2
     )
-    Fmax = f_max * c**2 * jnp.maximum(N**2, 0.0)
+    # Fmax = f_max * c**2 * jnp.maximum(N**2, 0.0) version avant 
+    Fmax = f_max * c * jnp.maximum(N, 0.0) #version chat du 18/08
     scale = jnp.where(
         component_scale > 0.0,
         jnp.minimum(1.0, Fmax / jnp.maximum(Fnorm, eps)),

@@ -70,38 +70,6 @@ jax.config.update("jax_enable_x64", True)
 # CONFIG -- EVERYTHING you might want to change lives here, nowhere else.
 # No environment variables are read anywhere in this script anymore.
 # ============================================================================
-GPU_ID = "0"
-
-N = 50
-
-# Une unité de longueur code = une cellule physique
-ULEN = "4.7536191406e20 cm"
-
-# Une unité de vitesse code = vitesse réduite de la lumière
-UVEL = "2.99792458e7 cm/s"
-
-# L_box = 4 R_S / 1.4
-BOXPHYS = "4.7536191406e22 cm"
-BOXCODE = None
-
-# Débit ionisant du test Iliev 2006
-SRC = 5e48
-
-# TPHYS = 3 t_rec
-TPHYS = "1.92915e16 s"#"1.1574897190e16 s"
-
-EPS = 1e-30
-MAXDT = None
-NSTEP = None
-
-N_H_CGS = 1.0e-3
-T_AMBIENT_K = 1.0e4
-
-MAKE_GIFS = True
-GIF_FRAMES = 100
-
-print("Backend:", jax.default_backend(), jax.devices())
-
 up = UnitParser()
 
 
@@ -112,6 +80,41 @@ def parse_quantity(text: str, expected_dim: str):
         return up.parse(text, expected_dim=expected_dim)
     except ValueError as exc:
         raise SystemExit(f"Invalid quantity '{text}': {exc}") from exc
+GPU_ID = "0"
+
+N = 25
+
+
+BOXPHYS = "4.7536191406e22 cm"
+# Une unité de vitesse code = vitesse réduite de la lumière
+UVEL = "2.99792458e7 cm/s"  # c_red = 10^-3 c
+# Une unité de longueur code = une cellule physique
+# ULEN = f"{parse_quantity(BOXPHYS, expected_dim='length').cgs_value / N} cm"
+ULEN = "4.7536191406e22 cm"
+# L_box = 4 R_S / 1.4
+
+BOXCODE = None
+
+# Débit ionisant du test Iliev 2006
+SRC = 5e48
+
+# TPHYS = 3 t_rec
+TPHYS = "1.92915e16 s"#"1.1574897190e16 s"
+
+EPS = 1e-30
+MAXDT = None
+NSTEP = 3000
+
+N_H_CGS = 1.0e-3
+T_AMBIENT_K = 1.0e4
+
+MAKE_GIFS = False
+GIF_FRAMES = 100
+print("DEBUG N before ULEN =", N)
+print("DEBUG ULEN string =", ULEN)
+print("Backend:", jax.default_backend(), jax.devices())
+
+
 
 
 def sanitize_tag(text: str) -> str:
@@ -135,13 +138,18 @@ unit_velocity_phys = uvel_q.cgs_value
 unit_velocity_str = f"{uvel_q.value:g}{uvel_q.unit}"
 
 c_cgs = 2.99792458e10
-if abs(unit_velocity_phys - c_cgs) / c_cgs > 0.5:
-    print(f"  !! WARNING: UVEL = {unit_velocity_str} ({unit_velocity_phys:.3e} cm/s) "
-          f"is far from the real speed of light ({c_cgs:.3e} cm/s). "
-          f"This will distort every cgs<->code conversion (Temp_cgs, T_cgs, "
-          f"and therefore the recombination coefficient). Fix UVEL in CONFIG "
-          f"unless you specifically intend a non-relativistic light speed test.")
-
+c_red_cgs = 1.0e-3 * c_cgs
+# if abs(unit_velocity_phys - c_cgs) / c_cgs > 0.5:
+#     print(f"  !! WARNING: UVEL = {unit_velocity_str} ({unit_velocity_phys:.3e} cm/s) "
+#           f"is far from the real speed of light ({c_cgs:.3e} cm/s). "
+#           f"This will distort every cgs<->code conversion (Temp_cgs, T_cgs, "
+#           f"and therefore the recombination coefficient). Fix UVEL in CONFIG "
+#           f"unless you specifically intend a non-relativistic light speed test.")
+if abs(unit_velocity_phys - c_red_cgs) / c_red_cgs > 0.5:
+    raise ValueError(
+        "UVEL doit être égal à c_red_cgs pour ce test "
+        "de transfert radiatif."
+    )
 if BOXPHYS is not None:
     boxphys_q = parse_quantity(BOXPHYS, expected_dim="length")
     box_width_phys_cgs = boxphys_q.cgs_value
@@ -169,7 +177,7 @@ time_axis_unit = tphys_q.unit
 time_axis_scale = up.unit_factor_to_cgs(time_axis_unit, expected_dim="time")
 tphys_str = f"{tphys_q.value:g}{tphys_q.unit}"
 
-c_red_cgs = 1.0e-3 * c_cgs
+
 
 rho_ambient_cgs = N_H_CGS * 1.6726219e-24
 mass_unit_phys_cgs = rho_ambient_cgs * unit_length_phys_cgs**3
@@ -189,12 +197,20 @@ cu = CodeUnits.from_config(
 # light_speed_code = c_cgs / cu.V_cgs
 light_speed_code = c_red_cgs / cu.V_cgs
 time_code = t_phys / cu.T_cgs
+# source_rate_code = source_rate_phys * cu.T_cgs
+# source_rate_code = (
+#     source_rate_phys
+#     * cu.T_cgs
+#     / unit_length_phys_cgs**3
+# )
 source_rate_code = source_rate_phys * cu.T_cgs
 
 cfl_code = 0.4
 dt_cfl = cfl_code / (3.0 * light_speed_code / dx_code)
 n_steps_est = int(math.ceil(time_code / dt_cfl))
-max_dt = MAXDT if MAXDT is not None else 2.0 * dt_cfl
+# max_dt = MAXDT if MAXDT is not None else 2.0 * dt_cfl
+# max_dt = dt_cfl * 0.5
+max_dt = MAXDT if MAXDT is not None else dt_cfl
 n_super_step = NSTEP if NSTEP is not None else int(1.2 * n_steps_est) + 100
 
 # ============================================================================
@@ -237,9 +253,11 @@ print(f"  max_dt                = {max_dt:.6e} code")
 print(f"  estimated n_steps     = {n_steps_est}   (n_super_step = {n_super_step})")
 print("=" * 70)
 
-# ============================================================================
-# SOLVER
-# ============================================================================
+assert np.isclose(
+    dx_phys_cgs,
+    box_width_phys_cgs / N,
+    rtol=1e-12,
+)
 # ============================================================================
 # SOLVER
 # ============================================================================
@@ -263,6 +281,7 @@ assert abs(cfl_code - eq_test.cfl) < 1e-12, (
     f"desynchronized cfl: dt_cfl computed with {cfl_code}, solver has {eq_test.cfl}"
 )
 source_density_per_step = source_rate_code * dt_cfl / cell_volume_code
+# source_density_per_step = source_rate_code * dt_cfl
 print(f"  eps_code              = {eps_code:.3e}   "
       f"(source/step = {source_density_per_step:.3e} [ph/vol code], "
       f"ratio = {source_density_per_step / eps_code:.2e})")
@@ -285,13 +304,13 @@ class StateBlockFlux:
 rt_flux = StateBlockFlux(
     dh.ConvectiveFlux_Radiative_transfer(
         eq_test, dh.HLL_Radiative_transfer_Local(eq_test, dh.signal_speed_Rusanov),
-        dh.PLM(limiter="VANLEER"), dx=dx_code),
+        dh.PLM(limiter="MINMOD"), dx=dx_code),
     slice(0, eq_test.n_cons),
 )
 hydro_flux = StateBlockFlux(
     dh.ConvectiveFlux(
         eq_test_hydro, dh.LaxFriedrichs(eq_test_hydro, dh.signal_speed_Rusanov),
-        dh.PLM(limiter="VANLEER"), dx=dx_code),
+        dh.PLM(limiter="MINMOD"), dx=dx_code),
     slice(eq_test.n_cons, eq_test.n_cons + eq_test_hydro.n_cons),
 )
 
@@ -299,6 +318,7 @@ hydro_flux = StateBlockFlux(
 #     (chemistry=False) puis chimie/ionisation couplee (photon-conserving)
 #     via HydrogenPhotoChemistryForce, PLUS de HeatCoolForce_basic ni de
 #     HydrogenIonizationForce separee.
+
 stellar_force = StellarRadiationForce(
     dx=dx_code,
     injection_mode="stromgren",
@@ -310,6 +330,14 @@ stellar_force = StellarRadiationForce(
     eq=eq_test, hydro_eq=eq_test_hydro, cu=cu,
     chemistry=False,                       # injection only
 )
+print(
+    "DEBUG source rate code =",
+    float(stellar_force.stromgren_rate),
+)
+print(
+    "DEBUG source rate expected code =",
+    source_rate_phys * cu.T_cgs,
+)
 chem_force = HydrogenPhotoChemistryForce(
     stellar_force,
     case="B",
@@ -317,14 +345,14 @@ chem_force = HydrogenPhotoChemistryForce(
     max_frac=0.9,
     include_heating=False,
     include_cooling=False,
-    # fixed_temperature_K=T_AMBIENT_K,
+    fixed_temperature_K=T_AMBIENT_K#fixed_temperature_K=T_AMBIENT_K,
 )
 print(f"  chemistry scheme = coupled ({type(chem_force).__name__})")
 
 hydrosim_test = dh.hydro(
     n_super_step=n_super_step,
     fluxes=[hydro_flux, rt_flux],
-    forces=[stellar_force, chem_force],
+    forces=[stellar_force,chem_force],
     dx=dx_code,
     max_dt=max_dt,
 )
@@ -374,9 +402,16 @@ rho_ambient_cgs = n_H_cgs * 1.6726219e-24
 rho_ambient_code = rho_ambient_cgs / cu.rho_cgs
 kB_cgs = 1.380649e-16
 mH_cgs = 1.6726219e-24
-mu = getattr(cu, "mu", 0.61)
-p_ambient_cgs = rho_ambient_cgs * kB_cgs * T_ambient_K / (mu * mH_cgs)
+mu = 1.0# mu = getattr(cu, "mu", 0.61) chat 18/08
+# p_ambient_cgs = rho_ambient_cgs * kB_cgs * T_ambient_K / (mu * mH_cgs) chat 18/08
+n_tot_initial = n_H_cgs
+p_ambient_cgs = n_tot_initial * kB_cgs * T_ambient_K
 p_ambient_code = p_ambient_cgs / cu.P_cgs
+
+# print("DEBUG cu.P_cgs =", cu.P_cgs)
+# print("DEBUG p_ambient_cgs =", p_ambient_cgs)
+# print("DEBUG p_ambient_code =", p_ambient_code)
+# print("DEBUG expected E_internal_code =", p_ambient_code / (5.0 / 3.0 - 1.0))
 
 # ============================================================================
 # --- Athena blast-wave IC (kept, commented out for the Stromgren test) ----
@@ -393,14 +428,41 @@ p_ambient_code = p_ambient_cgs / cu.P_cgs
 # ionizing point source.
 # ============================================================================
 sol_test = sol_test.at[idx_rho_local].set(rho_ambient_code)
-sol_test = sol_test.at[idx_p_local].set(p_ambient_code)
+# sol_test = sol_test.at[idx_p_local].set(p_ambient_code)
+sol_test = sol_test.at[idx_p_local].set(
+    p_ambient_code / (5.0 / 3.0 - 1.0)
+) # chat 18/08
 sol_test = sol_test.at[0, center, center, center].set(1e-20)
 sol_test = sol_test.at[9].set(0.0)
+
+E_initial = np.asarray(sol_test[0], dtype=np.float64)
+
+print(
+    "DEBUG E_gamma initial min/max/negative =",
+    float(E_initial.min()),
+    float(E_initial.max()),
+    int(np.sum(E_initial < 0.0)),
+)
+
+T_K_initial = chem_force.view.temperature_K(sol_test)
+
+print(
+    "T min/max initial =",
+    float(jnp.min(T_K_initial)),
+    float(jnp.max(T_K_initial)),
+)
+n_H_dbg, n_HI_dbg, n_HII_dbg, n_e_dbg = (
+    chem_force.view.number_densities_cgs(sol_test, sol_test[9])
+)
 
 print(f"\nRunning to t = {t_phys:.3e} s = {time_code:.3e} code units ...")
 field_test, _, _, dt_hist, n_steps = hydrosim_test.evolve_till_time(
     cp.deepcopy(sol_test), params, time_code
 )
+# field_test, _, _, dt_hist, n_steps = hydrosim_test.evolve_till_time(
+#     cp.deepcopy(sol_test), params, dt_cfl*10.0
+# )
+
 
 dt_hist = np.asarray(dt_hist)
 dt_sum = float(dt_hist[dt_hist > 0].sum())
@@ -418,6 +480,39 @@ if dt_hist[0] < 0.99 * dt_cfl:
           f"max_dt={max_dt:.3e} caps the CFL.")
 
 
+T_K = chem_force.view.temperature_K(field_test)
+x_final = chem_force.view.xHII(field_test)
+
+# print(
+#     "DEBUG x_HII min/max final =",
+#     float(jnp.min(x_final)),
+#     float(jnp.max(x_final)),
+# )
+
+# print(
+#     "T min/max final =",
+#     float(jnp.min(T_K)),
+#     float(jnp.max(T_K)),
+# )
+
+# T_arr = np.asarray(T_K)
+# x_arr = np.asarray(x_final)
+
+# mask_ionized = x_arr > 0.9
+# mask_neutral = x_arr < 1.0e-3
+
+# print(
+#     "DEBUG T ionized min/max =",
+#     float(T_arr[mask_ionized].min()),
+#     float(T_arr[mask_ionized].max()),
+# )
+
+# print(
+#     "DEBUG T neutral min/max =",
+#     float(T_arr[mask_neutral].min()),
+#     float(T_arr[mask_neutral].max()),
+# )
+
 def fmt_t_phys():
     return f"{t_phys / time_axis_scale:.2e} {time_axis_unit}"
 
@@ -426,6 +521,107 @@ def fmt_t_phys():
 # DIAGNOSTICS
 # ============================================================================
 E3d = np.asarray(field_test[0], dtype=np.float64)
+print(
+    "DEBUG E_gamma final min/max/negative =",
+    float(E3d.min()),
+    float(E3d.max()),
+    int(np.sum(E3d < 0.0)),
+)
+print(
+    "DEBUG E_gamma final finite/min/max/mean =",
+    bool(np.all(np.isfinite(E3d))),
+    float(E3d.min()),
+    float(E3d.max()),
+    float(E3d.mean()),
+)
+Fx3d = np.asarray(field_test[1], dtype=np.float64)
+Fy3d = np.asarray(field_test[2], dtype=np.float64)
+Fz3d = np.asarray(field_test[3], dtype=np.float64)
+
+Fmag = np.sqrt(Fx3d**2 + Fy3d**2 + Fz3d**2)
+
+E_threshold = 1.0e-6 * np.max(E3d)
+active = E3d > E_threshold
+
+reduced_flux = Fmag / np.maximum(
+    light_speed_code * E3d,
+    1e-300,
+)
+print(
+    "DEBUG light_speed_code =",
+    light_speed_code,
+)
+Fx_limited, Fy_limited, Fz_limited = hchem.limit_m1_flux_cone(
+    jnp.asarray(E3d),
+    jnp.asarray(Fx3d),
+    jnp.asarray(Fy3d),
+    jnp.asarray(Fz3d),
+    c=light_speed_code,
+    f_max=1.0,
+)
+
+Fmag_limited = np.sqrt(
+    np.asarray(Fx_limited)**2
+    + np.asarray(Fy_limited)**2
+    + np.asarray(Fz_limited)**2
+)
+
+reduced_flux_limited = Fmag_limited / np.maximum(
+    light_speed_code * E3d,
+    1e-300,
+)
+
+print(
+    "DEBUG limited reduced flux max active =",
+    float(np.max(reduced_flux_limited[active])),
+)
+
+print(
+    "DEBUG limited reduced flux > 1 active cells =",
+    int(np.sum(reduced_flux_limited[active] > 1.0 + 1e-8)),
+)
+print(
+    "DEBUG E_gamma min/max/negative =",
+    float(E3d.min()),
+    float(E3d.max()),
+    int(np.sum(E3d < 0.0)),
+)
+# # reduced_flux = Fmag / np.maximum(light_speed_code * E3d, 1e-300)
+# E_threshold = 1.0e-6 * np.max(E3d)
+
+# active = E3d > E_threshold
+# reduced_flux = Fmag / np.maximum(light_speed_code * E3d, 1e-300)
+# print(
+#     "DEBUG active cells for reduced flux =",
+#     int(np.sum(active)),
+# )
+
+# print(
+#     "DEBUG reduced flux max active =",
+#     float(np.max(reduced_flux[active])),
+# )
+
+# print(
+#     "DEBUG reduced flux > 1 active cells =",
+#     int(np.sum(reduced_flux[active] > 1.0 + 1e-8)),
+# )
+# print(
+#     "DEBUG reduced flux min/max =",
+#     float(np.nanmin(reduced_flux)),
+#     float(np.nanmax(reduced_flux)),
+# )
+# print(
+#     "DEBUG reduced flux > 1 cells =",
+#     int(np.sum(reduced_flux > 1.0 + 1e-8)),
+# )
+
+# print(
+#     "DEBUG E_gamma min/max/negative =",
+#     float(E3d.min()),
+#     float(E3d.max()),
+#     int(np.sum(E3d < 0.0)),
+# )
+
 E_cell = E3d * cell_volume_code
 c = size_shape // 2
 
@@ -435,7 +631,10 @@ photons_in_box = E_cell.sum()
 photons_expect = source_rate_code * dt_sum
 print(f"  photons in box  = {photons_in_box:.6e}   expected = {photons_expect:.6e}"
       f"   ratio = {photons_in_box / max(photons_expect, 1e-300):.6f}")
-
+print(
+    "DEBUG source conservation ratio =",
+    float(photons_in_box / max(photons_expect, 1e-300)),
+)
 line = E_cell[c:, c, c]
 peak = E_cell.max()
 for th in [1e-3, 1e-6, 1e-10, 1e-15]:
@@ -447,7 +646,23 @@ print(f"  expected free-streaming radius = {c_cgs * t_phys / dx_phys_cgs:.1f} ce
 
 xHII_abs_idx = getattr(stellar_force, "idx_xHII", None)
 if xHII_abs_idx is not None and field_test.shape[0] > xHII_abs_idx:
+    
     xHII_3d = np.asarray(field_test[xHII_abs_idx], dtype=np.float64)
+
+    center = size_shape // 2
+    r_axis = np.arange(1, center)
+
+    x_profile = xHII_3d[center + r_axis, center, center]
+    y_profile = xHII_3d[center, center + r_axis, center]
+    z_profile = xHII_3d[center, center, center + r_axis]
+
+    print(
+        "DEBUG axis profiles max differences =",
+        float(np.max(np.abs(x_profile - y_profile))),
+        float(np.max(np.abs(x_profile - z_profile))),
+    )
+
+
     print(f"  x_HII min/max/mean = "
           f"{xHII_3d.min():.4e} / {xHII_3d.max():.4e} / {xHII_3d.mean():.4e}")
     n_out_of_bounds = np.sum((xHII_3d < -1e-9) | (xHII_3d > 1.0 + 1e-9))
@@ -522,18 +737,93 @@ if xHII_abs_idx is not None and field_test.shape[0] > xHII_abs_idx:
             xHII_shell_avg.append(float(np.mean(vals)))
     r_vals = np.array(r_vals)
     xHII_shell_avg = np.array(xHII_shell_avg)
+    for r_print, x_print in zip(r_vals, xHII_shell_avg):
+        print(
+        f"DEBUG shell r={r_print} "
+        f"xHII_avg={x_print:.8f}"
+     )
+    imax = np.argmax(xHII_shell_avg)
 
-    below_half = np.where(xHII_shell_avg < 0.5)[0]
-    if below_half.size > 0:
-        r_front_cells = r_vals[below_half[0]]
-        r_front_cgs = r_front_cells * dx_phys_cgs
-        print(f"  simulated front (x_HII=0.5) = {r_front_cells} cells "
-              f"= {r_front_cgs:.4e} cm = {r_front_cgs / axis_unit_scale:.4f} {axis_unit_name}")
-        print(f"  ratio simulated / analytic R_I(t) = "
-              f"{r_front_cgs / max(R_I_t_cgs, 1e-300):.4f}")
+    print(
+        "DEBUG shell peak radius/value =",
+        int(r_vals[imax]),
+        float(xHII_shell_avg[imax]),
+    )
+    # below_half = np.where(xHII_shell_avg < 0.5)[0]
+    # if below_half.size > 0:
+    #     r_front_cells = r_vals[below_half[0]]
+    #     print(
+    #         "DEBUG radius conversion =",
+    #         r_front_cells,
+    #         dx_phys_cgs,
+    #         r_front_cells * dx_phys_cgs,
+    #     )
+    #     r_front_cgs = r_front_cells * dx_phys_cgs
+    #     print(f"  simulated front (x_HII=0.5) = {r_front_cells} cells "
+    #           f"= {r_front_cgs:.4e} cm = {r_front_cgs / axis_unit_scale:.4f} {axis_unit_name}")
+    #     print(f"  ratio simulated / analytic R_I(t) = "
+    #           f"{r_front_cgs / max(R_I_t_cgs, 1e-300):.4f}")
+    # else:
+    #     print("  !! Ionization front has not reached x_HII < 0.5 anywhere in the box.")
+    above = np.where(xHII_shell_avg >= 0.5)[0]
+
+    if above.size == 0:
+        print(" !! Ionization front has not reached x_HII >= 0.5.")
     else:
-        print("  !! Ionization front has not reached x_HII < 0.5 anywhere in the box.")
+        i1 = above[-1]
 
+        if i1 >= len(r_vals) - 1:
+            r_front_cells = float(r_vals[i1])
+        else:
+            i2 = i1 + 1
+            r1 = float(r_vals[i1])
+            r2 = float(r_vals[i2])
+            x1 = float(xHII_shell_avg[i1])
+            x2 = float(xHII_shell_avg[i2])
+
+            if abs(x2 - x1) > 1e-14:
+                r_front_cells = r1 + (0.5 - x1) * (r2 - r1) / (x2 - x1)
+            else:
+                r_front_cells = r1
+
+        r_front_cgs = r_front_cells * dx_phys_cgs
+
+        print(
+            f" simulated interpolated front (x_HII=0.5) = "
+            f"{r_front_cells:.4f} cells = {r_front_cgs:.4e} cm"
+        )
+        print(
+            f" ratio simulated / analytic R_I(t) = "
+            f"{r_front_cgs / max(R_I_t_cgs, 1e-300):.4f}"
+        )
+        crossings = np.where(
+            (xHII_shell_avg[:-1] >= 0.5)
+            & (xHII_shell_avg[1:] < 0.5)
+        )[0]
+
+        if crossings.size > 0:
+            i = crossings[0]
+
+            r0 = r_vals[i]
+            r1 = r_vals[i + 1]
+            x0 = xHII_shell_avg[i]
+            x1 = xHII_shell_avg[i + 1]
+
+            r_front_cells = r0 + (0.5 - x0) * (r1 - r0) / (x1 - x0)
+            r_front_cgs = r_front_cells * dx_phys_cgs
+
+            print(
+                f"  simulated interpolated front (x_HII=0.5) = "
+                f"{r_front_cells:.4f} cells = {r_front_cgs:.4e} cm"
+            )
+            print(
+                f"  ratio simulated / analytic R_I(t) = "
+                f"{r_front_cgs / max(R_I_t_cgs, 1e-300):.4f}"
+            )
+        else:
+            print(
+            "  !! No crossing x_HII=0.5 found in the shell-averaged profile."
+            )
     fig, ax = plt.subplots(figsize=(7, 5))
     ax.plot(r_vals * dx_phys_cgs / axis_unit_scale, xHII_shell_avg,
             "o-", ms=3, color="cyan", label="simulated (shell avg)")

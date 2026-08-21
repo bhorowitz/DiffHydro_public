@@ -198,7 +198,8 @@ class HydrogenPhotoChemistryForce:
         expansion_factor: float = 1.0,
         energy_max_frac: float = 0.5,
         fixed_temperature_K: float | None = None,
-    ):
+       
+    ):  
         self.sf = stellar_force
         self.case = case.upper()
         self.collisional = bool(collisional)
@@ -366,15 +367,30 @@ class HydrogenPhotoChemistryForce:
         decay = 1.0 / (1.0 + D * dt_s)                            # facteur implicite
 
         # fraction de photons detruits sur dt : Delta t D / (1 + Delta t D)
-        absorbed_frac = jnp.minimum(D * dt_s * decay, self.max_frac)
-        N_abs = N_cgs * absorbed_frac
+        # absorbed_frac = jnp.minimum(D * dt_s * decay, self.max_frac)
+        N_safe = jnp.maximum(N_cgs, 0.0)
 
-        # --- ionisations que ces photons peuvent produire ------------------
+        absorbed_frac = jnp.minimum(D * dt_s * decay, self.max_frac)
+        N_abs = N_safe * absorbed_frac
+
+        # N_abs = N_cgs * absorbed_frac
+
+        # # --- ionisations que ces photons peuvent produire ------------------
+        # n_H_safe = jnp.maximum(n_H, hchem.tiny_like(sol))
+        # dx_photo_wanted = N_abs / n_H_safe
+        # headroom = self.max_frac * (1.0 - x)
+        # dx_photo = jnp.minimum(dx_photo_wanted, headroom)
+        # N_abs_eff = dx_photo * n_H
+        N_safe = jnp.maximum(N_cgs, 0.0)
+
+        N_abs = N_safe * absorbed_frac
+
         n_H_safe = jnp.maximum(n_H, hchem.tiny_like(sol))
         dx_photo_wanted = N_abs / n_H_safe
         headroom = self.max_frac * (1.0 - x)
         dx_photo = jnp.minimum(dx_photo_wanted, headroom)
-        N_abs_eff = dx_photo * n_H
+
+        N_abs_eff = jnp.minimum(dx_photo * n_H, N_safe)
 
         # --- ionisation collisionnelle et recombinaison --------------------
         dx_coll = ((1.0 - x) * hchem.beta_HI_cgs(T_K) * n_e * dt_s
@@ -392,7 +408,17 @@ class HydrogenPhotoChemistryForce:
         # --- champ radiatif, eq. (A6) / (A9) --------------------------------
         C = self.b_rec * (hchem.alpha_A_HII_cgs(T_K)
                         - hchem.alpha_B_HII_cgs(T_K)) * n_HII * n_e
-        dN_cgs = -N_abs_eff + dt_s * C * decay          # eq. (A9), Ndot=0
+        # dN_cgs = -N_abs_eff + dt_s * C * decay          # eq. (A9), Ndot=0
+        dN_cgs = -N_abs_eff + dt_s * C * decay
+        # N_new_cgs = jnp.maximum(N_safe + dN_cgs, 0.0)
+        # dN_cgs = N_new_cgs - N_cgs
+        # sol = view.add_photons_cgs(sol, dN_cgs)
+        N_abs_eff = jnp.minimum(N_abs_eff, N_safe)
+
+        dN_cgs = -N_abs_eff + dt_s * C * decay
+
+        N_new_cgs = jnp.maximum(N_safe + dN_cgs, 0.0)
+        dN_cgs = N_new_cgs - N_cgs
 
         sol = view.add_photons_cgs(sol, dN_cgs)
         sol = view.set_xHII(sol, x_new)
@@ -406,6 +432,29 @@ class HydrogenPhotoChemistryForce:
         )
         for j, F in zip(view.idx_F, (Fx, Fy, Fz)):
             sol = sol.at[j].set(F)
+        N_before = N_cgs
+        N_after = N_cgs + dN_cgs
 
+        N_abs_accounted = N_before - N_after
+        ionizations_from_photons = N_abs_eff
+
+        # jax.debug.print(
+        #     "photon residual = {r}",
+        #     r=jnp.max(jnp.abs(N_abs_accounted - ionizations_from_photons))
+        # )
         # ... (bloc thermodynamique inchange : chauffage/refroidissement) ...
+
+        if self.fixed_temperature_K is not None:
+            sol = view.set_temperature_K(
+                sol,
+                self.fixed_temperature_K,
+                x_HII=x_new,
+            )
+        # sol = sol.at[0].set(jnp.maximum(sol[0], 0.0))
+        # jax.debug.print(
+        #     "DEBUG chemistry N min/max = {nmin} / {nmax}",
+        #     nmin=jnp.min(sol),
+        #     nmax=jnp.max(sol),
+        # )
+
         return sol, params
