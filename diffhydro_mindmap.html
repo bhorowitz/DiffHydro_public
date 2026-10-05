@@ -1,0 +1,673 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DiffHydro — Execution Architecture</title>
+<style>
+  :root {
+    --bg: #0f1117;
+    --surface: #161b27;
+    --surface2: #1e2535;
+    --border: #2a3348;
+    --text: #e2e8f0;
+    --muted: #8896b0;
+    --faint: #4a5568;
+
+    /* Couleurs par module */
+    --c-hydro:   #38bdf8;  /* bleu ciel  — HYDRO DRIVER */
+    --c-conv:    #34d399;  /* vert       — CONVECTIVE FLUX */
+    --c-eq:      #f59e0b;  /* ambre      — EQUATION MANAGER */
+    --c-riemann: #a78bfa;  /* violet     — RIEMANN SOLVER */
+    --c-recon:   #fb923c;  /* orange     — RECONSTRUCTION */
+    --c-rt:      #f472b6;  /* rose       — BRANCHE RT */
+    --c-cond:    #60a5fa;  /* bleu       — CONDUCTIVE FLUX */
+
+    --arrow: #4a5568;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'JetBrains Mono', 'Fira Code', 'Courier New', monospace;
+    font-size: 12px;
+    min-height: 100vh;
+    padding: 28px 20px;
+  }
+
+  h1 {
+    text-align: center;
+    font-size: 18px;
+    font-weight: 700;
+    color: var(--text);
+    letter-spacing: 0.05em;
+    margin-bottom: 6px;
+  }
+  .subtitle {
+    text-align: center;
+    color: var(--muted);
+    font-size: 11px;
+    margin-bottom: 32px;
+  }
+
+  /* ── LÉGENDE ─────────────────────────────────── */
+  .legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    justify-content: center;
+    margin-bottom: 36px;
+  }
+  .legend-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    padding: 4px 10px;
+    border-radius: 20px;
+    font-size: 11px;
+  }
+  .legend-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+
+  /* ── LAYOUT PRINCIPAL ────────────────────────── */
+  .main-grid {
+    display: grid;
+    grid-template-columns: 1fr 2fr 1fr;
+    grid-template-rows: auto auto auto;
+    gap: 20px;
+    max-width: 1300px;
+    margin: 0 auto;
+    align-items: start;
+  }
+
+  /* ── COLONNES ────────────────────────────────── */
+  .col { display: flex; flex-direction: column; gap: 14px; }
+  .col-left  { grid-column: 1; }
+  .col-mid   { grid-column: 2; }
+  .col-right { grid-column: 3; }
+
+  /* ── SECTION ─────────────────────────────────── */
+  .section {
+    border-radius: 10px;
+    border: 1.5px solid var(--border);
+    overflow: hidden;
+  }
+  .section-header {
+    padding: 8px 12px;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .section-body { padding: 10px; display: flex; flex-direction: column; gap: 8px; }
+
+  /* ── NODE ────────────────────────────────────── */
+  .node {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 8px 10px;
+    position: relative;
+    transition: transform 0.15s, box-shadow 0.15s;
+    cursor: default;
+  }
+  .node:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px rgba(0,0,0,0.4);
+    border-color: #3a4a6a;
+    z-index: 10;
+  }
+  .node-name {
+    font-weight: 700;
+    font-size: 12px;
+    margin-bottom: 4px;
+  }
+  .node-role {
+    color: var(--muted);
+    font-size: 10px;
+    line-height: 1.4;
+    margin-bottom: 4px;
+  }
+  .node-io {
+    font-size: 10px;
+    color: var(--faint);
+    border-top: 1px solid var(--border);
+    padding-top: 4px;
+    margin-top: 4px;
+    line-height: 1.5;
+  }
+  .io-in  { color: #60a5fa; }
+  .io-out { color: #34d399; }
+
+  /* Badge "calls" */
+  .calls {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin-top: 5px;
+  }
+  .call-badge {
+    font-size: 9px;
+    padding: 2px 6px;
+    border-radius: 10px;
+    opacity: 0.85;
+    font-weight: 600;
+  }
+
+  /* Flèche de flux entre sections */
+  .arrow-block {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+    color: var(--faint);
+    font-size: 10px;
+    padding: 2px 0;
+  }
+  .arrow-line {
+    width: 2px;
+    height: 22px;
+    background: linear-gradient(to bottom, var(--arrow), transparent);
+  }
+  .arrow-head { font-size: 16px; color: var(--arrow); line-height: 1; }
+  .arrow-label { font-size: 10px; color: var(--muted); }
+
+  /* ── COULEURS PAR MODULE ─────────────────────── */
+  .hydro   .section-header { background: color-mix(in srgb, var(--c-hydro) 15%, var(--surface2)); color: var(--c-hydro); border-bottom: 1.5px solid color-mix(in srgb, var(--c-hydro) 40%, transparent); }
+  .conv    .section-header { background: color-mix(in srgb, var(--c-conv) 15%, var(--surface2));  color: var(--c-conv);  border-bottom: 1.5px solid color-mix(in srgb, var(--c-conv)  40%, transparent); }
+  .eq      .section-header { background: color-mix(in srgb, var(--c-eq) 15%, var(--surface2));    color: var(--c-eq);    border-bottom: 1.5px solid color-mix(in srgb, var(--c-eq)    40%, transparent); }
+  .riemann .section-header { background: color-mix(in srgb, var(--c-riemann) 15%, var(--surface2)); color: var(--c-riemann); border-bottom: 1.5px solid color-mix(in srgb, var(--c-riemann) 40%, transparent); }
+  .recon   .section-header { background: color-mix(in srgb, var(--c-recon) 15%, var(--surface2)); color: var(--c-recon); border-bottom: 1.5px solid color-mix(in srgb, var(--c-recon)  40%, transparent); }
+  .rt      .section-header { background: color-mix(in srgb, var(--c-rt) 15%, var(--surface2));    color: var(--c-rt);    border-bottom: 1.5px solid color-mix(in srgb, var(--c-rt)      40%, transparent); }
+  .cond    .section-header { background: color-mix(in srgb, var(--c-cond) 15%, var(--surface2));  color: var(--c-cond);  border-bottom: 1.5px solid color-mix(in srgb, var(--c-cond)    40%, transparent); }
+
+  .hydro   { border-color: color-mix(in srgb, var(--c-hydro) 40%, transparent); }
+  .conv    { border-color: color-mix(in srgb, var(--c-conv)  40%, transparent); }
+  .eq      { border-color: color-mix(in srgb, var(--c-eq)    40%, transparent); }
+  .riemann { border-color: color-mix(in srgb, var(--c-riemann) 40%, transparent); }
+  .recon   { border-color: color-mix(in srgb, var(--c-recon) 40%, transparent); }
+  .rt      { border-color: color-mix(in srgb, var(--c-rt)    40%, transparent); }
+  .cond    { border-color: color-mix(in srgb, var(--c-cond)  40%, transparent); }
+
+  .badge-hydro   { background: color-mix(in srgb, var(--c-hydro) 20%, transparent);   color: var(--c-hydro); }
+  .badge-conv    { background: color-mix(in srgb, var(--c-conv) 20%, transparent);    color: var(--c-conv); }
+  .badge-eq      { background: color-mix(in srgb, var(--c-eq) 20%, transparent);      color: var(--c-eq); }
+  .badge-riemann { background: color-mix(in srgb, var(--c-riemann) 20%, transparent); color: var(--c-riemann); }
+  .badge-recon   { background: color-mix(in srgb, var(--c-recon) 20%, transparent);   color: var(--c-recon); }
+  .badge-rt      { background: color-mix(in srgb, var(--c-rt) 20%, transparent);      color: var(--c-rt); }
+  .badge-cond    { background: color-mix(in srgb, var(--c-cond) 20%, transparent);    color: var(--c-cond); }
+
+  /* ── SÉPARATEUR EQUATION M1 ──────────────────── */
+  .eq-data {
+    background: var(--surface2);
+    border: 1px dashed var(--border);
+    border-radius: 6px;
+    padding: 6px 10px;
+    font-size: 10px;
+    color: var(--muted);
+    line-height: 1.7;
+  }
+  .eq-title { font-weight: 700; color: var(--text); margin-bottom: 3px; font-size: 11px; }
+
+  /* ── FLUX CENTRAL VERTICAL ───────────────────── */
+  .central-flow {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0;
+  }
+
+  /* ── SPLIT HORIZONTAL DANS LA COL MID ───────── */
+  .mid-split {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+  }
+
+  /* ── NOTEBOOK ENTRY ──────────────────────────── */
+  .notebook-entry {
+    background: var(--surface2);
+    border: 2px dashed color-mix(in srgb, var(--c-hydro) 50%, transparent);
+    border-radius: 10px;
+    padding: 10px 14px;
+    text-align: center;
+    font-weight: 700;
+    color: var(--c-hydro);
+    font-size: 12px;
+    letter-spacing: 0.05em;
+    margin-bottom: 4px;
+  }
+
+  /* ── TOOLTIP hover ───────────────────────────── */
+  .node[data-tip]:hover::after {
+    content: attr(data-tip);
+    position: absolute;
+    top: -32px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: #1e2535;
+    border: 1px solid #3a4a6a;
+    color: var(--text);
+    font-size: 10px;
+    padding: 3px 8px;
+    border-radius: 5px;
+    white-space: nowrap;
+    z-index: 100;
+    pointer-events: none;
+  }
+</style>
+</head>
+<body>
+
+<h1>⚡ DiffHydro — Execution Architecture (Blast)</h1>
+<p class="subtitle">Mind map of classes, functions, and data flows</p>
+
+<!-- LÉGENDE -->
+<div class="legend">
+  <div class="legend-item"><div class="legend-dot" style="background:var(--c-hydro)"></div>A — Hydro Driver</div>
+  <div class="legend-item"><div class="legend-dot" style="background:var(--c-conv)"></div>B — Convective Flux</div>
+  <div class="legend-item"><div class="legend-dot" style="background:var(--c-eq)"></div>C — Equation Manager</div>
+  <div class="legend-item"><div class="legend-dot" style="background:var(--c-riemann)"></div>D — Riemann Solver</div>
+  <div class="legend-item"><div class="legend-dot" style="background:var(--c-recon)"></div>E — Reconstruction</div>
+  <div class="legend-item"><div class="legend-dot" style="background:var(--c-rt)"></div>F — RT Branch</div>
+  <div class="legend-item"><div class="legend-dot" style="background:var(--c-cond)"></div>G — Conductive Flux</div>
+</div>
+
+<!-- LAYOUT PRINCIPAL -->
+<div class="main-grid">
+
+  <!-- ══════════════════════════════════════════════════════════
+       LEFT COLUMN — Equation Manager + Reconstruction
+  ═══════════════════════════════════════════════════════════ -->
+  <div class="col col-left">
+
+    <!-- EQUATION MANAGER -->
+    <div class="section eq">
+      <div class="section-header">⚙️ C — Equation Manager</div>
+      <div class="section-body">
+
+        <div class="node" data-tip="Called throughout the pipeline">
+          <div class="node-name" style="color:var(--c-eq)">get_primitives_from_conservatives</div>
+          <div class="node-role">Converts U → W (conservatives → primitives)</div>
+          <div class="node-io">
+            <span class="io-in">↳ IN: conservatives (n_cons, ...)</span><br>
+            <span class="io-out">↳ OUT: primitives (n_cons, ...)</span>
+          </div>
+        </div>
+
+        <div class="node">
+          <div class="node-name" style="color:var(--c-eq)">get_conservatives_from_primitives</div>
+          <div class="node-role">Converts W → U (primitives → conservatives)</div>
+          <div class="node-io">
+            <span class="io-in">↳ IN: primitives</span><br>
+            <span class="io-out">↳ OUT: conservatives</span>
+          </div>
+        </div>
+
+        <div class="node">
+          <div class="node-name" style="color:var(--c-eq)">get_fluxes_xi</div>
+          <div class="node-role">Physical flux F(U) along an axis<br>
+            <code>[ρu, ρu²+p, ρuv, ρuw, u(E+p)]</code><br>
+            + passives: cons_p × u_axis</div>
+          <div class="node-io">
+            <span class="io-in">↳ IN: primitives, conservatives, axis</span><br>
+            <span class="io-out">↳ OUT: flux_physique</span>
+          </div>
+        </div>
+
+        <div class="node">
+          <div class="node-name" style="color:var(--c-eq)">get_signal_speed / get_speed_of_sound / get_wavespeeds_xi</div>
+          <div class="node-role">Acoustic speed c_s = √(γp/ρ)<br>
+            Used for CFL and solvers</div>
+          <div class="node-io">
+            <span class="io-in">↳ IN: p, rho</span><br>
+            <span class="io-out">↳ OUT: c_s</span>
+          </div>
+        </div>
+
+        <!-- Memory layout -->
+        <div class="eq-data">
+          <div class="eq-title">📦 Memory layout (n_cons)</div>
+          <div><span style="color:var(--c-eq)">slots 0..4</span> — active [ρ, vx, vy, vz, p/E]</div>
+          <div><span style="color:var(--c-conv)">slots 5..n_cons</span> — passive scalars s_k (ρ·s_k stored)</div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- RECONSTRUCTION -->
+    <div class="section recon">
+      <div class="section-header">🔬 E — Reconstruction (PLM / MUSCL / WENO / TENO / PPM)</div>
+      <div class="section-body">
+        <div class="node">
+          <div class="node-name" style="color:var(--c-recon)">PLM.reconstruct_xi</div>
+          <div class="node-role">Extrapolates left/right states at interfaces<br>
+            j=0 → left face (L), j=1 → right face (R)<br>
+            Applies a limiter (VanLeer, MC, ...)</div>
+          <div class="node-io">
+            <span class="io-in">↳ IN: buffer (n_cons,...), axis, j</span><br>
+            <span class="io-out">↳ OUT: state at interface</span>
+          </div>
+        </div>
+        <div class="eq-data">
+          <div class="eq-title">Available orders and limiters</div>
+          WENO1 (order 1, positivity fallback)<br>
+          PLM (order 2, configurable limiter)<br>
+          MUSCL3 (order 3)<br>
+          TENO5 / TENO5_alt (order 5)<br>
+          PPM (order 4, piecewise parabolic)
+        </div>
+      </div>
+    </div>
+
+  </div><!-- /col-left -->
+
+
+  <!-- ══════════════════════════════════════════════════════════
+       MIDDLE COLUMN — Hydro Driver (main execution flow)
+  ═══════════════════════════════════════════════════════════ -->
+  <div class="col col-mid">
+
+    <!-- NOTEBOOK ENTRY -->
+    <div class="notebook-entry">📓 Notebook — run cell</div>
+
+    <div class="arrow-block">
+      <div class="arrow-line"></div>
+      <div class="arrow-head">▼</div>
+      <div class="arrow-label">calls</div>
+    </div>
+
+    <!-- HYDRO DRIVER -->
+    <div class="section hydro">
+      <div class="section-header">🚀 A — Hydro Driver <span style="font-size:10px; opacity:0.6">hydro_core.py</span></div>
+      <div class="section-body">
+
+        <div class="node">
+          <div class="node-name" style="color:var(--c-hydro)">evolve_till_time</div>
+          <div class="node-role">Time loop until t_target<br>
+            Uses jax.lax.while_loop (JIT-compiled)</div>
+          <div class="node-io">
+            <span class="io-in">↳ IN: fields₀, params, t_target</span><br>
+            <span class="io-out">↳ OUT: fields_f, params_f, t_f, dt_hist, n_steps</span>
+          </div>
+          <div class="calls">
+            <span class="call-badge badge-hydro">→ hydrostep_adapt</span>
+          </div>
+        </div>
+        <div class="node" style="border-color:color-mix(in srgb,var(--c-hydro) 30%,transparent); font-size:10px;">
+          <div class="node-name" style="color:var(--c-hydro); font-size:11px;">Other evolve methods</div>
+          <div class="node-role">
+            <code>evolve_with_callbacks</code> — step-level callbacks + snapshots<br>
+            <code>evolve_with_dt_schedule</code> — fixed dt array input<br>
+            <code>evolve</code> — simple fixed n_steps loop<br>
+            <code>evolve_memory_efficient</code> — gradient checkpointing
+          </div>
+        </div>
+        <div class="arrow-block"><div class="arrow-line"></div><div class="arrow-head">▼</div></div>
+
+        <div class="node">
+          <div class="node-name" style="color:var(--c-hydro)">hydrostep_adapt</div>
+          <div class="node-role">Computes adaptive dt then advances one full step</div>
+          <div class="node-io">
+            <span class="io-in">↳ IN: i, (fields, params), t</span><br>
+            <span class="io-out">↳ OUT: (fields_new, params_new), dt</span>
+          </div>
+          <div class="calls">
+            <span class="call-badge badge-hydro">→ timestep</span>
+            <span class="call-badge badge-hydro">→ _hydrostep</span>
+          </div>
+        </div>
+
+        <div class="mid-split">
+          <div class="node">
+            <div class="node-name" style="color:var(--c-hydro)">timestep</div>
+            <div class="node-role">Global CFL via min over all fluxes/forces</div>
+            <div class="node-io">
+              <span class="io-in">↳ IN: fields</span><br>
+              <span class="io-out">↳ OUT: dt</span>
+            </div>
+            <div class="calls">
+              <span class="call-badge badge-conv">→ flux.timestep</span>
+              <span class="call-badge badge-cond">→ force.timestep</span>
+            </div>
+          </div>
+          <div class="node">
+            <div class="node-name" style="color:var(--c-hydro)">_hydrostep</div>
+            <div class="node-role">Numerical advancement of one step<br>(forcing + spatial solver)</div>
+            <div class="node-io">
+              <span class="io-in">↳ IN: i, (fields, params), dt</span><br>
+              <span class="io-out">↳ OUT: fields_new, params_new</span>
+            </div>
+            <div class="calls">
+              <span class="call-badge badge-hydro">→ forcing</span>
+              <span class="call-badge badge-hydro">→ mol_solve_step</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="arrow-block"><div class="arrow-line"></div><div class="arrow-head">▼</div></div>
+
+        <div class="node">
+          <div class="node-name" style="color:var(--c-hydro)">mol_solve_step</div>
+          <div class="node-role">Time integration via unsplit RHS<br>
+            Wraps the integrator (SSPRK3, Euler, ...)</div>
+          <div class="node-io">
+            <span class="io-in">↳ IN: sol, dt, params</span><br>
+            <span class="io-out">↳ OUT: sol_new</span>
+          </div>
+          <div class="calls">
+            <span class="call-badge badge-hydro">→ integrator(rhs_unsplit, ...)</span>
+          </div>
+        </div>
+
+        <div class="arrow-block"><div class="arrow-line"></div><div class="arrow-head">▼</div></div>
+
+        <div class="node">
+          <div class="node-name" style="color:var(--c-hydro)">rhs_unsplit</div>
+          <div class="node-role">Assembles −∇·F over x,y,z (Euler RHS)<br>
+            Applies boundary conditions + halos</div>
+          <div class="node-io">
+            <span class="io-in">↳ IN: sol, params</span><br>
+            <span class="io-out">↳ OUT: ∂U/∂t = −Σ_axis (F_{i+1/2} − F_{i-1/2}) / dx</span>
+          </div>
+          <div class="calls">
+            <span class="call-badge badge-hydro">→ boundary.impose</span>
+            <span class="call-badge badge-hydro">→ flux(axis)</span>
+            <span class="call-badge badge-hydro">→ roll_with_halo</span>
+          </div>
+        </div>
+
+        <div class="arrow-block"><div class="arrow-line"></div><div class="arrow-head">▼</div></div>
+
+        <div class="node">
+          <div class="node-name" style="color:var(--c-hydro)">flux  <span style="font-weight:400;font-size:10px;color:var(--muted)">(hydro_core.py:364)</span></div>
+          <div class="node-role">Sum of all active fluxes along one axis<br>
+            F_total = F_conv + F_cond + F_RT + ...</div>
+          <div class="node-io">
+            <span class="io-in">↳ IN: sol, axis, params</span><br>
+            <span class="io-out">↳ OUT: F_total</span>
+          </div>
+          <div class="calls">
+            <span class="call-badge badge-conv">→ ConvectiveFlux.flux</span>
+            <span class="call-badge badge-cond">→ ConductiveFlux.flux</span>
+            <span class="call-badge badge-rt">→ CF_RT.flux</span>
+          </div>
+        </div>
+
+      </div>
+    </div><!-- /hydro section -->
+
+    <!-- FLÈCHE BASSE vers Convective -->
+    <div class="arrow-block">
+      <div class="arrow-line"></div>
+      <div class="arrow-head">▼</div>
+      <div class="arrow-label">delegates to</div>
+    </div>
+
+    <!-- CONVECTIVE + CONDUCTIVE côte à côte -->
+    <div class="mid-split">
+
+      <div class="section conv">
+        <div class="section-header">📐 B — Convective Flux</div>
+        <div class="section-body">
+          <div class="node">
+            <div class="node-name" style="color:var(--c-conv)">ConvectiveFlux.flux</div>
+            <div class="node-role">Full pipeline:<br>
+              prim → reconstruction → Riemann → F_num</div>
+            <div class="node-io">
+              <span class="io-in">↳ IN: sol, ax, params, flux_prev</span><br>
+              <span class="io-out">↳ OUT: F_interface</span>
+            </div>
+            <div class="calls">
+              <span class="call-badge badge-eq">eq.conversions</span>
+              <span class="call-badge badge-recon">recon.reconstruct_xi</span>
+              <span class="call-badge badge-riemann">solver.solve_riemann</span>
+            </div>
+          </div>
+          <div class="node">
+            <div class="node-name" style="color:var(--c-conv)">compute_positivity_preserving</div>
+            <div class="node-role">Corrects ρ&lt;0 or p&lt;0<br>
+              with WENO1 (order 1) as fallback</div>
+          </div>
+          <div class="node">
+            <div class="node-name" style="color:var(--c-conv)">timestep (convective CFL)</div>
+            <div class="node-role">dt ∝ dx / (|u|+c_s)<br>Constraint <strong>linear</strong> in dx</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="section cond">
+        <div class="section-header">🌡️ G — Conductive Flux</div>
+        <div class="section-body">
+          <div class="node">
+            <div class="node-name" style="color:var(--c-cond)">ConductiveFlux.flux</div>
+            <div class="node-role">Discretized Fourier's law<br>
+              q = −κ ∇T on harmonic face<br>
+              Only affects the energy slot</div>
+            <div class="node-io">
+              <span class="io-in">↳ IN: sol, axis, params</span><br>
+              <span class="io-out">↳ OUT: energy flux only</span>
+            </div>
+          </div>
+          <div class="node">
+            <div class="node-name" style="color:var(--c-cond)">timestep (diffusive CFL)</div>
+            <div class="node-role">dt ∝ dx² / κ<br>Constraint <strong>quadratic</strong> in dx<br>⚠️ very restrictive at high resolution</div>
+          </div>
+        </div>
+      </div>
+
+    </div><!-- /mid-split -->
+
+  </div><!-- /col-mid -->
+
+
+  <!-- ══════════════════════════════════════════════════════════
+       RIGHT COLUMN — Riemann + RT Branch
+  ═══════════════════════════════════════════════════════════ -->
+  <div class="col col-right">
+
+    <!-- RIEMANN SOLVER -->
+    <div class="section riemann">
+      <div class="section-header">⚡ D — Riemann Solver</div>
+      <div class="section-body">
+
+        <div class="node">
+          <div class="node-name" style="color:var(--c-riemann)">solve_riemann_problem_xi</div>
+          <div class="node-role">Generic entry, dispatches by equation_type<br>
+            → single_phase / MHD / RT</div>
+          <div class="node-io">
+            <span class="io-in">↳ IN: W_L, W_R, U_L, U_R, axis</span><br>
+            <span class="io-out">↳ OUT: (F_num, aux1, aux2)</span>
+          </div>
+        </div>
+
+        <div class="node">
+          <div class="node-name" style="color:var(--c-riemann)">LaxFriedrichs._solve_riemann_problem_xi</div>
+          <div class="node-role">Rusanov / Lax-Friedrichs:<br>
+            F = ½(F_L+F_R) − ½cα(U_R−U_L)<br>
+            α = max(|u|+c_s) — very stable, diffusive</div>
+          <div class="node-io">
+            <span class="io-in">↳ IN: W_L, W_R, U_L, U_R, axis</span><br>
+            <span class="io-out">↳ OUT: F_num, None, None</span>
+          </div>
+          <div class="calls">
+            <span class="call-badge badge-eq">→ eq.get_fluxes_xi (×2)</span>
+            <span class="call-badge badge-eq">→ eq.get_speed_of_sound</span>
+          </div>
+        </div>
+
+        <div class="eq-data">
+          <div class="eq-title">Solver comparison</div>
+          <span style="color:var(--c-riemann)">Lax-Friedrichs / Rusanov</span> — simple, robust, diffusive<br>
+          <span style="color:var(--c-riemann)">LaxFriedrichs_safe</span> — clipped for guaranteed positivity<br>
+          <span style="color:var(--c-hydro)">HLLC / HLLC_RT</span> — accurate for shocks and contacts<br>
+          <span style="color:var(--c-conv)">HLL</span> — two-wave estimate, cheaper than HLLC<br>
+          <span style="color:var(--c-rt)">HLL_MHD / HLLD_MHD</span> — MHD-aware, resolves Alfvén waves
+        </div>
+
+      </div>
+    </div>
+
+    <!-- BRANCHE RT -->
+    <div class="section rt">
+      <div class="section-header">☢️ F — Radiative Transfer Branch (RT)</div>
+      <div class="section-body">
+
+        <div class="node">
+          <div class="node-name" style="color:var(--c-rt)">ConvectiveFlux_RT.flux</div>
+          <div class="node-role">Same pipeline as ConvectiveFlux<br>
+            but with eq_RT and solver_RT</div>
+          <div class="node-io">
+            <span class="io-in">↳ IN: sol, ax, params, flux_prev</span><br>
+            <span class="io-out">↳ OUT: F_interface_RT</span>
+          </div>
+        </div>
+
+        <div class="node">
+          <div class="node-name" style="color:var(--c-rt)">EquationManager_RT</div>
+          <div class="node-role">RT variables:<br>
+            active: [ρ, vx, vy, vz, p]<br>
+            passive: [E_r, F_rx, F_ry, F_rz]</div>
+          <div class="node-io">
+            <span class="io-out">↳ get_fluxes_xi : flux M1<br>
+            c²·P_rad can be added here</span>
+          </div>
+        </div>
+
+        <div class="node">
+          <div class="node-name" style="color:var(--c-rt)">LaxFriedrichs_RT._solve_riemann_xi</div>
+          <div class="node-role">Same LF formula but on RT variables<br>
+            α_RT = max(|u|+c_rad)</div>
+        </div>
+
+        <!-- Système M1 -->
+        <div class="eq-data">
+          <div class="eq-title">M1 System (moments 0 and 1)</div>
+          ∂_t E_r + ∇·F_r = κ_a(a_r T⁴ − E_r)<br>
+          ∂_t F_r + c²∇·P_r = −(κ_a+κ_s)F_r<br>
+          <br>
+          <span style="color:var(--c-rt)">Levermore closure:</span><br>
+          𝔻 = [(1−χ)/2]𝕀 + [(3χ−1)/2]n̂⊗n̂<br>
+          χ(f) = (3+4f²)/(5+2√(4−3f²))
+        </div>
+
+      </div>
+    </div>
+
+  </div><!-- /col-right -->
+
+</div><!-- /main-grid -->
+
+</body>
+</html>

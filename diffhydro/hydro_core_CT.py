@@ -28,10 +28,13 @@ class hydro:
                  maxjit=True,
                  use_mol=True,
                  use_ct=True,
-                 integrator="RK2"):
+                 integrator="RK2",
+                 dx=1.0,
+                 debug_fixed_dt: float | None = None):
         #parameters that are held constant per run (i.e. probably don't want to take derivatives with respect to...)
         self.splitting_schemes = splitting_schemes #strang splitting for x,y,z sweeps
         self.max_dt = max_dt
+        self.debug_fixed_dt = debug_fixed_dt
         self.boundary = boundary
         #supersteps, each superstep has len(splitting_schemes) time steps
         self.n_super_step = n_super_step
@@ -40,13 +43,13 @@ class hydro:
         self.fluxes = fluxes or []
         self.forces = forces or []
         self.maxjit = maxjit
-        self.dx_o = 1.0
+        self.dx_o = dx
         self.timescale = jnp.zeros(self.n_super_step)
         self.use_mol = use_mol
         self.integrator = INTEGRATOR_DICT[integrator]  # callable
         self._integrator_name = integrator
         self.use_ct = use_ct
-        print("using CT?", use_ct)
+        # print("using CT?", use_ct)
 
         # indices expected by EquationManagerMHD; leave generic
         self.iBx, self.iBy, self.iBz = 4, 5, 6  # if Euler run, these rows may not exist
@@ -124,7 +127,12 @@ class hydro:
         fields, params, t = state
         ttt = self.timestep(fields)
         ttt = jnp.minimum(self.max_dt, ttt)
-        dt = ttt
+        if self.debug_fixed_dt is not None:#debug option by the chat
+            fixed_dt = jnp.array(self.debug_fixed_dt, dtype=ttt.dtype)
+            dt = jnp.minimum(ttt, fixed_dt)
+            jax.debug.print("hydro_core_CT: debug_fixed_dt active, dt = {}", dt)
+        else:
+            dt = ttt
         fields2, params2 = self._hydrostep(i, (fields, params), dt)  # unchanged _hydrostep
         return (fields2, params2, t + dt)
 
@@ -400,5 +408,7 @@ class hydro:
             "integrator": self._integrator_name,
             "n_super_step": self.n_super_step,
             "max_dt": self.max_dt,
+            # sinon self.dx_o retombe a 1.0 apres un round-trip pytree
+            "dx": self.dx_o,
         }  # static values
         return (children, aux_data)

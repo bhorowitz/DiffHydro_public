@@ -93,7 +93,7 @@ class PeriodicBoundarySimple:
         self.field_spec = field_spec if field_spec is not None else P(None, 'x', 'y', 'z')
         self.roll_fn = roll_fn  # Pass in hydro.roll_with_halo
     
-    def impose(self, sol, axis):
+    def impose(self, sol, axis, width=1):
         """
         For periodic BCs with multi-GPU, just ensure halos are synced.
         The actual periodic wrapping is handled by roll operations in the flux computation.
@@ -142,7 +142,7 @@ class OutflowBoundary:
         self.pmesh_shape = pmesh_shape
         self.field_spec = field_spec if field_spec is not None else P(None, 'x', 'y', 'z')
     
-    def impose(self, sol, axis):
+    def impose(self, sol, axis, width=1):
         """
         Apply outflow BCs with proper multi-GPU handling.
         """

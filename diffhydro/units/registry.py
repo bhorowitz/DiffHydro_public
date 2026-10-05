@@ -48,6 +48,7 @@ class UnitParser:
         "kg/m^3": (1.0e-3, "density"),
         "dyne/cm^2": (1.0, "pressure"),
         "erg/cm^3": (1.0, "energy_density"),
+        "erg/s/cm^2": (1.0, "radiation_flux"),
         "K": (1.0, "temperature"),
     }
 
@@ -59,6 +60,7 @@ class UnitParser:
         "density": "g/cm^3",
         "pressure": "dyne/cm^2",
         "energy_density": "erg/cm^3",
+        "radiation_flux": "erg/s/cm^2",
         "temperature": "K",
     }
 
@@ -98,6 +100,22 @@ class UnitParser:
         except KeyError as exc:
             raise ValueError(f"Unknown dimension '{dim}'.") from exc
 
+    def units_for_dimension(self, dim: str) -> list[tuple[str, float]]:
+        """Return [(unit_name, cgs_factor), ...] for every known unit of
+        the given dimension, sorted by increasing cgs factor.
+
+        Used by callers that need to auto-select a human-readable display
+        unit (e.g. picking 'km' instead of 'cm' for a large box, or 'cm'
+        instead of 'km' for a small one) without hardcoding a unit list
+        that could drift out of sync with _UNIT_TABLE.
+        """
+        entries = [
+            (unit, factor)
+            for unit, (factor, d) in self._UNIT_TABLE.items()
+            if d == dim
+        ]
+        return sorted(entries, key=lambda item: item[1])
+
     def _unit_info(self, unit: str) -> tuple[float, str]:
         try:
             return self._UNIT_TABLE[unit]
@@ -108,4 +126,3 @@ class UnitParser:
     @staticmethod
     def _normalize_unit(unit: str) -> str:
         return "".join(unit.strip().split())
-

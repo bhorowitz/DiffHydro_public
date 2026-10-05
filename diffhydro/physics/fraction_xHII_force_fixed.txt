@@ -1,0 +1,54 @@
+Dans HydrogenPhotoChemistryForce.__init__, remplace :
+
+        self.debug_absorbed_cgs = 0.0,
+
+par rien : supprime complètement cette ligne.
+
+Dans force(), remplace tout le bloc depuis :
+
+        # --- champ radiatif, eq. (A6) / (A9) --------------------------------
+
+jusqu'avant :
+
+        # flux, eq. (A8)/(A10) : F^{t+dt} = F^t / (1 + dt D)
+
+par :
+
+        # --- champ radiatif, eq. (A6) / (A9) -------------------------------
+        C = self.b_rec * (
+            hchem.alpha_A_HII_cgs(T_K)
+            - hchem.alpha_B_HII_cgs(T_K)
+        ) * n_HII * n_e
+
+        N_abs_eff = jnp.minimum(N_abs_eff, N_safe)
+        dN_cgs = -N_abs_eff + dt_s * C * decay
+
+        N_new_cgs = jnp.maximum(N_safe + dN_cgs, 0.0)
+        dN_cgs = N_new_cgs - N_cgs
+
+        sol = view.add_photons_cgs(sol, dN_cgs)
+        sol = view.set_xHII(sol, x_new)
+
+Ne mets aucun float(), aucune += et aucun attribut Python mutable dans force().
+
+Supprime également les diagnostics suivants s'ils sont présents dans force() :
+
+        self.debug_absorbed_cgs += float(...)
+        jax.debug.print(...)
+
+Garde le bloc de flux :
+
+        for j in view.idx_F:
+            sol = sol.at[j].multiply(decay)
+        Fx, Fy, Fz = hchem.limit_m1_flux_cone(
+            sol[view.idx_N], *[sol[j] for j in view.idx_F],
+            c=self.sf.light_speed, f_max=self.f_max,
+        )
+        for j, F in zip(view.idx_F, (Fx, Fy, Fz)):
+            sol = sol.at[j].set(F)
+
+Puis garde le retour :
+
+        return sol, params
+
+La virgule dans self.debug_absorbed_cgs = 0.0, crée en plus un tuple Python, mais le problème bloquant est float() dans la boucle JAX.

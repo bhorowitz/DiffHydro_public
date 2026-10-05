@@ -254,27 +254,82 @@ class MUSCL3:
     
         """
         eps_ad = 1e-6
+        tiny = 1e-12
         if j == 0: #left
                 delta_central = jnp.roll(buffer,self.f_sten(2,j), axis=axis) - jnp.roll(buffer,self.f_sten(1,j), axis=axis)
                 delta_upwind =  jnp.roll(buffer,self.f_sten(1,j), axis=axis) - jnp.roll(buffer,self.f_sten(0,j), axis=axis)
+                den_a = delta_upwind + eps_ad
+                den_a = jnp.where(jnp.abs(den_a) < tiny, jnp.where(den_a >= 0.0, tiny, -tiny), den_a)
+                den_b = delta_upwind + eps_ad
+                den_b = jnp.where(jnp.abs(den_b) < tiny, jnp.where(den_b >= 0.0, tiny, -tiny), den_b)
                 r = jnp.where(
                     delta_upwind >= eps_ad,
-                    delta_central / (delta_upwind + eps_ad), 
-                    (delta_central + eps_ad) / (delta_upwind + eps_ad))
+                    delta_central / den_a,
+                    (delta_central + eps_ad) / den_b)
+                r = jnp.nan_to_num(r, nan=0.0, posinf=0.0, neginf=0.0)
                 limiter = self.limiter(r)
                 cell_state_xi_j = jnp.roll(buffer,0,axis=axis) + 0.5 * limiter * (jnp.roll(buffer,-1,axis=axis) - jnp.roll(buffer,0,axis=axis)) 
         if j == 1: #right
                 delta_central = -1* jnp.roll(buffer,self.f_sten(2,j), axis=axis) + jnp.roll(buffer,self.f_sten(1,j), axis=axis)
                 delta_upwind =  -1* jnp.roll(buffer,self.f_sten(1,j), axis=axis) + jnp.roll(buffer,self.f_sten(0,j), axis=axis)
-    
+                den_a = delta_upwind + eps_ad
+                den_a = jnp.where(jnp.abs(den_a) < tiny, jnp.where(den_a >= 0.0, tiny, -tiny), den_a)
+                den_b = delta_upwind + eps_ad**2
+                den_b = jnp.where(jnp.abs(den_b) < tiny, jnp.where(den_b >= 0.0, tiny, -tiny), den_b)
                 r = jnp.where(
                     delta_upwind >= eps_ad**2, 
-                    delta_central / (delta_upwind + eps_ad), 
-                    (delta_central + eps_ad) / (delta_upwind + eps_ad**2))
+                    delta_central / den_a,
+                    (delta_central + eps_ad) / den_b)
+                r = jnp.nan_to_num(r, nan=0.0, posinf=0.0, neginf=0.0)
                 limiter = self.limiter(r)
                 cell_state_xi_j = jnp.roll(buffer,-1,axis=axis) - 0.5 * limiter * (jnp.roll(buffer,-2,axis=axis) - jnp.roll(buffer,-1,axis=axis))
         return cell_state_xi_j
 
+# # old version of Ben
+# class MUSCL3:
+#     def __init__(self,limiter: str):
+#         self.limiter = LIMITER_DICT[limiter]
+        
+#     def f_sten(self,idd,j):
+#         #clunky, can probably refactor out
+#         return idd-j-1
+        
+#     def reconstruct_xi(self,
+#                 buffer: Array,
+#                 axis: int,
+#                 j: int = None,
+#             ) -> Array:
+        
+#         """MUSCL-type reconstruction with different limiters.
+    
+#         psi_{i+1/2}^L = psi_i     + 0.5 * phi(r_L) * (psi_{i} - psi_{i-1})
+#         psi_{i+1/2}^R = psi_{i+1} - 0.5 * phi(r_R) * (psi_{i+2} - psi_{i+1})
+    
+#         r_L = (phi_{i+1} - phi_{i}) / (phi_{i} - phi_{i-1})
+#         r_R = (phi_{i+1} - phi_{i}) / (phi_{i+2} - phi_{i+1})
+    
+#         """
+#         eps_ad = 1e-6
+#         if j == 0: #left
+#                 delta_central = jnp.roll(buffer,self.f_sten(2,j), axis=axis) - jnp.roll(buffer,self.f_sten(1,j), axis=axis)
+#                 delta_upwind =  jnp.roll(buffer,self.f_sten(1,j), axis=axis) - jnp.roll(buffer,self.f_sten(0,j), axis=axis)
+#                 r = jnp.where(
+#                     delta_upwind >= eps_ad,
+#                     delta_central / (delta_upwind + eps_ad), 
+#                     (delta_central + eps_ad) / (delta_upwind + eps_ad))
+#                 limiter = self.limiter(r)
+#                 cell_state_xi_j = jnp.roll(buffer,0,axis=axis) + 0.5 * limiter * (jnp.roll(buffer,-1,axis=axis) - jnp.roll(buffer,0,axis=axis)) 
+#         if j == 1: #right
+#                 delta_central = -1* jnp.roll(buffer,self.f_sten(2,j), axis=axis) + jnp.roll(buffer,self.f_sten(1,j), axis=axis)
+#                 delta_upwind =  -1* jnp.roll(buffer,self.f_sten(1,j), axis=axis) + jnp.roll(buffer,self.f_sten(0,j), axis=axis)
+    
+#                 r = jnp.where(
+#                     delta_upwind >= eps_ad**2, 
+#                     delta_central / (delta_upwind + eps_ad), 
+#                     (delta_central + eps_ad) / (delta_upwind + eps_ad**2))
+#                 limiter = self.limiter(r)
+#                 cell_state_xi_j = jnp.roll(buffer,-1,axis=axis) - 0.5 * limiter * (jnp.roll(buffer,-2,axis=axis) - jnp.roll(buffer,-1,axis=axis))
+#         return cell_state_xi_j
 
 class PLM:
     """
@@ -305,6 +360,7 @@ class PLM:
         qR_iphalf = qip1 - 0.5 * jnp.roll(dq, -1, axis=axis)
 
         return qL_iphalf if j == 0 else qR_iphalf
+    
     
 class PPM:
     """
@@ -427,3 +483,272 @@ class PPM:
             return qR_iphalf
         else:
             raise ValueError("PPM.reconstruct_xi expects j in {0,1}")
+
+class PPM_CW:
+    """
+    A more "PPM-like" (Colella–Woodward inspired) reconstruction than the previous class:
+
+    - Fixes r-ratio gating: uses |den| > eps (not den > eps), with sign-safe division.
+    - Uses MUSCL/TVD-style limited slopes for edge prediction.
+    - Applies a classic PPM parabolic monotonicity limiter (needs both edges of each cell).
+    - Optional (conservative) contact steepening hook retained, but safer axis->velocity mapping.
+    - API matches existing convention:
+        j=0 -> LEFT state at i+1/2 (from cell i)
+        j=1 -> RIGHT state at i+1/2 (from cell i+1)
+
+    Notes:
+    - This is still a *spatial* PPM-style reconstruction (no characteristic tracing / time-centering).
+      Add Hancock/CTU style predictor, this becomes closer to full PPM.
+    """
+
+    def __init__(
+        self,
+        limiter: str = "MC",
+        eps_ratio: float = 1e-12,
+        use_ppm_monotone: bool = True,
+        use_bounds_clip: bool = True,
+        use_curvature: bool = True,
+        steepen: bool = False,
+        rho_idx: int | None = None,
+        p_idx: int | None = None,
+        vel_ids: tuple[int, int, int] | None = None,
+        chi0: float = 0.5,
+        chi1: float = 1.5,
+        beta: float = 0.25,
+        eps_steepen: float = 1e-12,
+    ):
+        if limiter not in LIMITER_DICT:
+            raise KeyError(
+                f"Unknown limiter '{limiter}'. Available: {list(LIMITER_DICT.keys())}"
+            )
+
+        self.limiter_fun      = LIMITER_DICT[limiter]
+        self.eps_ratio        = eps_ratio
+        self.use_ppm_monotone = use_ppm_monotone
+        self.use_bounds_clip  = use_bounds_clip
+        self.use_curvature    = use_curvature
+        self.steepen          = steepen
+        self.rho_idx          = rho_idx
+        self.p_idx            = p_idx
+        self.vel_ids          = vel_ids
+        self.chi0             = chi0
+        self.chi1             = chi1
+        self.beta             = beta
+        self.eps_steepen      = eps_steepen
+
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _safe_div(num: Array, den: Array, eps: float) -> Array:
+        """
+        Sign-safe division for limiter ratios:
+          if |den| > eps: num/den
+          else:           num/(den + sign(den)*eps), with sign(0)=+1
+        """
+        sgn      = jnp.where(den >= 0.0, 1.0, -1.0)
+        den_safe = jnp.where(jnp.abs(den) > eps, den, den + sgn * eps)
+        return num / den_safe
+
+    # ------------------------------------------------------------------
+
+    def _limited_slope(self, qm1: Array, q: Array, qp1: Array) -> Array:
+        """
+        MUSCL-style limited slope using phi(r) * backward_difference:
+          r     = (qp1 - q) / (q - qm1)
+          slope = phi(r) * (q - qm1)
+        """
+        dq_b = q   - qm1
+        dq_f = qp1 - q
+        # jax.debug.print("nan dqp = {}", jnp.any(jnp.isnan(dq_f)))
+        # jax.debug.print("nan dqm = {}", jnp.any(jnp.isnan(dq_b)))
+        # jax.debug.print("min dqm = {}", jnp.min(dq_b))
+        # jax.debug.print("max dqm = {}", jnp.max(dq_b))
+        r    = self._safe_div(dq_f, dq_b, self.eps_ratio)
+        phi  = self.limiter_fun(r)
+        return phi * dq_b
+
+    # ------------------------------------------------------------------
+
+    def _predict_edges(
+        self,
+        qm1: Array,
+        q:   Array,
+        qp1: Array,
+        qp2: Array,
+    ) -> tuple[Array, Array]:
+        """
+        Build raw PPM-ish right edge of cell i (aR_i) and left edge of cell i+1
+        (aL_{i+1}) at interface i+1/2.
+
+        Limited slopes plus a second-difference curvature correction (cheap, symmetric).
+        """
+        # Limited slopes in cells i and i+1
+        d_i   = self._limited_slope(qm1, q,   qp1)
+        d_ip1 = self._limited_slope(q,   qp1, qp2)
+
+        # Second differences (curvature)
+        curv_i   = (qp1 - q)   - (q   - qm1)
+        curv_ip1 = (qp2 - qp1) - (qp1 - q)
+
+        if self.use_curvature:
+            # Right edge of cell i at i+1/2 (LEFT state)
+            aR_i   = q   + 0.5 * d_i   + (1.0 / 6.0) * curv_i
+            # Left edge of cell i+1 at i+1/2 (RIGHT state)
+            aL_ip1 = qp1 - 0.5 * d_ip1 - (1.0 / 6.0) * curv_ip1
+        else:
+            aR_i   = q   + 0.5 * d_i
+            aL_ip1 = qp1 - 0.5 * d_ip1
+
+        if self.use_bounds_clip:
+            qmin   = jnp.minimum(q, qp1)
+            qmax   = jnp.maximum(q, qp1)
+            aR_i   = jnp.clip(aR_i,   qmin, qmax)
+            aL_ip1 = jnp.clip(aL_ip1, qmin, qmax)
+
+        return aR_i, aL_ip1
+
+    # ------------------------------------------------------------------
+
+    def _ppm_monotone_limiter(
+        self,
+        q:  Array,
+        aL: Array,
+        aR: Array,
+    ) -> tuple[Array, Array]:
+        """
+        Classic PPM parabolic monotonicity limiter applied per cell i,
+        given its left and right edge values (aL_i at i-1/2, aR_i at i+1/2).
+
+        Enforces:
+          - no new extrema:   if (aR-q)*(q-aL) <= 0  ->  aL = aR = q
+          - no steep parabola:
+              if |aR-q| >= 2|q-aL|  ->  aR = q + 2(q-aL)
+              if |q-aL| >= 2|aR-q|  ->  aL = q - 2(aR-q)
+        """
+        dqR = aR - q
+        dqL = q  - aL
+
+        extremum = (dqR * dqL) <= 0.0
+        aL = jnp.where(extremum, q, aL)
+        aR = jnp.where(extremum, q, aR)
+
+        dqR = aR - q
+        dqL = q  - aL
+
+        aR  = jnp.where(jnp.abs(dqR) >= 2.0 * jnp.abs(dqL), q + 2.0 * dqL, aR)
+        dqR = aR - q
+        aL  = jnp.where(jnp.abs(dqL) >= 2.0 * jnp.abs(dqR), q - 2.0 * dqR, aL)
+
+        return aL, aR
+
+    # ------------------------------------------------------------------
+
+    def _contact_steepen(
+        self,
+        buffer: Array,
+        axis:   int,
+        qL:     Array,
+        qR:     Array,
+    ) -> tuple[Array, Array]:
+        """
+        Conservative (optional) contact steepening hook.
+        Axis->velocity mapping is explicit and safe.
+
+        NOTE: True PPM steepening is more nuanced; consider keeping this off
+        unless validated.
+        """
+        if not (
+            self.steepen
+            and self.rho_idx is not None
+            and self.p_idx   is not None
+            and self.vel_ids is not None
+        ):
+            return qL, qR
+
+        # axis is spatial (1, 2, 3 for x, y, z); map to velocity index 0, 1, 2
+        ax_vel = axis - 1
+        if ax_vel < 0 or ax_vel > 2:
+            return qL, qR  # silently skip if axis is unexpected
+
+        rho = buffer[self.rho_idx]
+        p   = buffer[self.p_idx]
+        u   = buffer[self.vel_ids[ax_vel]]
+
+        rho_im1 = jnp.roll(rho, +1, axis=axis)
+        rho_ip1 = jnp.roll(rho, -1, axis=axis)
+        p_im1   = jnp.roll(p,   +1, axis=axis)
+        p_ip1   = jnp.roll(p,   -1, axis=axis)
+        u_im1   = jnp.roll(u,   +1, axis=axis)
+        u_ip1   = jnp.roll(u,   -1, axis=axis)
+
+        chi  = jnp.abs(rho_ip1 - rho_im1) / (
+            jnp.minimum(jnp.minimum(rho_im1, rho), rho_ip1) + self.eps_steepen
+        )
+        pmax = jnp.maximum(jnp.maximum(p_im1, p), p_ip1)
+        dpp  = p_ip1 - p_im1
+
+        phi_p       = jnp.exp(-(dpp * dpp) / (self.beta * (pmax + self.eps_steepen) ** 2))
+        compressive = ((u_ip1 - u_im1) < 0.0).astype(buffer.dtype)
+
+        s = (chi - self.chi0) / (self.chi1 - self.chi0)
+        s = jnp.clip(s, 0.0, 1.0) * phi_p * compressive
+
+        qi   = buffer
+        qip1 = jnp.roll(buffer, -1, axis=axis)
+        qL   = (1.0 - s) * qL + s * qi
+        qR   = (1.0 - s) * qR + s * qip1
+
+        if self.use_bounds_clip:
+            qmin = jnp.minimum(qi, qip1)
+            qmax = jnp.maximum(qi, qip1)
+            qL   = jnp.clip(qL, qmin, qmax)
+            qR   = jnp.clip(qR, qmin, qmax)
+
+        return qL, qR
+
+    # ------------------------------------------------------------------
+
+    def reconstruct_xi(self, buffer: Array, axis: int, j: int = None) -> Array:
+        """
+        buffer : primitives, shape [nvar, ...]
+        axis   : spatial sweep axis (same as MUSCL3 / old PPM)
+        j      : 0 => left  state at i+1/2 (from cell i)
+                 1 => right state at i+1/2 (from cell i+1)
+        """
+        # Stencil
+        qim1 = jnp.roll(buffer, +1, axis=axis)
+        qi   = buffer
+        qip1 = jnp.roll(buffer, -1, axis=axis)
+        qip2 = jnp.roll(buffer, -2, axis=axis)
+
+        # Raw interface edges:
+        #   aR_i   = LEFT  state at i+1/2 (from cell i)
+        #   aL_ip1 = RIGHT state at i+1/2 (from cell i+1)
+        aR_i, aL_ip1 = self._predict_edges(qim1, qi, qip1, qip2)
+
+        if self.use_ppm_monotone:
+            # Per-cell PPM monotonicity limiter needs both edges of cell i:
+            #   aL_i = right state at i-1/2 from cell i
+            #        = aL_ip1 shifted by +1
+            aL_i = jnp.roll(aL_ip1, +1, axis=axis)
+
+            aL_i, aR_i = self._ppm_monotone_limiter(qi, aL_i, aR_i)
+
+            # Propagate back: right state at i+1/2 from cell i+1
+            aL_ip1 = jnp.roll(aL_i, -1, axis=axis)
+
+            if self.use_bounds_clip:
+                qmin   = jnp.minimum(qi, qip1)
+                qmax   = jnp.maximum(qi, qip1)
+                aR_i   = jnp.clip(aR_i,   qmin, qmax)
+                aL_ip1 = jnp.clip(aL_ip1, qmin, qmax)
+
+        # Optional contact steepening
+        aR_i, aL_ip1 = self._contact_steepen(buffer, axis, aR_i, aL_ip1)
+
+        if j == 0:
+            return aR_i
+        elif j == 1:
+            return aL_ip1
+        else:
+            raise ValueError("PPM_CW.reconstruct_xi expects j in {0, 1}")

@@ -42,4 +42,3 @@ def code_units_from_metadata(metadata: Mapping[str, Any]) -> CodeUnits:
         kB_cgs=float(thermo.get("kB_cgs", 1.380649e-16)),
         mH_cgs=float(thermo.get("mH_cgs", 1.6735575e-24)),
     )
-
