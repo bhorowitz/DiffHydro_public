@@ -294,9 +294,11 @@ class PLM:
         dqm = qi - qim1
         dqp = qip1 - qi
 
-        r = jnp.where(jnp.abs(dqm) >= self.eps,
-                      dqp / (dqm + jnp.sign(dqm) * self.eps),
-                      0.0)
+        # guard the denominator too: where() differentiates both branches, so dqp/0 in the
+        # untaken branch (flat regions, dqm == 0) would give 0*inf = NaN in the adjoint
+        big = jnp.abs(dqm) >= self.eps
+        den = jnp.where(big, dqm + jnp.sign(dqm) * self.eps, 1.0)
+        r = jnp.where(big, dqp / den, 0.0)
 
         phi = self.limiter_fun(r)
         dq = phi * dqm
@@ -355,22 +357,26 @@ class PPM:
         # Ratios for the "i" and "i+1" cells (centered around each face):
         # r_i   = (q_{i+1}-q_i)   / (q_i - q_{i-1})
         # r_ip1 = (q_{i+2}-q_{i+1}) / (q_{i+1} - q_i)
+        # Sign-symmetric gating (|den|) with a guarded denominator, as in PLM: a vanishing
+        # one-sided difference gives r = 0 (zero slope), and the untaken branch never divides by ~0.
+        def _ratio(num, den):
+            big = jnp.abs(den) >= eps_ad
+            return jnp.where(big, num / jnp.where(big, den, 1.0), 0.0)
+
         num_i   = (qip1 - qi)
         den_i   = (qi - qim1)
-        r_i = jnp.where(den_i >= eps_ad, num_i / (den_i + eps_ad),
-                        (num_i + eps_ad) / (den_i + eps_ad))
+        r_i = _ratio(num_i, den_i)
 
         num_ip1 = (qip2 - qip1)
         den_ip1 = (qip1 - qi)
-        r_ip1 = jnp.where(den_ip1 >= eps_ad, num_ip1 / (den_ip1 + eps_ad),
-                          (num_ip1 + eps_ad) / (den_ip1 + eps_ad))
+        r_ip1 = _ratio(num_ip1, den_ip1)
 
         phi_i   = self.limiter_fun(r_i)
         phi_ip1 = self.limiter_fun(r_ip1)
 
         # Limited one-sided slopes (MUSCL-like)
         # delta_i   ~ phi(r_i)   * (q_i   - q_{i-1})
-        # delta_ip1 ~ phi(r_ip1) * (q_{i+2} - q_{i+1})  (note: right-biased per MUSCL3) :contentReference[oaicite:5]{index=5}
+        # delta_ip1 ~ phi(r_ip1) * (q_{i+1} - q_i)      (same convention, one cell over)
         delta_i   = phi_i   * (qi   - qim1)
         delta_ip1 = phi_ip1 * (qip1 - qi)
 
@@ -378,9 +384,11 @@ class PPM:
         curv_i   = (qip1 - qi)   - (qi   - qim1)
         curv_ip1 = (qip2 - qip1) - (qip1 - qi)
 
-        # Left state at i+1/2 from cell i, Right state at i+1/2 from cell i+1
-        qL_iphalf = qi   + 0.5*delta_i   + (1.0/6.0)*curv_i   # Plus, not minus!
-        qR_iphalf = qip1 - 0.5*delta_ip1 - (1.0/6.0)*curv_ip1 # Minus, not plus!
+        # Left state at i+1/2 from cell i, Right state at i+1/2 from cell i+1.
+        # The parabola q_i + delta x + curv/2 (x^2 - 1/12) matching cell averages gives
+        # +curv/12 at BOTH faces x = +-1/2 (curvature is even under reflection).
+        qL_iphalf = qi   + 0.5*delta_i   + (1.0/12.0)*curv_i
+        qR_iphalf = qip1 - 0.5*delta_ip1 + (1.0/12.0)*curv_ip1
 
         # --- monotonic bracketing at the face (TVD-ish safety) ---
         if self.use_clip:
