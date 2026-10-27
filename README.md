@@ -49,6 +49,10 @@ Built on the JAX ecosystem for scientific computing, diffhydro provides a Python
 
 Whether you’re doing traditional forward modeling or cutting-edge simulation-based inference, diffhydro offers a flexible platform that bridges classical computational astrophysics with differentiable programming and machine learning.
 
+We have a suite of tutorials about with basics about CFD, autodiff, gradient based workflows here:
+
+- [Tutorials](https://github.com/bhorowitz/DiffHydro_public/tree/main/tutorials)
+
 We provide a few examples in this repository, but if you don’t want to wade through the notebooks, there are some basic quick-start examples in this Colab notebook:
 
 - [Turbulence and Blast Wave](https://colab.research.google.com/drive/14GuxwW_s4_OfuUXNsYOShAuySOoUay_b?usp=sharing)
